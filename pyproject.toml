@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "veg_outline"
+version = "0.1"
+description = "Detect and extract curvilinear vegetation outlines"
+readme = { file = "README.md", content-type = "text/markdown" }
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Fatemeh Karimi Nejadasl", email = "fkariminejadasl@gmail.com" }
+]
+urls = { "Homepage" = "https://github.com/fkariminejadasl/veg_outline" }
+
+# Core dependencies
+dependencies = [
+    "numpy>=1.23.3",
+    "scipy",
+    "scikit-learn",
+    "pandas",
+    "matplotlib>=3.6.1",
+    "opencv-python",
+    "tqdm",
+    "Pillow",
+    # deep-learning
+    "torch",
+    "torchvision",
+    "timm",
+    "omegaconf",
+    "wandb",
+    # geospatial
+    "rasterio",
+    #"shapely",
+    #"networkx", 
+    #"geopandas",
+    #"fiona",
+    #"pyproj",
+    #"rtree",        # optional spatial index used by geopandas
+]
+
+# Optional extras
+[project.optional-dependencies]
+
+# pip install .[notebook]
+# for notebook demos / quick experiments
+notebook = [
+    "jupyterlab",
+    "ipython",
+    "gdown>=5.2.0",
+    "requests>=2.32.3",
+]
+
+# testing extras
+# pip install .[test]
+test = [
+    "pytest",
+    # "pytest-cov",
+]
+
+# app: pip install fastapi uvicorn python-multipart gradio build
+# pip install .[app]
+app = [
+    "gradio",
+    #"fastapi",
+    #"uvicorn",
+]
+
+# ==============
+# If you prefer explicit packages (non-src layout), expose them here.
+# Exposing `scripts/` under the `veg_outline` namespace enables:
+# python -m veg_outline.scripts.some_script
+[tool.setuptools]
+packages = [
+  "veg_outline",
+  #"veg_outline.scripts",
+]
+
+[tool.setuptools.package-dir]
+"veg_outline"         = "veg_outline"
+#"veg_outline.scripts" = "scripts"
+# ============
+
+# for test with markers. Use pytest -s sometest.py  -m "not ignore"
+# for all tests with markers: pytest tests  -m "not ignore and not debug"
+[tool.pytest.ini_options]
+markers = [
+    "ignore: mark test as ignored",
+    "local: mark test as run locally",
+    "debug: mark test as debug",
+]
