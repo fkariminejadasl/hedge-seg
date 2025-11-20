@@ -19,6 +19,7 @@ dependencies = [
     "numpy>=1.23.3",
     "scipy",
     "scikit-learn",
+    "scikit-image",
     "pandas",
     "matplotlib>=3.6.1",
     "opencv-python",
