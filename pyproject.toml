@@ -25,13 +25,15 @@ dependencies = [
     "opencv-python",
     "tqdm",
     "Pillow",
-    # deep-learning
+
+    # --- deep-learning
     "torch",
     "torchvision",
     "timm",
     "omegaconf",
     "wandb",
-    # geospatial
+
+    # --- geospatial
     "rasterio",
     #"shapely",
     #"networkx", 
