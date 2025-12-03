@@ -3,6 +3,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import rasterio
+from rasterio.enums import Resampling
 from rasterio.plot import show
 
 
@@ -63,33 +64,59 @@ def save_float_geotiff_as_png(
     cv2.imwrite(out_path, img_8bit)
 
 
-def download_ahn4_sample():
-    """
-    Download a sample AHN4 10m normalized height GeoTIFF from Zenodo,
-    which is stored inside a zip file on a remote server.
-    Uses rasterio's vsizip and vsicurl virtual file systems to read
-    the TIF directly from the zip without downloading the entire zip first.
-    Saves the extracted TIF locally.
-    """
-    zip_url = (
-        "/vsizip/"
-        "{/vsicurl/https://zenodo.org/records/15261042/files/4_AHN4.zip?download=1}"
-        "/4_AHN4/ahn4_10m_perc_95_normalized_height.tif"
-    )
-
-    # Open the remote TIF inside the zip
-    with rasterio.open(zip_url) as src:
-        profile = src.profile
-        data = src.read()  # you could read a window instead of all data
-
-    # Save locally as a normal GeoTIFF
-    profile.update(driver="GTiff")
-
-    with rasterio.open(
-        "/home/fatemeh/Downloads/ahn4_10m_perc_95_normalized_height.tif", "w", **profile
-    ) as dst:
-        dst.write(data)
+def compute_percentiles_approx(path: str | Path, sample_scale: int = 20):
+    """Estimate percentiles from a coarse overview instead of full data."""
+    with rasterio.open(path) as src:
+        h = src.height // sample_scale
+        w = src.width // sample_scale
+        overview = src.read(
+            1,
+            out_shape=(h, w),
+            resampling=Resampling.bilinear,
+        )
+    overview = np.nan_to_num(overview, nan=0.0)
+    vmin = np.percentile(overview, 2)
+    vmax = np.percentile(overview, 98)
+    return float(vmin), float(vmax)
 
 
-# download_ahn4_sample()
+def save_fullres_geotiff_as_png_tiled(
+    path: str | Path,
+    out_path: str | Path,
+) -> None:
+    path = Path(path)
+    out_path = Path(out_path)
+
+    with rasterio.open(path) as src:
+        height, width = src.height, src.width
+
+        # 1) approximate vmin/vmax from an overview
+        vmin, vmax = compute_percentiles_approx(path)
+
+        # 2) allocate a uint8 array for the final image
+        #    (1 byte per pixel instead of 4 bytes for float32)
+        img_8bit = np.zeros((height, width), dtype=np.uint8)
+
+        # 3) loop over blocks (GDAL blocks)
+        for i, window in src.block_windows(1):
+            block = src.read(1, window=window)
+            block = np.nan_to_num(block, nan=0.0)
+
+            block = np.clip(block, vmin, vmax)
+            norm = (block - vmin) / (vmax - vmin + 1e-9)
+            block_8 = (norm * 255).astype(np.uint8)
+
+            r0 = window.row_off
+            c0 = window.col_off
+            r1 = r0 + window.height
+            c1 = c0 + window.width
+            img_8bit[r0:r1, c0:c1] = block_8
+
+    cv2.imwrite(str(out_path), img_8bit)
+
+
 # image = load_geotiff("/home/fatemeh/Downloads/UK_Knepp_10m_veg_TILE_000_BAND_perc_95_normalized_height.tif")
+# (30900, 26600)
+# save_fullres_geotiff_as_png_tiled("/home/fatemeh/Downloads/ahn4_10m_perc_95_normalized_height.tif", "/home/fatemeh/Downloads/ahn4_fullres.png")
+# image = load_geotiff("/home/fatemeh/Downloads/ahn4_10m_perc_95_normalized_height.tif") # (30900, 26600) 1/10
+# save_float_geotiff_as_png(image, "/home/fatemeh/Downloads/ahn4.jpg")
