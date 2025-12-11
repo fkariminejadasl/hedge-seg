@@ -3,16 +3,16 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "veg_outline"
+name = "hedge_seg"
 version = "0.1"
-description = "Detect and extract curvilinear vegetation outlines"
+description = "Detect and extract hedges"
 readme = { file = "README.md", content-type = "text/markdown" }
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [
     { name = "Fatemeh Karimi Nejadasl", email = "fkariminejadasl@gmail.com" }
 ]
-urls = { "Homepage" = "https://github.com/fkariminejadasl/veg_outline" }
+urls = { "Homepage" = "https://github.com/fkariminejadasl/hedge_seg" }
 
 # Core dependencies
 dependencies = [
@@ -72,17 +72,17 @@ app = [
 
 # ==============
 # If you prefer explicit packages (non-src layout), expose them here.
-# Exposing `scripts/` under the `veg_outline` namespace enables:
-# python -m veg_outline.scripts.some_script
+# Exposing `scripts/` under the `hedge_seg` namespace enables:
+# python -m hedge_seg.scripts.some_script
 [tool.setuptools]
 packages = [
-  "veg_outline",
-  #"veg_outline.scripts",
+  "hedge_seg",
+  #"hedge_seg.scripts",
 ]
 
 [tool.setuptools.package-dir]
-"veg_outline"         = "veg_outline"
-#"veg_outline.scripts" = "scripts"
+"hedge_seg"         = "hedge_seg"
+#"hedge_seg.scripts" = "scripts"
 # ============
 
 # for test with markers. Use pytest -s sometest.py  -m "not ignore"

@@ -17,17 +17,22 @@ Each input raster represents a **Vegetation Height Model (VHM)** where each pixe
 
 ## 🎯 Objectives
 
-- Detect hedges in vegetation height surfaces  
-- Map hedge networks from airborne laser scanning data  
+- Detect hedges in vegetation height surfaces
 
 ---
 
 ## 🧪 Example Workflow
 
 ```python
-from hedge_seg import data as hs
+from hedge_seg import data as hd
 
 # Load vegetation height model (VHM)
-image = hs.load_geotiff(
-    "UK_Knepp_10m_veg_TILE_000_BAND_perc_95_normalized_height.tif"
-)
+image = hd.load_geotiff("UK_Knepp_10m_veg_TILE_000_BAND_perc_95_normalized_height.tif")
+```
+
+---
+
+## 📏 Terminology
+
+- **Spatial resolution**: size of one pixel on the ground, for example 10 × 10 meters.  
+- **Spatial extent**: total area covered by the raster, corresponding to image resolution (height and width in pixels) in deep learning and computer vision.
