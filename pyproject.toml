@@ -37,7 +37,7 @@ dependencies = [
     "rasterio",
     #"shapely",
     #"networkx", 
-    #"geopandas",
+    "geopandas", # comes with pyogrio
     #"fiona",
     #"pyproj",
     #"rtree",        # optional spatial index used by geopandas
@@ -93,3 +93,8 @@ markers = [
     "local: mark test as run locally",
     "debug: mark test as debug",
 ]
+
+
+# add linters
+# pip install black isort pyflakes
+# for i in hedge_seg exps;do echo $i; black $i -l 88; isort $i --profile black; pyflakes $i;done
