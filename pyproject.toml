@@ -97,4 +97,4 @@ markers = [
 
 # add linters
 # pip install black isort pyflakes
-# for i in hedge_seg exps;do echo $i; black $i -l 88; isort $i --profile black; pyflakes $i;done
+# for i in hedge_seg exps scripts;do echo $i; black $i -l 88; isort $i --profile black; pyflakes $i;done

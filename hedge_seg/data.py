@@ -8,7 +8,7 @@ from rasterio.enums import Resampling
 from rasterio.features import geometry_mask
 from rasterio.plot import show
 from rasterio.windows import from_bounds
-from shapely.geometry import LineString
+from shapely.geometry import box
 
 
 def load_geotiff(path: str | Path) -> np.ndarray:
@@ -99,8 +99,7 @@ def save_fullres_geotiff_as_png_tiled(
     cv2.imwrite(str(out_path), img_8bit)
 
 
-import geopandas as gpd
-
+# Example usage of reading a shapefile
 path = "/home/fatemeh/Downloads/hedg/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
 gdf = gpd.read_file(path)
 
@@ -116,6 +115,19 @@ np.array(a.xy[0])  # x coordinates
 a.xy[1]  # y coordinates
 a.coords[:]
 
+sindex = gdf.sindex
+qgeom = box(
+    31119.322999998927, 393999.63500000164, 31277.68200000003, 393885.0769999996
+)
+candidates = gdf.loc[gdf.sindex.query(qgeom, predicate="intersects")]
+result = candidates[candidates.intersects(qgeom)]
+
+idx = sindex.intersection(qgeom.bounds)
+# bbox_gdf = gdf.__class__({"geometry": [qgeom]}, crs=gdf.crs)
+bbox_gdf = gpd.GeoDataFrame(geometry=[qgeom], crs=gdf.crs)
+candidates = gdf.loc[idx]
+hits = candidates[candidates.intersects(qgeom)].copy()
+clipped = gpd.clip(hits, bbox_gdf)
 # image = load_geotiff("/home/fatemeh/Downloads/UK_Knepp_10m_veg_TILE_000_BAND_perc_95_normalized_height.tif")
 # (30900, 26600)
 # save_fullres_geotiff_as_png_tiled("/home/fatemeh/Downloads/ahn4_10m_perc_95_normalized_height.tif", "/home/fatemeh/Downloads/ahn4_fullres.png")
@@ -313,7 +325,7 @@ save_linestring_buffer_raster_png(
     tif_path=tif_path,
     out_png=save_path,
     linestring_index=200,
-    buffer_dist=100,  # meters
+    buffer_dist=1280,  # meters
 )
 
 result = raster_values_in_buffer(
