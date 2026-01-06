@@ -10,8 +10,10 @@ import cv2
 import geopandas as gpd
 import numpy as np
 import rasterio
+from affine import Affine
 from pyproj import Transformer
 from rasterio.features import rasterize
+from rasterio.warp import Resampling, reproject
 from rasterio.windows import Window
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
@@ -299,6 +301,7 @@ def generate_dataset(
             img8: np.ndarray,
             label_obj: dict,
             mask: Optional[np.ndarray],
+            w_transform,
         ):
             img_path = paths["images"] / f"{sample_id}.png"
             cv2.imwrite(str(img_path), img8)
@@ -311,12 +314,16 @@ def generate_dataset(
                 mask_path = paths["masks"] / f"{sample_id}.png"
                 cv2.imwrite(str(mask_path), mask)
 
-            save_osm_chip(sample_id, label_obj["bbox_world"], size)
+            save_osm_chip(
+                sample_id, label_obj["bbox_world"], size, w_transform, src.crs
+            )
 
-        def save_osm_chip(sample_id: str, bbox_world, size_px: int):
+        def save_osm_chip(
+            sample_id: str, bbox_world, size_px: int, dst_transform, dst_crs
+        ):
             minx, miny, maxx, maxy = bbox_world
 
-            # Reproject bbox to Web Mercator for tile fetching
+            # Request tiles in EPSG:3857
             minx_m, miny_m = to_3857.transform(minx, miny)
             maxx_m, maxy_m = to_3857.transform(maxx, maxy)
 
@@ -327,11 +334,9 @@ def generate_dataset(
 
             meters_per_px = (maxx_m - minx_m) / float(size_px)
             meters_per_px = max(meters_per_px, 1e-6)
-
             z = math.log2((156543.03392804097 * math.cos(lat_rad)) / meters_per_px)
             zoom = int(np.clip(int(round(z)), 0, 19))
 
-            # Fetch OSM image
             img, extent = ctx.bounds2img(
                 minx_m,
                 miny_m,
@@ -342,40 +347,28 @@ def generate_dataset(
                 ll=False,
             )
 
-            # contextily extent is (xmin, xmax, ymin, ymax) in the same CRS as requested (here EPSG:3857)
+            # Source georeferencing for the returned mosaic
             xmin_e, xmax_e, ymin_e, ymax_e = extent
-
             H, W = img.shape[0], img.shape[1]
+            src_transform = Affine(
+                (xmax_e - xmin_e) / W, 0.0, xmin_e, 0.0, -(ymax_e - ymin_e) / H, ymax_e
+            )
 
-            # Convert requested bounds to pixel coordinates in the returned mosaic
-            x0 = int(round((minx_m - xmin_e) / (xmax_e - xmin_e) * W))
-            x1 = int(round((maxx_m - xmin_e) / (xmax_e - xmin_e) * W))
-
-            y0 = int(round((ymax_e - maxy_m) / (ymax_e - ymin_e) * H))
-            y1 = int(round((ymax_e - miny_m) / (ymax_e - ymin_e) * H))
-
-            # Clip to valid range
-            x0 = max(0, min(W, x0))
-            x1 = max(0, min(W, x1))
-            y0 = max(0, min(H, y0))
-            y1 = max(0, min(H, y1))
-
-            # Crop to exact requested bounds
-            if (x1 - x0) >= 2 and (y1 - y0) >= 2:
-                img = img[y0:y1, x0:x1]
-            else:
-                # Fallback: if something went wrong, keep the full mosaic (rare)
-                pass
-
-            # Now resize exactly to chip size
-            img = cv2.resize(img, (size_px, size_px), interpolation=cv2.INTER_AREA)
-
-            # Ensure uint8 and resize exactly to chip size
-            if img.dtype != np.uint8:
-                img = img.astype(np.uint8)
+            # Reproject OSM (EPSG:3857) onto your chip grid (dst_crs, dst_transform)
+            dst = np.zeros((size_px, size_px, 3), dtype=np.uint8)
+            for b in range(3):
+                reproject(
+                    source=img[:, :, b],
+                    destination=dst[:, :, b],
+                    src_transform=src_transform,
+                    src_crs="EPSG:3857",
+                    dst_transform=dst_transform,
+                    dst_crs=dst_crs,
+                    resampling=Resampling.nearest,  # use nearest for strict alignment check
+                )
 
             # contextily returns RGB; convert to BGR for cv2
-            img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            img_bgr = cv2.cvtColor(dst, cv2.COLOR_RGB2BGR)
 
             osm_path = paths["osm"] / f"{sample_id}.png"
             cv2.imwrite(str(osm_path), img_bgr)
@@ -443,7 +436,7 @@ def generate_dataset(
                 "n_lines": len(hit),
                 "polylines_px": polylines,  # list of polylines, each polyline is list of [x,y]
             }
-            save_one(sample_id, img8, label_obj, mask)
+            save_one(sample_id, img8, label_obj, mask, w_transform)
 
             pos_done += 1
 
@@ -491,7 +484,7 @@ def generate_dataset(
                 "n_lines": 0,
                 "polylines_px": polylines,
             }
-            save_one(sample_id, img8, label_obj, mask)
+            save_one(sample_id, img8, label_obj, mask, w_transform)
 
             neg_done += 1
 
