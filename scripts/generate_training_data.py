@@ -262,6 +262,7 @@ def generate_dataset(
     chip: ChipSpec = ChipSpec(),
     seed: int = 0,
     max_tries_per_sample: int = 200,
+    use_osm: bool = True,
 ):
     random.seed(seed)
     np.random.seed(seed)
@@ -314,9 +315,10 @@ def generate_dataset(
                 mask_path = paths["masks"] / f"{sample_id}.png"
                 cv2.imwrite(str(mask_path), mask)
 
-            save_osm_chip(
-                sample_id, label_obj["bbox_world"], size, w_transform, src.crs
-            )
+            if use_osm:
+                save_osm_chip(
+                    sample_id, label_obj["bbox_world"], size, w_transform, src.crs
+                )
 
         def save_osm_chip(
             sample_id: str, bbox_world, size_px: int, dst_transform, dst_crs
@@ -346,6 +348,9 @@ def generate_dataset(
                 source=ctx.providers.OpenStreetMap.Mapnik,
                 ll=False,
             )
+
+            if img.ndim == 3 and img.shape[2] == 4:
+                img = img[:, :, :3]
 
             # Source georeferencing for the returned mosaic
             xmin_e, xmax_e, ymin_e, ymax_e = extent
@@ -511,6 +516,7 @@ generate_dataset(
     chip=chip,
     seed=123,  # repeatable
     max_tries_per_sample=200,
+    use_osm=False,
 )
 
 
