@@ -1,13 +1,16 @@
 import json
+import math
 import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import contextily as ctx
 import cv2
 import geopandas as gpd
 import numpy as np
 import rasterio
+from pyproj import Transformer
 from rasterio.features import rasterize
 from rasterio.windows import Window
 from shapely.geometry import box
@@ -122,6 +125,7 @@ def ensure_dirs(out_dir: Path) -> dict:
         "images": out_dir / "images",
         "labels": out_dir / "labels",
         "masks": out_dir / "masks",
+        "osm": out_dir / "osm",
     }
     for p in paths.values():
         p.mkdir(parents=True, exist_ok=True)
@@ -281,6 +285,9 @@ def generate_dataset(
         if gdf.crs != src.crs:
             gdf = gdf.to_crs(src.crs)
 
+        to_3857 = Transformer.from_crs(src.crs, "EPSG:3857", always_xy=True)
+        to_wgs84 = Transformer.from_crs(src.crs, "EPSG:4326", always_xy=True)
+
         # Build spatial index once
         sindex = gdf.sindex
 
@@ -303,6 +310,75 @@ def generate_dataset(
             if mask is not None:
                 mask_path = paths["masks"] / f"{sample_id}.png"
                 cv2.imwrite(str(mask_path), mask)
+
+            save_osm_chip(sample_id, label_obj["bbox_world"], size)
+
+        def save_osm_chip(sample_id: str, bbox_world, size_px: int):
+            minx, miny, maxx, maxy = bbox_world
+
+            # Reproject bbox to Web Mercator for tile fetching
+            minx_m, miny_m = to_3857.transform(minx, miny)
+            maxx_m, maxy_m = to_3857.transform(maxx, maxy)
+
+            # Estimate zoom so OSM pixel size roughly matches your chip size
+            cx, cy = (minx + maxx) * 0.5, (miny + maxy) * 0.5
+            lon, lat = to_wgs84.transform(cx, cy)
+            lat_rad = math.radians(lat)
+
+            meters_per_px = (maxx_m - minx_m) / float(size_px)
+            meters_per_px = max(meters_per_px, 1e-6)
+
+            z = math.log2((156543.03392804097 * math.cos(lat_rad)) / meters_per_px)
+            zoom = int(np.clip(int(round(z)), 0, 19))
+
+            # Fetch OSM image
+            img, extent = ctx.bounds2img(
+                minx_m,
+                miny_m,
+                maxx_m,
+                maxy_m,
+                zoom=zoom,
+                source=ctx.providers.OpenStreetMap.Mapnik,
+                ll=False,
+            )
+
+            # contextily extent is (xmin, xmax, ymin, ymax) in the same CRS as requested (here EPSG:3857)
+            xmin_e, xmax_e, ymin_e, ymax_e = extent
+
+            H, W = img.shape[0], img.shape[1]
+
+            # Convert requested bounds to pixel coordinates in the returned mosaic
+            x0 = int(round((minx_m - xmin_e) / (xmax_e - xmin_e) * W))
+            x1 = int(round((maxx_m - xmin_e) / (xmax_e - xmin_e) * W))
+
+            y0 = int(round((ymax_e - maxy_m) / (ymax_e - ymin_e) * H))
+            y1 = int(round((ymax_e - miny_m) / (ymax_e - ymin_e) * H))
+
+            # Clip to valid range
+            x0 = max(0, min(W, x0))
+            x1 = max(0, min(W, x1))
+            y0 = max(0, min(H, y0))
+            y1 = max(0, min(H, y1))
+
+            # Crop to exact requested bounds
+            if (x1 - x0) >= 2 and (y1 - y0) >= 2:
+                img = img[y0:y1, x0:x1]
+            else:
+                # Fallback: if something went wrong, keep the full mosaic (rare)
+                pass
+
+            # Now resize exactly to chip size
+            img = cv2.resize(img, (size_px, size_px), interpolation=cv2.INTER_AREA)
+
+            # Ensure uint8 and resize exactly to chip size
+            if img.dtype != np.uint8:
+                img = img.astype(np.uint8)
+
+            # contextily returns RGB; convert to BGR for cv2
+            img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+            osm_path = paths["osm"] / f"{sample_id}.png"
+            cv2.imwrite(str(osm_path), img_bgr)
 
         # ----------------------------
         # POSITIVES
@@ -364,6 +440,7 @@ def generate_dataset(
                 "chip_size_px": size,
                 "raster_band": chip.band,
                 "bbox_world": [minx, miny, maxx, maxy],
+                "n_lines": len(hit),
                 "polylines_px": polylines,  # list of polylines, each polyline is list of [x,y]
             }
             save_one(sample_id, img8, label_obj, mask)
@@ -411,6 +488,7 @@ def generate_dataset(
                 "chip_size_px": size,
                 "raster_band": chip.band,
                 "bbox_world": [minx, miny, maxx, maxy],
+                "n_lines": 0,
                 "polylines_px": polylines,
             }
             save_one(sample_id, img8, label_obj, mask)
@@ -441,3 +519,19 @@ generate_dataset(
     seed=123,  # repeatable
     max_tries_per_sample=200,
 )
+
+
+"""
+from pathlib import Path
+import json
+
+folder = Path("/home/fatemeh/Downloads/hedg/results/test_dataset/labels")
+n_lines_all = []
+n_lines_dic = dict()
+for json_path in folder.glob("*.json"):
+    with json_path.open("r") as f:
+        data = json.load(f)
+    n_lines = data.get("n_lines")  # None if missing
+    n_lines_all.append(n_lines)
+    n_lines_dic[json_path.stem] = n_lines
+"""

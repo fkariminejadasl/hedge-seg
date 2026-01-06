@@ -41,6 +41,7 @@ dependencies = [
     #"fiona",
     #"pyproj",
     #"rtree",        # optional spatial index used by geopandas
+    "contextily", #A library for fetching and displaying basemap tiles from various sources (OpenStreetMap, CartoDB, etc.) 
 ]
 
 # Optional extras
