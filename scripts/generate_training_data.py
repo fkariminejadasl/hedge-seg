@@ -516,7 +516,7 @@ generate_dataset(
     chip=chip,
     seed=123,  # repeatable
     max_tries_per_sample=200,
-    use_osm=False,
+    use_osm=True,
 )
 
 
@@ -533,4 +533,14 @@ for json_path in folder.glob("*.json"):
     n_lines = data.get("n_lines")  # None if missing
     n_lines_all.append(n_lines)
     n_lines_dic[json_path.stem] = n_lines
+"""
+
+"""
+# all LineString, point [2, 184], no empty, no invalid, all simple (no self crossing), closed=ring 318 items, 
+a = [len(gdf.geometry.iloc[i].xy[0]) for i in range(len(gdf))] # [min(a),max(a)]=[2, 184]
+idxs = np.where(np.asarray(a)==max(a))[0].tolist() # 62070, 62087, 62092
+gdf.iloc[62070].geometry.bounds
+gdf.iloc[idxs].geometry.is_closed # closed, simple, ring (closed+simple), valid, empty
+a = [gdf.iloc[i].geometry.is_closed for i in range(len(gdf))]
+idxs = np.where(np.asarray(a)==True)[0].tolist() # 62070, 62087, 62092
 """
