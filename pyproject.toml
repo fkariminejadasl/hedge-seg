@@ -31,9 +31,10 @@ dependencies = [
     "torchvision",
     "timm",
     "omegaconf",
-    "wandb",
     "transformers",
     "accelerate",
+    "wandb",
+    "tensorboard",
 
     # --- geospatial
     "rasterio",
