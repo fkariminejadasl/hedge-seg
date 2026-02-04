@@ -505,6 +505,13 @@ def save_DINOv3_embeddings(image_dir, embed_dir):
         task="image-feature-extraction",
     )
 
+    # # Process all images in a batch
+    # import torch
+    # paths = sorted(Path(image_dir).glob("*.png"))
+    # batch_paths = [str(p) for p in paths]
+    # feats = feature_extractor(batch_paths, return_tensors=True) # list [1, 201, 1024]
+    # feats = torch.concat(feats) # N x 201 x 1024
+
     def save_DINOv3_embeddings_per_image(image_path, embed_dir):
         image = load_image(str(image_path))
         features = feature_extractor(image)
@@ -515,13 +522,17 @@ def save_DINOv3_embeddings(image_dir, embed_dir):
         save_file = embed_dir / f"{image_path.stem}.npz"
         np.savez(save_file, **{"feat": features[5:]})  # *.npz
 
+    # Save embeddings for each image
     for image_path in Path(image_dir).glob("*.png"):
         save_DINOv3_embeddings_per_image(image_path, embed_dir)
 
 
 shp_path = "/home/fatemeh/Downloads/hedg/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
 tif_path = "/home/fatemeh/Downloads/hedg/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
-out_dir = Path("/home/fatemeh/Downloads/hedg/results/test_dataset")
+out_dir = Path("/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm")
+image_dir = out_dir / "images"
+embed_dir = out_dir / "embeddings"
+embed_dir.mkdir(parents=True, exist_ok=True)
 
 chip = ChipSpec(
     size_px=256,  # start small for testing
@@ -542,9 +553,6 @@ generate_dataset(
     use_osm=False,
 )
 
-image_dir = out_dir / "images"
-embed_dir = out_dir / "embeddings"
-embed_dir.mkdir(parents=True, exist_ok=True)
 save_DINOv3_embeddings(image_dir, embed_dir)
 
 """

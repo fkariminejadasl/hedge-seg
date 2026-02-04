@@ -209,6 +209,6 @@ with tensorboard.SummaryWriter(cfg.tensorboard_file) as writer:
             best_accuracy = eval_acc
             torch.save(
                 {"model": model.state_dict(), "epoch": epoch},
-                cfg.save_dir / f"best_{np.exp}.pt",
+                cfg.save_dir / f"best_{cfg.exp}.pt",
             )
             print(f"Best model accuracy: {best_accuracy:.2f}% at epoch: {epoch}")
