@@ -50,6 +50,76 @@ def segmentation_to_edges_stack(seg, background_label=0):
     return labels, edge_stack
 
 
+def edge_to_segmentation_morphology(edge):
+    """
+    Works well if edges are fairly clean and closed
+    example:
+    edge = cv2.imread("edges.png", cv2.IMREAD_GRAYSCALE)
+    """
+    # Make edges binary
+    _, edge_bin = cv2.threshold(edge, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Close gaps in edges
+    kernel = np.ones((3, 3), np.uint8)
+    edge_closed = cv2.dilate(edge_bin, kernel, iterations=1)
+    edge_closed = cv2.morphologyEx(edge_closed, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    # Invert to get regions
+    regions = 255 - edge_closed  # now regions are white, borders are black
+
+    num_labels, labels = cv2.connectedComponents(regions)
+
+    # Connected components for segmentation labels
+    # labels is an integer image where each object has an id: 0, 1, 2, ...
+    # you can colorize it for visualization
+    label_viz = (labels.astype(np.float32) / num_labels * 255).astype(np.uint8)
+    color = cv2.applyColorMap(label_viz, cv2.COLORMAP_JET)
+
+    return labels, color
+
+
+def edge_to_segmentation_watershed(edge):
+    """
+    Watershed tends to help when regions touch each other and you need better separation
+    """
+    # Make edges binary
+    _, edge_bin = cv2.threshold(edge, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Close gaps in edges
+    kernel = np.ones((3, 3), np.uint8)
+    edge_closed = cv2.dilate(edge_bin, kernel, iterations=1)
+    edge_closed = cv2.morphologyEx(edge_closed, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    # Compute distance transform of background
+    inv = 255 - edge_closed
+    dist = cv2.distanceTransform(inv, cv2.DIST_L2, 5)
+
+    # Threshold distance to get markers
+    _, markers_fg = cv2.threshold(dist, 0.4 * dist.max(), 255, 0)
+    markers_fg = markers_fg.astype(np.uint8)
+
+    # sure background from edges
+    markers_bg = cv2.dilate(edge_closed, np.ones((3, 3), np.uint8), iterations=3)
+
+    # unknown region
+    unknown = cv2.subtract(markers_bg, markers_fg)
+
+    # connected components as seeds
+    _, markers = cv2.connectedComponents(markers_fg)
+    markers = markers + 1
+    markers[unknown == 255] = 0
+
+    # Run watershed
+    # We need a 3 channel image for watershed to work on
+    img_color = cv2.cvtColor(inv, cv2.COLOR_GRAY2BGR)
+
+    markers = cv2.watershed(img_color, markers)
+    # markers: -1 = boundary, positive ids = segments
+    segmentation = markers.copy()
+    segmentation[segmentation == -1] = 0
+    return segmentation
+
+
 # Create a blank segmentation map
 seg = np.zeros((200, 200), dtype=np.uint8)
 
@@ -64,6 +134,7 @@ plt.imshow(seg, cmap="tab20")
 plt.title("Synthetic Segmentation Mask")
 plt.axis("off")
 plt.show(block=False)
+
 # Convert segmentation to edges
 edges = segmentation_to_edges(seg)
 seg_edges = segmentation_to_edges_per_object(seg)
@@ -73,6 +144,9 @@ plt.figure()
 plt.imshow(seg_edges[1], cmap="gray")
 plt.show(block=False)
 
+# Convert edges back to segmentation
+seg = edge_to_segmentation_morphology(edges)
+seg = edge_to_segmentation_watershed(edges)
 
 gray = cv2.imread("image.jpg", cv2.IMREAD_GRAYSCALE)
 blur = cv2.GaussianBlur(gray, (5, 5), 0)
