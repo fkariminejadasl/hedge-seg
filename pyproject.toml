@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hedge_seg"
+version = "0.1"
+description = "Detect and extract hedges"
+readme = { file = "README.md", content-type = "text/markdown" }
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Fatemeh Karimi Nejadasl", email = "fkariminejadasl@gmail.com" }
+]
+urls = { "Homepage" = "https://github.com/fkariminejadasl/hedge_seg" }
+
+# Core dependencies
+dependencies = [
+    "numpy>=1.23.3",
+    "scipy",
+    "scikit-learn",
+    "scikit-image",
+    "pandas",
+    "matplotlib>=3.6.1",
+    "opencv-python",
+    "tqdm",
+    "Pillow",
+
+    # --- deep-learning
+    "torch",
+    "torchvision",
+    "timm",
+    "omegaconf",
+    "transformers",
+    "accelerate",
+    "wandb",
+    "tensorboard",
+
+    # --- geospatial
+    "rasterio",
+    #"shapely",
+    #"networkx", 
+    "geopandas", # comes with pyogrio
+    #"fiona",
+    #"pyproj",
+    #"rtree",        # optional spatial index used by geopandas
+    "contextily", #A library for fetching and displaying basemap tiles from various sources (OpenStreetMap, CartoDB, etc.) 
+]
+
+# Optional extras
+[project.optional-dependencies]
+
+# pip install .[notebook]
+# for notebook demos / quick experiments
+notebook = [
+    "jupyterlab",
+    "ipython",
+    "gdown>=5.2.0",
+    "requests>=2.32.3",
+]
+
+# testing extras
+# pip install .[test]
+test = [
+    "pytest",
+    # "pytest-cov",
+]
+
+# app: pip install fastapi uvicorn python-multipart gradio build
+# pip install .[app]
+app = [
+    "gradio",
+    #"fastapi",
+    #"uvicorn",
+]
+
+# ==============
+# If you prefer explicit packages (non-src layout), expose them here.
+# Exposing `scripts/` under the `hedge_seg` namespace enables:
+# python -m hedge_seg.scripts.some_script
+[tool.setuptools]
+packages = [
+  "hedge_seg",
+  #"hedge_seg.scripts",
+]
+
+[tool.setuptools.package-dir]
+"hedge_seg"         = "hedge_seg"
+#"hedge_seg.scripts" = "scripts"
+# ============
+
+# for test with markers. Use pytest -s sometest.py  -m "not ignore"
+# for all tests with markers: pytest tests  -m "not ignore and not debug"
+[tool.pytest.ini_options]
+markers = [
+    "ignore: mark test as ignored",
+    "local: mark test as run locally",
+    "debug: mark test as debug",
+]
+
+
+# add linters
+# pip install black isort pyflakes
+# for i in hedge_seg exps scripts;do echo $i; black $i -l 88; isort $i --profile black; pyflakes $i;done
