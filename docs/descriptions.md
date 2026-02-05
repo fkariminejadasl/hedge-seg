@@ -1,0 +1,3 @@
+- `generate_training_data.py`: image, map, labels, embeddings.
+- `process_labels.py`: to make resample equidistant points on each polyline.
+- `train_neg_pos_classifier.py`: classifier to identify negative from positive images

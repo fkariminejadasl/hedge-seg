@@ -572,7 +572,10 @@ for json_path in folder.glob("*.json"):
 
 """
 # all LineString, point [2, 184], no empty, no invalid, all simple (no self crossing), closed=ring 318 items, 
+gdf = gpd.read_file(shp_path)
 a = [len(gdf.geometry.iloc[i].xy[0]) for i in range(len(gdf))] # [min(a),max(a)]=[2, 184]
+b = dict(Counter(a).most_common()) # from collections import Counter
+plt.bar(list(b.keys()), list(b.values()));plt.xlabel("n_points");plt.ylabel("n_polylines") # or [22:30]
 idxs = np.where(np.asarray(a)==max(a))[0].tolist() # 62070, 62087, 62092 # 13307 min 2 pts
 gdf.iloc[62070].geometry.bounds
 gdf.iloc[idxs].geometry.is_closed # closed, simple, ring (closed+simple), valid, empty
@@ -581,4 +584,12 @@ idxs = np.where(np.asarray(a)==True)[0].tolist()
 # 51399  388967 # pos_000000
 # 143904.612, 529319.225 # max
 # 27587.828  369991.498 # min
+folder = Path("/home/fatemeh/Downloads/hedg/results/test_dataset/labels")
+n_lines_by_file = {}
+for p in folder.glob("pos_*.json"):
+    with p.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    n_lines_by_file[p.name] = data.get("n_lines")
+max_file = max(n_lines_by_file, key=n_lines_by_file.get) # pos_000092.json, 423 polylines
+max_value = n_lines_by_file[max_file]
 """

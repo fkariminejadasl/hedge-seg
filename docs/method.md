@@ -30,7 +30,7 @@ These refernce are the DETR-like model, which from BEV images they get the vecto
 - [MapTRv2](https://arxiv.org/pdf/2308.05736v2), [MapTR](https://openreview.net/pdf/f0aa5f3818d2d071eed47bfd84263b7b217b437a.pdf). 
 - [BezierFormer](https://arxiv.org/pdf/2404.16304). 
 - PolyRoad: Polyline Transformer for Topological Road-Boundary Detection. 
-- 
+- [VectorMapNet]
 
 ### Medical Imaging
 - DeformCL: Learning Deformable Centerline Representation for Vessel Extraction in 3D Medical Image. First semantic segmentation, postprocess and get points and then DETR-like architecture for getting curves. Note that features are only points not the embedding of the image as in the DETR memory is the embedding of the whole image up to patch size. 
@@ -41,7 +41,6 @@ These refernce are the DETR-like model, which from BEV images they get the vecto
 
 
 ### Others
-- 
 - [DiffusionEdge](https://arxiv.org/pdf/2401.02032) Diffusion Probabilistic Model for Crisp Edge Detection. Condition on the image to get image images using diffusion model.
 
 <!-- ================================= -->
