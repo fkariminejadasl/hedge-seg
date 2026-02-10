@@ -33,6 +33,9 @@ dependencies = [
     "omegaconf",
     "transformers",
     "accelerate",
+    "datasets",
+    "albumentations",
+    "torchmetrics", # torchmetrics[detection]
     "wandb",
     "tensorboard",
 
