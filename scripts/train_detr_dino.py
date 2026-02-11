@@ -521,8 +521,8 @@ def main():
         exp="detr_from_dino_test",
         save_path=Path("/home/fatemeh/Downloads/hedg/results/training"),
         embed_dir=Path(
-            "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/packed_pos_npz"
-        ),  # contains *.npz
+            "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/embs_bbs"
+        ),
         n_epochs=5,
     )
     cfg = OmegaConf.create(cfg)

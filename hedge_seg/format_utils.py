@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 
 
-def pack_pos_npz(
+def pack_embeddings_bbs_npz(
     embeddings_dir: Path,
     labels_dir: Path,
     output_dir: Path,
@@ -75,9 +75,76 @@ def pack_pos_npz(
     print(f"Written: {written}, Skipped: {skipped}, Output: {output_dir}")
 
 
-main_dir = Path("/home/fatemeh/Downloads/hedg/results/test_mini")
-pack_pos_npz(
-    embeddings_dir=main_dir / "embeddings",
-    labels_dir=main_dir / "labels_processed",
-    output_dir=main_dir / "packed_pos_npz",
-)
+def pack_embeddings_polylines_npz(
+    embeddings_dir: Path,
+    labels_dir: Path,
+    output_dir: Path,
+    feat_key="feat",
+    poly_key="polylines_px_resampled",
+):
+    """
+    For each embeddings_dir/pos_*.npz:
+      - loads feat from npz
+      - loads labels_dir/<same_stem>.json
+      - reads fixed-length polylines from poly_key
+      - writes output_dir/<same_name>.npz with: feat, polylines, labels, image_size
+    Skips files with missing labels or zero valid polylines.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    written, skipped = 0, 0
+
+    for emb_path in sorted(embeddings_dir.glob("pos_*.npz")):
+        lab_path = labels_dir / f"{emb_path.stem}.json"
+        if not lab_path.exists():
+            skipped += 1
+            continue
+
+        with open(lab_path, "r") as f:
+            lab = json.load(f)
+
+        H = W = lab["chip_size_px"]
+        P = lab["n_points_per_line"]
+
+        polys = []
+        for pl in lab.get(poly_key, []):
+            if not (isinstance(pl, list) and len(pl) == P):
+                continue
+            pts = []
+            for x, y in pl:
+                x = float(x)
+                y = float(y)
+                x = max(0.0, min(x, float(W)))
+                y = max(0.0, min(y, float(H)))
+                pts.append([x, y])
+            polys.append(pts)
+
+        if len(polys) == 0:
+            skipped += 1
+            continue
+
+        polylines = np.asarray(polys, dtype=np.float32)  # (N,P,2)
+        labels = np.zeros((polylines.shape[0],), dtype=np.int64)  # single class -> 0
+
+        feat = np.load(emb_path)[feat_key]
+        feat = np.ascontiguousarray(feat).astype(np.float32)
+
+        out_path = output_dir / emb_path.name
+        np.savez_compressed(
+            out_path,
+            feat=feat,
+            polylines=polylines,
+            labels=labels,
+            image_size=np.asarray([H, W], dtype=np.int32),
+        )
+        written += 1
+
+    print(f"Written: {written}, Skipped: {skipped}, Output: {output_dir}")
+
+
+# main_dir = Path("/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm")
+# pack_embeddings_polylines_npz(
+#     embeddings_dir=main_dir / "embeddings",
+#     labels_dir=main_dir / "labels_processed",
+#     output_dir=main_dir / "embs_polylines",
+# )
