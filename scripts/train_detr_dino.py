@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -198,7 +196,8 @@ class DetrFromEmbeddings(nn.Module):
 
         # Transformer: encoder(src), decoder(tgt=query, memory=enc)
         memory = self.transformer.encoder(src)  # (B,L,D)
-        hs = self.transformer.decoder(tgt=query, memory=memory)  # (B,Q,D)
+        tgt = torch.zeros_like(query)
+        hs = self.transformer.decoder(tgt=tgt + query, memory=memory)  # (B,Q,D)
 
         logits = self.class_embed(hs)  # (B,Q,K+1)
         boxes = self.bbox_embed(hs).sigmoid()  # normalized cxcywh in [0,1]
@@ -396,10 +395,9 @@ class DetrCriterion(nn.Module):
 class DetrEmbDataset(Dataset):
     """
     Expected per file:
-      feat: (196,1024) or (N,196,1024)
-      boxes: (num_obj,4) in xyxy pixel coords OR already normalized
+      feat: (196,1024)
+      boxes: (num_obj,4) in xyxy pixel coords not normalized
       labels: (num_obj,)
-      optionally: image_size: (H,W) to normalize pixel boxes
     """
 
     def __init__(self, embed_dir: Path, normalize_boxes: bool = True):
