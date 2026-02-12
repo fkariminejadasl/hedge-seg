@@ -264,13 +264,22 @@ class HungarianMatcherPolyline(nn.Module):
             # Class cost: negative prob of tgt class
             cost_class = -out_prob[b][:, tgt_ids]  # (Q,Ni)
 
-            # Polyline cost: mean L1 across points
-            # Flatten to (Q, 2K) and (Ni, 2K), then cdist L1
+            # Polyline cost: reverse-invariant mean L1 across points
+            # Compute L1 distance to the target polyline in both directions (forward and reversed),
+            # then take the minimum cost for each (query, target) pair.
+            # Implementation: flatten to (Q, 2K) and (Ni, 2K), use cdist(L1) for forward and reversed,
+            # then cost_poly = min(cost_fwd, cost_rev).
+            # It can be replaced by either the Hausdorff or Chamfer distance.
             Q = out_poly[b].shape[0]
             K = out_poly[b].shape[1]
             out_flat = out_poly[b].reshape(Q, 2 * K)  # (Q,2K)
             tgt_flat = tgt_poly.reshape(tgt_poly.shape[0], 2 * K)  # (Ni,2K)
-            cost_poly = torch.cdist(out_flat, tgt_flat, p=1) / float(2 * K)  # (Q,Ni)
+            tgt_rev = torch.flip(tgt_poly, dims=[1]).reshape(
+                tgt_poly.shape[0], 2 * K
+            )  # (Ni,2K)
+            cost_fwd = torch.cdist(out_flat, tgt_flat, p=1) / float(2 * K)  # (Q,Ni)
+            cost_rev = torch.cdist(out_flat, tgt_rev, p=1) / float(2 * K)  # (Q,Ni)
+            cost_poly = torch.minimum(cost_fwd, cost_rev)
 
             # Optional bbox GIoU cost from polylines
             cost_giou = 0.0
@@ -377,15 +386,24 @@ class DetrPolylineCriterion(nn.Module):
         for b, (src_idx, tgt_idx) in enumerate(indices):
             if len(src_idx) == 0:
                 continue
+
             s = pred_poly[b, src_idx]  # (M,K,2)
             t = targets[b]["polylines"][tgt_idx]  # (M,K,2)
+            t_rev = torch.flip(t, dims=[1])  # (M,K,2)
 
-            loss = loss + F.l1_loss(s, t, reduction="sum")
+            # Per-instance forward and reversed L1
+            # (sum over K and xy, keep instance dimension)
+            l1_fwd = F.l1_loss(s, t, reduction="none").sum(dim=(1, 2))  # (M,)
+            l1_rev = F.l1_loss(s, t_rev, reduction="none").sum(dim=(1, 2))  # (M,)
+            l1 = torch.minimum(l1_fwd, l1_rev).sum()  # scalar
+
+            loss = loss + l1
             n_matched += s.shape[0]
 
         n_matched = max(n_matched, 1)
-        # average per matched instance, and per point coordinate
-        loss = loss / (n_matched * pred_poly.shape[2] * 2.0)
+        # average per matched instance and per point coordinate
+        K = pred_poly.shape[2]
+        loss = loss / (n_matched * K * 2.0)
         return loss
 
     def loss_bbox_giou(self, outputs, targets, indices):
