@@ -481,6 +481,7 @@ class DetrPolylineEmbDataset(Dataset):
 
         polylines = d["polylines"]  # (Ni,K,2) pixel coords
         labels = d["labels"]  # (Ni,)
+        image_size = d["image_size"]  # (2,) np.array(H, W, dtype=np.int32)
 
         polylines = torch.from_numpy(np.ascontiguousarray(polylines)).float()
         labels = torch.from_numpy(np.ascontiguousarray(labels)).long()
@@ -501,7 +502,7 @@ class DetrPolylineEmbDataset(Dataset):
                 polylines[..., 1] = polylines[..., 1] / float(H)
                 polylines = polylines.clamp(0, 1)
 
-        target = {"labels": labels, "polylines": polylines}
+        target = {"labels": labels, "polylines": polylines, "image_size": image_size}
         return feat, target
 
 
@@ -512,7 +513,7 @@ def detr_polyline_collate_fn(batch):
 
 
 # -------------------------
-# Training / eval
+# Training / eval / inference
 # -------------------------
 
 
@@ -584,6 +585,99 @@ def eval_one_epoch(loader, model, criterion, device):
     for k in sums:
         sums[k] /= max(n, 1)
     return sums
+
+
+@torch.no_grad()
+def detr_polyline_inference(
+    model,
+    feats: torch.Tensor,
+    image_sizes: List[List[int, int]],
+    score_thresh: float = 0.5,
+    topk: int = 100,
+    device: torch.device | None = None,
+):
+    """
+    Run inference for the polyline DETR model.
+
+    Args:
+        model: DetrPolylineFromEmbeddings
+        feats: (B,196,1024) float tensor (DINO features)
+        image_sizes: list/tuple length B, each (H,W) in pixels
+        score_thresh: keep predictions with score >= thresh
+        topk: keep at most topk predictions per image after filtering
+        device: optional device; if given, feats are moved there
+
+    Returns:
+        list of length B. Each element is a dict:
+          {
+            "scores": (M,),
+            "labels": (M,),
+            "polylines_norm": (M,K,2) in [0,1],
+            "polylines_px": (M,K,2) in pixel coords,
+          }
+        where M <= topk
+    """
+    model.eval()
+    if device is not None:
+        feats = feats.to(device)
+        model = model.to(device)
+
+    outputs = model(feats)
+    logits = outputs["pred_logits"]  # (B,Q,C+1)
+    polylines = outputs["pred_polylines"]  # (B,Q,K,2) normalized
+
+    prob = F.softmax(logits, dim=-1)  # (B,Q,C+1)
+    scores_all, labels_all = prob[..., :-1].max(dim=-1)  # exclude "no-object" -> (B,Q)
+
+    B, Q = scores_all.shape
+    results = []
+
+    for b in range(B):
+        H, W = image_sizes[b]
+
+        scores = scores_all[b]
+        labels = labels_all[b]
+        polys = polylines[b]  # (Q,K,2)
+
+        keep = scores >= score_thresh
+        if keep.any():
+            scores = scores[keep]
+            labels = labels[keep]
+            polys = polys[keep]
+        else:
+            # nothing passed threshold
+            results.append(
+                {
+                    "scores": scores.new_zeros((0,)),
+                    "labels": labels.new_zeros((0,), dtype=torch.long),
+                    "polylines_norm": polys.new_zeros((0, polys.shape[1], 2)),
+                    "polylines_px": polys.new_zeros((0, polys.shape[1], 2)),
+                }
+            )
+            continue
+
+        # topk
+        if scores.numel() > topk:
+            top_idx = torch.topk(scores, k=topk, largest=True).indices
+            scores = scores[top_idx]
+            labels = labels[top_idx]
+            polys = polys[top_idx]
+
+        # convert to pixel coordinates
+        polys_px = polys.clone()
+        polys_px[..., 0] = polys_px[..., 0] * float(W)
+        polys_px[..., 1] = polys_px[..., 1] * float(H)
+
+        results.append(
+            {
+                "scores": scores.detach().cpu(),
+                "labels": labels.detach().cpu(),
+                "polylines_norm": polys.detach().cpu(),
+                "polylines_px": polys_px.detach().cpu(),
+            }
+        )
+
+    return results
 
 
 # -------------------------
@@ -697,6 +791,21 @@ def main():
                     cfg.save_path / "best_detr_polyline_from_dino.pt",
                 )
                 print(f"Saved best: {best_val:.4f} at epoch {epoch}")
+
+    # Example inference on eval set
+    feats, targets = next(iter(eval_loader))
+    image_sizes = [t["image_size"].tolist() for t in targets]
+    preds = detr_polyline_inference(
+        model=model,
+        feats=feats,
+        image_sizes=image_sizes,
+        score_thresh=0.5,
+        topk=20,
+        device=device,
+    )
+
+    # preds[0]["polylines_px"] is (M,K,2) in pixel coords
+    print(preds[0]["scores"].shape, preds[0]["polylines_px"].shape)
 
 
 if __name__ == "__main__":
