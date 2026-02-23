@@ -591,7 +591,7 @@ def eval_one_epoch(loader, model, criterion, device):
 def detr_polyline_inference(
     model,
     feats: torch.Tensor,
-    image_sizes: List[List[int, int]],
+    image_sizes: List[Tuple[int, int]],
     score_thresh: float = 0.5,
     topk: int = 100,
     device: torch.device | None = None,
@@ -792,6 +792,7 @@ def main():
                 )
                 print(f"Saved best: {best_val:.4f} at epoch {epoch}")
 
+# """
     # Example inference on eval set
     feats, targets = next(iter(eval_loader))
     image_sizes = [t["image_size"].tolist() for t in targets]
@@ -806,6 +807,7 @@ def main():
 
     # preds[0]["polylines_px"] is (M,K,2) in pixel coords
     print(preds[0]["scores"].shape, preds[0]["polylines_px"].shape)
+# """
 
 
 if __name__ == "__main__":

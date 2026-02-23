@@ -28,6 +28,8 @@ Image to vector models where given image and extract vectors directly. Vector ca
 These refernce are the DETR-like model, which from BEV images they get the vector data.
 
 - [MapTRv2](https://arxiv.org/pdf/2308.05736v2), [MapTR](https://openreview.net/pdf/f0aa5f3818d2d071eed47bfd84263b7b217b437a.pdf). 
+- [FlexMap](https://arxiv.org/pdf/2601.22376)
+- [MapQR](https://arxiv.org/pdf/2402.17430)
 - [BezierFormer](https://arxiv.org/pdf/2404.16304). 
 - PolyRoad: Polyline Transformer for Topological Road-Boundary Detection. 
 - [VectorMapNet]
