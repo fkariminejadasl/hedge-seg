@@ -13,6 +13,8 @@ from torch.utils import tensorboard
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+from hedge_seg.trainin_utils import set_seed
+
 # -------------------------
 # Utilities: boxes for optional GIoU-from-polyline
 # -------------------------
@@ -159,7 +161,7 @@ class DetrPolylineFromEmbeddings(nn.Module):
         dim_feedforward: int = 1024,
         dropout: float = 0.1,
         grid_size: Tuple[int, int] = (14, 14),
-        num_points: int = 20,  # K
+        num_points: int = 20,
     ):
         super().__init__()
         self.num_classes = num_classes
@@ -686,9 +688,8 @@ def detr_polyline_inference(
 
 
 def main():
-    torch.manual_seed(0)
     cfg = dict(
-        exp="detr_polyline_from_dino_test",
+        exp="detr_polyline_1",
         save_path=Path("/home/fatemeh/Downloads/hedg/results/training"),
         embed_dir=Path(
             "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/embs_polylines"
@@ -699,6 +700,8 @@ def main():
         n_epochs=5,
         batch_size=256,
         num_workers=15,
+        max_lr=3e-4,  # 1e-3
+        weight_decay=1e-2,  # default 1e-2
         use_tqdm=True,
     )
     cfg = OmegaConf.create(cfg)
@@ -709,6 +712,7 @@ def main():
     n_train = int(0.8 * len(dataset))
     n_val = len(dataset) - n_train
     train_ds, val_ds = torch.utils.data.random_split(dataset, [n_train, n_val])
+    print(f"Dataset: total={len(dataset)}, train={len(train_ds)}, val={len(val_ds)}")
 
     train_loader = DataLoader(
         train_ds,
@@ -757,7 +761,9 @@ def main():
     if device.type == "cuda":
         print(f"Using device: {torch.cuda.get_device_properties()}")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=cfg.max_lr, weight_decay=cfg.weight_decay
+    )
 
     best_val = 1e9
     tb_dir = cfg.save_path / f"tensorboard/{cfg.exp}"
@@ -794,7 +800,7 @@ def main():
                 best_val = eval_losses["loss_total"]
                 torch.save(
                     {"model": model.state_dict(), "epoch": epoch},
-                    cfg.save_path / "best_detr_polyline_from_dino.pt",
+                    cfg.save_path / f"best_{cfg.exp}.pt",
                 )
                 print(f"Saved best: {best_val:.4f} at epoch {epoch}")
 
@@ -818,4 +824,5 @@ def main():
 
 
 if __name__ == "__main__":
+    set_seed(42)
     main()

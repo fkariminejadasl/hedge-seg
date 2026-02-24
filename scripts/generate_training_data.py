@@ -593,6 +593,7 @@ chip = ChipSpec(
 # )
 
 
+# huggingface-cli login # from ~/.cache/huggingface/token
 save_DINOv3_embeddings(image_dir, embed_dir, batch_size=512)
 
 """
