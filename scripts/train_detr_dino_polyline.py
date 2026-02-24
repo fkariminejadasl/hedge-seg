@@ -693,9 +693,13 @@ def main():
         embed_dir=Path(
             "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/embs_polylines"
         ),
-        n_epochs=5,
         num_points=20,
         num_classes=1,
+        # trining
+        n_epochs=5,
+        batch_size=256,
+        num_workers=15,
+        use_tqdm=True,
     )
     cfg = OmegaConf.create(cfg)
 
@@ -708,16 +712,16 @@ def main():
 
     train_loader = DataLoader(
         train_ds,
-        batch_size=8,
+        batch_size=cfg.batch_size,
         shuffle=True,
-        num_workers=2,
+        num_workers=cfg.num_workers,
         collate_fn=detr_polyline_collate_fn,
     )
     eval_loader = DataLoader(
         val_ds,
-        batch_size=8,
+        batch_size=cfg.batch_size,
         shuffle=False,
-        num_workers=2,
+        num_workers=cfg.num_workers,
         collate_fn=detr_polyline_collate_fn,
     )
 
@@ -744,12 +748,14 @@ def main():
         eos_coef=0.1,
         loss_poly=5.0,
         loss_bbox_giou=1.0,
-        loss_smooth=0.0,  # set small value like 0.1 if you want smoother curves
+        loss_smooth=0.0,  # set small value like 0.1 for smoother curves
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     criterion.to(device)
+    if device.type == "cuda":
+        print(f"Using device: {torch.cuda.get_device_properties()}")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
 
@@ -758,9 +764,9 @@ def main():
     tb_dir.mkdir(parents=True, exist_ok=True)
 
     with tensorboard.SummaryWriter(tb_dir) as writer:
-        for epoch in tqdm(range(1, cfg.n_epochs + 1)):
+        for epoch in tqdm(range(1, cfg.n_epochs + 1), disable=cfg.use_tqdm):
             s_time = datetime.now().replace(microsecond=0)
-            print(f"Epoch {epoch:03d} starting at {s_time}")
+            print(f"Epoch {epoch:03d}/{cfg.n_epochs} starting at {s_time}")
 
             train_losses = train_one_epoch(
                 train_loader, model, criterion, optimizer, device
@@ -769,7 +775,7 @@ def main():
 
             e_time = datetime.now().replace(microsecond=0)
             print(
-                f"Epoch {epoch:03d} "
+                f"Epoch {epoch:03d}/{cfg.n_epochs} "
                 f"train_total={train_losses['loss_total']:.4f} "
                 f"(ce={train_losses['loss_ce']:.4f}, poly={train_losses['loss_poly']:.4f}, "
                 f"bbox_giou={train_losses['loss_bbox_giou']:.4f}, smooth={train_losses['loss_smooth']:.4f}) "
@@ -778,7 +784,7 @@ def main():
                 f"bbox_giou={eval_losses['loss_bbox_giou']:.4f}, smooth={eval_losses['loss_smooth']:.4f})"
             )
             print(
-                f"Epoch {epoch:03d} finished at {e_time} (duration {e_time - s_time})"
+                f"Epoch {epoch:03d}/{cfg.n_epochs} finished at {e_time} (duration {e_time - s_time})"
             )
 
             tb_add_losses(writer, epoch, train_losses, "train")
@@ -792,7 +798,8 @@ def main():
                 )
                 print(f"Saved best: {best_val:.4f} at epoch {epoch}")
 
-# """
+
+"""
     # Example inference on eval set
     feats, targets = next(iter(eval_loader))
     image_sizes = [t["image_size"].tolist() for t in targets]
@@ -807,7 +814,7 @@ def main():
 
     # preds[0]["polylines_px"] is (M,K,2) in pixel coords
     print(preds[0]["scores"].shape, preds[0]["polylines_px"].shape)
-# """
+"""
 
 
 if __name__ == "__main__":

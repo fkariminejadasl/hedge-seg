@@ -130,7 +130,7 @@ def pack_embeddings_polylines_npz(
         feat = np.ascontiguousarray(feat).astype(np.float32)
 
         out_path = output_dir / emb_path.name
-        np.savez_compressed(
+        np.savez(
             out_path,
             feat=feat,
             polylines=polylines,
@@ -142,7 +142,8 @@ def pack_embeddings_polylines_npz(
     print(f"Written: {written}, Skipped: {skipped}, Output: {output_dir}")
 
 
-# main_dir = Path("/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm")
+# dir_name = "test_256"
+# main_dir = Path(f"/home/fatemeh/Downloads/hedg/results/{dir_name}")
 # pack_embeddings_polylines_npz(
 #     embeddings_dir=main_dir / "embeddings",
 #     labels_dir=main_dir / "labels_processed",

@@ -16,7 +16,7 @@ def process_label_file(path: Path, out_dir: Path, n_points):
     out_data["bboxes_px_per_polyline"] = (
         bboxes  # list of [xmin,ymin,xmax,ymax] (or empty list)
     )
-    # out_data["polylines_px_resampled"] = resampled
+    out_data["polylines_px_resampled"] = resampled
     out_data["n_points_per_line"] = n_points
 
     out_path = out_dir / path.name
@@ -27,8 +27,10 @@ def process_label_file(path: Path, out_dir: Path, n_points):
         json.dump(out_data, f, ensure_ascii=False)
 
 
-labels_dir = Path("/home/fatemeh/Downloads/hedg/results/test_dataset/labels")
-out_dir = Path("/home/fatemeh/Downloads/hedg/results/test_dataset/labels_processed")
+dir_name = "test_256"
+main_dir = Path(f"/home/fatemeh/Downloads/hedg/results/{dir_name}")
+labels_dir = main_dir / "labels"
+out_dir = main_dir / "labels_processed"
 out_dir.mkdir(parents=True, exist_ok=True)
 np_points = 20
 

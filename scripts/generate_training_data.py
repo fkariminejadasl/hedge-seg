@@ -17,6 +17,8 @@ from rasterio.warp import Resampling, reproject
 from rasterio.windows import Window
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
+from transformers import pipeline
+from transformers.image_utils import load_image
 
 # ----------------------------
 # Utils
@@ -496,21 +498,11 @@ def generate_dataset(
         print(f"Saved negatives: {neg_done}/{n_neg} (tries={neg_tries})")
 
 
-def save_DINOv3_embeddings(image_dir, embed_dir):
-    from transformers import pipeline
-    from transformers.image_utils import load_image
-
+def save_DINOv3_embeddings_sequential(image_dir, embed_dir):
     feature_extractor = pipeline(
         model="facebook/dinov3-vitl16-pretrain-lvd1689m",
         task="image-feature-extraction",
     )
-
-    # # Process all images in a batch
-    # import torch
-    # paths = sorted(Path(image_dir).glob("*.png"))
-    # batch_paths = [str(p) for p in paths]
-    # feats = feature_extractor(batch_paths, return_tensors=True) # list [1, 201, 1024]
-    # feats = torch.concat(feats) # N x 201 x 1024
 
     def save_DINOv3_embeddings_per_image(image_path, embed_dir):
         image = load_image(str(image_path))
@@ -527,33 +519,81 @@ def save_DINOv3_embeddings(image_dir, embed_dir):
         save_DINOv3_embeddings_per_image(image_path, embed_dir)
 
 
+def save_DINOv3_embeddings(image_dir, embed_dir, batch_size=32):
+    feature_extractor = pipeline(
+        model="facebook/dinov3-vitl16-pretrain-lvd1689m",
+        task="image-feature-extraction",
+    )
+
+    paths = image_dir.glob("*.png")
+    batch_paths = [str(p) for p in paths]
+
+    def run_batch_and_save(batch_paths, batch_files):
+        # feats_list is a list of length N, each like tensor (1, 201, 1024)
+        import time
+
+        t0 = time.time()
+        feats_list = feature_extractor(
+            batch_paths, batch_size=batch_size, return_tensors=True
+        )
+        print("done feature", len(batch_paths), "in", time.time() - t0, "seconds")
+        t0 = time.time()
+        for fp, f in zip(batch_files, feats_list):
+            features = np.asarray(f, dtype=np.float32).squeeze(0)  # (201, 1024)
+            save_file = embed_dir / f"{fp.stem}.npz"
+            # drop class + 4 register tokens
+            np.savez(save_file, feat=features[5:])  # np.savez_compressed much slower
+        print("done saving", len(batch_paths), "in", time.time() - t0, "seconds")
+
+    batch_paths = []
+    batch_files = []
+
+    for p in image_dir.glob("*.png"):
+        batch_files.append(p)
+        batch_paths.append(str(p))
+
+        if len(batch_paths) == batch_size:
+            run_batch_and_save(batch_paths, batch_files)
+            batch_paths.clear()
+            batch_files.clear()
+
+    # flush remainder
+    if batch_paths:
+        run_batch_and_save(batch_paths, batch_files)
+
+
+label_mode = "polylines"
+n_pos = 300_000
+res = 256
+dir_name = f"test_{res}"
 shp_path = "/home/fatemeh/Downloads/hedg/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
 tif_path = "/home/fatemeh/Downloads/hedg/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
-out_dir = Path("/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm")
+out_dir = Path(f"/home/fatemeh/Downloads/hedg/results/{dir_name}")
 image_dir = out_dir / "images"
 embed_dir = out_dir / "embeddings"
 embed_dir.mkdir(parents=True, exist_ok=True)
 
 chip = ChipSpec(
-    size_px=256,  # start small for testing
+    size_px=res,
     band=1,
-    label_mode="both",  # saves images + json + masks
+    label_mode=label_mode,  # "polylines", "mask", "both"
     line_width_px=2,
 )
 
-generate_dataset(
-    shp_path=shp_path,
-    tif_path=tif_path,
-    out_dir=out_dir,
-    n_pos=300,
-    n_neg=300,
-    chip=chip,
-    seed=123,  # repeatable
-    max_tries_per_sample=200,
-    use_osm=False,
-)
+# generate_dataset(
+#     shp_path=shp_path,
+#     tif_path=tif_path,
+#     out_dir=out_dir,
+#     n_pos=n_pos,
+#     n_neg=0,
+#     chip=chip,
+#     seed=123,
+#     max_tries_per_sample=200,
+#     use_osm=False,
+# )
 
-save_DINOv3_embeddings(image_dir, embed_dir)
+
+save_DINOv3_embeddings(image_dir, embed_dir, batch_size=512)
 
 """
 from pathlib import Path
