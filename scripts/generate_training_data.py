@@ -566,9 +566,9 @@ label_mode = "polylines"
 n_pos = 300_000
 res = 256
 dir_name = f"test_{res}"
-shp_path = "/home/fatemeh/Downloads/hedg/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
-tif_path = "/home/fatemeh/Downloads/hedg/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
-out_dir = Path(f"/home/fatemeh/Downloads/hedg/results/{dir_name}")
+shp_path = "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
+tif_path = "/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
+out_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
 image_dir = out_dir / "images"
 embed_dir = out_dir / "embeddings"
 embed_dir.mkdir(parents=True, exist_ok=True)
@@ -600,7 +600,7 @@ save_DINOv3_embeddings(image_dir, embed_dir, batch_size=512)
 from pathlib import Path
 import json
 
-folder = Path("/home/fatemeh/Downloads/hedg/results/test_dataset/labels")
+folder = Path("/home/fatemeh/Downloads/hedge/results/test_dataset/labels")
 n_lines_all = []
 n_lines_dic = dict()
 for json_path in folder.glob("*.json"):
@@ -625,7 +625,7 @@ idxs = np.where(np.asarray(a)==True)[0].tolist()
 # 51399  388967 # pos_000000
 # 143904.612, 529319.225 # max
 # 27587.828  369991.498 # min
-folder = Path("/home/fatemeh/Downloads/hedg/results/test_dataset/labels")
+folder = Path("/home/fatemeh/Downloads/hedge/results/test_dataset/labels")
 n_lines_by_file = {}
 for p in folder.glob("pos_*.json"):
     with p.open("r", encoding="utf-8") as f:

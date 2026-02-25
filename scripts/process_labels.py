@@ -27,21 +27,21 @@ def process_label_file(path: Path, out_dir: Path, n_points):
         json.dump(out_data, f, ensure_ascii=False)
 
 
+def process_labels_for_dir(labels_dir: Path, out_dir: Path, n_points):
+    json_files = sorted(labels_dir.glob("pos_*.json"))
+    for p in json_files:
+        process_label_file(p, out_dir, n_points)
+    print(f"Done. Wrote {len(json_files)} files to: {out_dir.resolve()}")
+
+
 dir_name = "test_256"
-main_dir = Path(f"/home/fatemeh/Downloads/hedg/results/{dir_name}")
+main_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
 labels_dir = main_dir / "labels"
 out_dir = main_dir / "labels_processed"
 out_dir.mkdir(parents=True, exist_ok=True)
-np_points = 20
+n_points = 20
 
-# label_file = Path(
-#     "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/labels/pos_000000.json"
-# )
-# process_label_file(label_file, out_dir, np_points)
+# label_file = Path("/home/fatemeh/Downloads/hedge/results/test_mini/labels/pos_000000.json")
+# process_label_file(label_file, out_dir, n_points)
 
-
-json_files = sorted(labels_dir.glob("pos_*.json"))
-for p in json_files:
-    process_label_file(p, out_dir, np_points)
-
-print(f"Done. Wrote {len(json_files)} files to: {out_dir.resolve()}")
+process_labels_for_dir(labels_dir, out_dir, n_points)

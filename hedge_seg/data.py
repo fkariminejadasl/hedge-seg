@@ -100,7 +100,7 @@ def save_fullres_geotiff_as_png_tiled(
 
 
 # Example usage of reading a shapefile
-path = "/home/fatemeh/Downloads/hedg/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
+path = "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
 gdf = gpd.read_file(path)
 
 print(gdf.head())
@@ -316,9 +316,9 @@ def save_linestring_buffer_raster_png(
 
 
 # Example usage
-shp_path = "/home/fatemeh/Downloads/hedg/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
-tif_path = "/home/fatemeh/Downloads/hedg/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
-save_path = "/home/fatemeh/Downloads/hedg/results/buffer_view.png"
+shp_path = "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
+tif_path = "/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
+save_path = "/home/fatemeh/Downloads/hedge/results/buffer_view.png"
 
 save_linestring_buffer_raster_png(
     shp_path=shp_path,

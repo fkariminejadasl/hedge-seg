@@ -148,8 +148,8 @@ cfg = dict(
     batch_size=32,
     no_epochs=50,
     exp="neg_pos_classifier_test",
-    save_dir=Path("/home/fatemeh/Downloads/hedg/results/training"),
-    data_dir=Path("/home/fatemeh/Downloads/hedg/results/test_dataset"),
+    save_dir=Path("/home/fatemeh/Downloads/hedge/results/training"),
+    data_dir=Path("/home/fatemeh/Downloads/hedge/results/test_dataset"),
 )
 cfg = OmegaConf.create(cfg)
 

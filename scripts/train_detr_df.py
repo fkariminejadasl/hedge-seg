@@ -478,28 +478,28 @@ def plot_results(image, results, threshold=0.6):
 
 
 # # Convert to COCO format
-# image_dir = Path("/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/images")
-# labels_dir = Path("/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/labels_processed")
-# output_json = Path("/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/instances_train.json")
+# image_dir = Path("/home/fatemeh/Downloads/hedge/results/test_dataset_with_osm/images")
+# labels_dir = Path("/home/fatemeh/Downloads/hedge/results/test_dataset_with_osm/labels_processed")
+# output_json = Path("/home/fatemeh/Downloads/hedge/results/test_dataset_with_osm/instances_train.json")
 # make_coco(image_dir, labels_dir, output_json)
 
 
 # # Convert to Hugging Face Datasets format
 # ds = to_hf_detr(
-#     images_dir="/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/images",
-#     labels_dir="/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/labels_processed",
+#     images_dir="/home/fatemeh/Downloads/hedge/results/test_dataset_with_osm/images",
+#     labels_dir="/home/fatemeh/Downloads/hedge/results/test_dataset_with_osm/labels_processed",
 # )
 # # print(ds[0]["objects"])
-# ds.save_to_disk("/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/detr_dataset")
+# ds.save_to_disk("/home/fatemeh/Downloads/hedge/results/test_dataset_with_osm/detr_dataset")
 
 
-output_dir = Path("/home/fatemeh/Downloads/hedg/results/training/detr-hf")
+output_dir = Path("/home/fatemeh/Downloads/hedge/results/training/detr-hf")
 # Load the dataset
 train_dataset = load_from_disk(
-    "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/detr_dataset"
+    "/home/fatemeh/Downloads/hedge/results/test_dataset_with_osm/detr_dataset"
 )
 test_dataset = load_from_disk(
-    "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/detr_dataset"
+    "/home/fatemeh/Downloads/hedge/results/test_dataset_with_osm/detr_dataset"
 )
 checkpoint = "facebook/detr-resnet-50-dc5"
 id2label = {0: "object"}
@@ -605,7 +605,7 @@ trainer.save_model()
 
 # Test the trained model on a sample image
 image = Image.open(
-    "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/images/pos_000000.png"
+    "/home/fatemeh/Downloads/hedge/results/test_dataset_with_osm/images/pos_000000.png"
 ).convert("RGB")
 obj_detector = pipeline("object-detection", model=output_dir)
 results = obj_detector(image)

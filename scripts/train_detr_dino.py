@@ -519,9 +519,9 @@ def main():
     torch.manual_seed(0)
     cfg = dict(
         exp="detr_from_dino_test",
-        save_path=Path("/home/fatemeh/Downloads/hedg/results/training"),
+        save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
-            "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/embs_bbs"
+            "/home/fatemeh/Downloads/hedge/results/test_dataset_with_osm/embs_bbs"
         ),
         n_epochs=5,
     )

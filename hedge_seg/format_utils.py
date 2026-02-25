@@ -143,7 +143,7 @@ def pack_embeddings_polylines_npz(
 
 
 # dir_name = "test_256"
-# main_dir = Path(f"/home/fatemeh/Downloads/hedg/results/{dir_name}")
+# main_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
 # pack_embeddings_polylines_npz(
 #     embeddings_dir=main_dir / "embeddings",
 #     labels_dir=main_dir / "labels_processed",
