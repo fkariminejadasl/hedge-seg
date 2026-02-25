@@ -691,9 +691,7 @@ def main():
     cfg = dict(
         exp="detr_polyline_1",
         save_path=Path("/home/fatemeh/Downloads/hedg/results/training"),
-        embed_dir=Path(
-            "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/embs_polylines"
-        ),
+        embed_dir=Path("/home/fatemeh/Downloads/hedg/results/test_mini/embs_polylines"),
         # save_path=Path("/home/fkarimineja/exps/hedge"),
         # embed_dir=Path("/home/fkarimineja/data/hedge/test_256/embs_polylines"),
         num_points=20,
@@ -813,6 +811,9 @@ def main():
 
 
 """
+    model.load_state_dict(
+        torch.load("/home/fatemeh/Downloads/hedg/snellius/best_detr_polyline_1.pt", map_location=device)["model"]
+    )
     # Example inference on eval set
     feats, targets = next(iter(eval_loader))
     image_sizes = [t["image_size"].tolist() for t in targets]
@@ -820,13 +821,33 @@ def main():
         model=model,
         feats=feats,
         image_sizes=image_sizes,
-        score_thresh=0.5,
+        score_thresh=0.9,
         topk=20,
         device=device,
     )
 
     # preds[0]["polylines_px"] is (M,K,2) in pixel coords
     print(preds[0]["scores"].shape, preds[0]["polylines_px"].shape)
+    import cv2
+    import matplotlib.pyplot as plt
+    def visualize_polylines(im, polylines):
+        plt.figure()
+        plt.imshow(im)
+        for poly in polylines:
+            plt.plot(poly[:, 0], poly[:, 1], "*")
+        plt.show(block=False)
+    i = 0
+    inp = dataset.files[val_ds.indices[i]]
+    im = cv2.imread(str(inp.parent.parent/f"images/{inp.stem}.png"))
+    polylines = np.load(inp.parent.parent/f"embs_polylines/{inp.stem}.npz")["polylines"]
+    pred_polylines = preds[i]["polylines_px"] # [M,K,2]
+
+    visualize_polylines(im, pred_polylines)
+    visualize_polylines(im, polylines)
+
+    a = np.load(inp) # /home/fatemeh/Downloads/hedg/results/test_mini/embs_polylines/pos_000003.npz
+    a = torch.tensor(a["feat"], dtype=torch.float32).unsqueeze(0)
+    preds = detr_polyline_inference(model=model,feats=a,image_sizes=[image_sizes[0]],score_thresh=0.9,topk=20,device=device)
 """
 
 
