@@ -694,12 +694,14 @@ def main():
         embed_dir=Path(
             "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/embs_polylines"
         ),
+        # save_path=Path("/home/fkarimineja/exps/hedge"),
+        # embed_dir=Path("/home/fkarimineja/data/hedge/test_256/embs_polylines"),
         num_points=20,
         num_classes=1,
         # trining
-        n_epochs=5,
-        batch_size=256,
-        num_workers=15,
+        n_epochs=5,  # 500
+        batch_size=256,  # 5x256=1280
+        num_workers=15,  # 17
         max_lr=3e-4,  # 1e-3
         weight_decay=1e-2,  # default 1e-2
         use_tqdm=True,
@@ -803,6 +805,11 @@ def main():
                     cfg.save_path / f"best_{cfg.exp}.pt",
                 )
                 print(f"Saved best: {best_val:.4f} at epoch {epoch}")
+    torch.save(
+        {"model": model.state_dict(), "epoch": epoch},
+        cfg.save_path / f"{cfg.exp}.pt",
+    )
+    print(f"Saved final model: {best_val:.4f} at epoch {epoch}")
 
 
 """
