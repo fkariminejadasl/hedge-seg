@@ -260,23 +260,31 @@ class ChipSpec:
 
 
 def generate_dataset(
-    shp_path: str | Path,
-    tif_path: str | Path,
-    out_dir: str | Path,
+    shp_path: Path,
+    tif_path: Path,
+    out_dir: Path,
     *,
     n_pos: int = 2000,
     n_neg: int = 2000,
-    chip: ChipSpec = ChipSpec(),
     seed: int = 0,
     max_tries_per_sample: int = 200,
     use_osm: bool = True,
+    # Chip parameters
+    size_px: int = 256,
+    label_mode: str = "polylines",  # "polylines", "mask", "both"
+    band: int = 1,
+    line_width_px: int = 2,
 ):
+    chip = ChipSpec(
+        size_px=size_px,
+        label_mode=label_mode,
+        band=band,
+        line_width_px=line_width_px,
+    )
+
     random.seed(seed)
     np.random.seed(seed)
 
-    shp_path = Path(shp_path)
-    tif_path = Path(tif_path)
-    out_dir = Path(out_dir)
     paths = ensure_dirs(out_dir)
 
     gdf = gpd.read_file(shp_path)

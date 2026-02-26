@@ -5,7 +5,7 @@ from hedge_seg.embeddings_and_pack import (
     save_DINOv3_embeddings,
 )
 from hedge_seg.label_postprocess import process_labels_for_dir
-from hedge_seg.training_data import ChipSpec, generate_dataset
+from hedge_seg.training_data import generate_dataset
 
 # ----------------------------
 # Training data generation
@@ -14,19 +14,17 @@ label_mode = "polylines"
 n_pos = 10  # 300_000
 res = 256
 dir_name = "test_mini2"  # f"test_{res}"
-shp_path = "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
-tif_path = "/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
+shp_path = Path(
+    "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
+)
+tif_path = Path(
+    "/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
+)
 out_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
 image_dir = out_dir / "images"
 embed_dir = out_dir / "embeddings"
 embed_dir.mkdir(parents=True, exist_ok=True)
 
-chip = ChipSpec(
-    size_px=res,
-    band=1,
-    label_mode=label_mode,  # "polylines", "mask", "both"
-    line_width_px=2,
-)
 
 print(f"Generating dataset with {n_pos} positive samples...")
 generate_dataset(
@@ -35,7 +33,8 @@ generate_dataset(
     out_dir=out_dir,
     n_pos=n_pos,
     n_neg=0,
-    chip=chip,
+    size_px=res,
+    label_mode=label_mode,
     seed=123,
     max_tries_per_sample=200,
     use_osm=False,
