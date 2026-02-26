@@ -7,7 +7,9 @@ Training data generation.
 
 import json
 import math
+import multiprocessing as mp
 import random
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -265,10 +267,10 @@ def generate_dataset(
     out_dir: Path,
     *,
     n_pos: int = 2000,
-    n_neg: int = 2000,
+    n_neg: int = 0,
     seed: int = 0,
     max_tries_per_sample: int = 200,
-    use_osm: bool = True,
+    use_osm: bool = False,
     # Chip parameters
     size_px: int = 256,
     label_mode: str = "polylines",  # "polylines", "mask", "both"
@@ -509,3 +511,135 @@ def generate_dataset(
             neg_done += 1
 
         print(f"Saved negatives: {neg_done}/{n_neg} (tries={neg_tries})")
+
+
+def gererate_dataset_worker(
+    part_id: int,
+    shp_path: Path,
+    tif_path: Path,
+    out_root: Path,
+    n_pos_part: int,
+    n_neg_part: int,
+    size_px: int,
+    base_seed: int,
+    label_mode: str,
+    max_tries: int,
+    use_osm: bool,
+):
+    # Separate output per process to avoid filename collisions
+    out_dir = out_root / f"part_{part_id:02d}"
+
+    # Different seed per process (still reproducible overall)
+    seed = base_seed + part_id
+
+    generate_dataset(
+        shp_path=shp_path,
+        tif_path=tif_path,
+        out_dir=out_dir,
+        n_pos=n_pos_part,
+        n_neg=n_neg_part,
+        size_px=size_px,
+        seed=seed,
+        max_tries_per_sample=max_tries,
+        label_mode=label_mode,
+        use_osm=use_osm,
+    )
+
+
+def generate_dataset_mp(
+    n_pos_total,
+    n_neg_total,
+    n_proc,
+    shp_path,
+    tif_path,
+    out_dir,
+    size_px,
+    seed,
+    max_tries,
+    label_mode,
+    use_osm,
+):
+    """
+    Multiprocess wrapper around generate_dataset. Splits the total number of positives/negatives across processes
+    """
+    # Split totals across processes. This distributes the remainder nicely
+    pos_counts = [n_pos_total // n_proc] * n_proc
+    for i in range(n_pos_total % n_proc):
+        pos_counts[i] += 1
+
+    neg_counts = [n_neg_total // n_proc] * n_proc
+    for i in range(n_neg_total % n_proc):
+        neg_counts[i] += 1
+
+    tasks = []
+    for part_id in range(n_proc):
+        if pos_counts[part_id] == 0 and neg_counts[part_id] == 0:
+            continue
+        tasks.append(
+            (
+                part_id,
+                shp_path,
+                tif_path,
+                out_dir,
+                pos_counts[part_id],
+                neg_counts[part_id],
+                size_px,
+                seed,
+                label_mode,
+                max_tries,
+                use_osm,
+            )
+        )
+
+    with mp.Pool(processes=n_proc) as pool:
+        _ = pool.starmap(gererate_dataset_worker, tasks)
+
+
+def merge_parts(out_root: Path) -> Path:
+    cats = ["images", "labels", "masks", "osm"]
+    for c in cats:
+        (out_root / c).mkdir(parents=True, exist_ok=True)
+
+    parts = sorted(p for p in out_root.glob("part_*") if p.is_dir())
+
+    pos_i = 0
+    neg_i = 0
+
+    for part in parts:
+        for lab_path in sorted((part / "labels").glob("*.json")):
+            with open(lab_path, "r", encoding="utf-8") as f:
+                obj = json.load(f)
+
+            if obj.get("type") == "positive":
+                new_id = f"pos_{pos_i:06d}"
+                pos_i += 1
+            else:
+                new_id = f"neg_{neg_i:06d}"
+                neg_i += 1
+
+            # move image/mask/osm first (optional ordering)
+            stem = lab_path.stem
+
+            src_img = part / "images" / f"{stem}.png"
+            if src_img.exists():
+                src_img.replace(out_root / "images" / f"{new_id}.png")
+
+            src_mask = part / "masks" / f"{stem}.png"
+            if src_mask.exists():
+                src_mask.replace(out_root / "masks" / f"{new_id}.png")
+
+            src_osm = part / "osm" / f"{stem}.png"
+            if src_osm.exists():
+                src_osm.replace(out_root / "osm" / f"{new_id}.png")
+
+            # rewrite + move label json
+            obj["id"] = new_id
+            with open(lab_path, "w", encoding="utf-8") as f:
+                json.dump(obj, f, ensure_ascii=False)
+            lab_path.replace(out_root / "labels" / f"{new_id}.json")
+
+    # remove part_* dirs (including any empty subfolders)
+    for part in parts:
+        shutil.rmtree(part)
+
+    return out_root

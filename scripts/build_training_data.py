@@ -5,42 +5,58 @@ from hedge_seg.embeddings_and_pack import (
     save_DINOv3_embeddings,
 )
 from hedge_seg.label_postprocess import process_labels_for_dir
-from hedge_seg.training_data import generate_dataset
+from hedge_seg.training_data import generate_dataset_mp, merge_parts
 
 # ----------------------------
 # Training data generation
 # ----------------------------
-label_mode = "polylines"
-n_pos = 10  # 300_000
-res = 256
+n_pos = 30  # 300_000
+n_proc = 10  # or min(10, os.cpu_count())
+size_px = 256
 dir_name = "test_mini2"  # f"test_{res}"
+out_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
 shp_path = Path(
     "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
 )
 tif_path = Path(
     "/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
 )
-out_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
-image_dir = out_dir / "images"
-embed_dir = out_dir / "embeddings"
-embed_dir.mkdir(parents=True, exist_ok=True)
+seed = 123
+max_tries = 200
+n_neg = 0
+label_mode = "polylines"
+use_osm = False
 
+out_dir.mkdir(parents=True, exist_ok=True)
 
 print(f"Generating dataset with {n_pos} positive samples...")
-generate_dataset(
-    shp_path=shp_path,
-    tif_path=tif_path,
-    out_dir=out_dir,
-    n_pos=n_pos,
-    n_neg=0,
-    size_px=res,
-    label_mode=label_mode,
-    seed=123,
-    max_tries_per_sample=200,
-    use_osm=False,
+# generate_dataset(
+#     shp_path=shp_path,
+#     tif_path=tif_path,
+#     out_dir=out_dir,
+#     n_pos=n_pos,
+#     n_neg=0,
+#     size_px=size_px,
+#     seed=seed,
+# )
+generate_dataset_mp(
+    n_pos,
+    n_neg,
+    n_proc,
+    shp_path,
+    tif_path,
+    out_dir,
+    size_px,
+    seed,
+    max_tries,
+    label_mode,
+    use_osm,
 )
 
+print(f"Dataset parts generated in: {out_dir}. Merging parts...")
+merged_dir = merge_parts(out_dir)
 
+# """
 # ----------------------------
 # Process labels (resample polylines, get bboxes)
 # ----------------------------
@@ -83,6 +99,7 @@ pack_embeddings_polylines_npz(
     labels_dir=main_dir / "labels_processed",
     output_dir=main_dir / "embs_polylines",
 )
+# """
 
 """
 from pathlib import Path
