@@ -8,8 +8,4 @@ In 256x256 image the max number of polylines are 441 and per polyline we take 20
 
 ## Scripts
 
-
-- `generate_training_data.py`: image, map, labels, embeddings.
-- `process_labels.py`: to make resample equidistant points on each polyline.
-- `format_utils.py`: save embeddings and polylines
-- `train_neg_pos_classifier.py`: classifier to identify negative from positive images
+`build_training_data.py`: create images and labels (`training_data`), postprocess labels (`label_postprocess`), compute embeddings and Combine embeddings with (post-processed) labels (`embeddings_and_pack`).

@@ -13,7 +13,7 @@ from torch.utils import tensorboard
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from hedge_seg.trainin_utils import set_seed
+from hedge_seg.training_utils import set_seed
 
 # -------------------------
 # Utilities: boxes for optional GIoU-from-polyline

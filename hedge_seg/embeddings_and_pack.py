@@ -1,7 +1,84 @@
+"""
+Embedding extraction and final dataset packing.
+
+Embedding extraction
+  - Compute embeddings for each training image
+  - Save embeddings to disk (per-image or sharded) so this step can run on a cluster
+
+Packing
+  - Combine embeddings with (post-processed) labels
+"""
+
 import json
 from pathlib import Path
 
 import numpy as np
+from transformers import pipeline
+from transformers.image_utils import load_image
+
+
+def save_DINOv3_embeddings_sequential(image_dir, embed_dir):
+    feature_extractor = pipeline(
+        model="facebook/dinov3-vitl16-pretrain-lvd1689m",
+        task="image-feature-extraction",
+    )
+
+    def save_DINOv3_embeddings_per_image(image_path, embed_dir):
+        image = load_image(str(image_path))
+        features = feature_extractor(image)
+        features = np.asarray(features, dtype=np.float32)  # (1, 201, 1024)
+        features = features.squeeze(0)  # (201, 1024)
+        #  1 class token + 4 register tokens + 196 patch tokens
+
+        save_file = embed_dir / f"{image_path.stem}.npz"
+        np.savez(save_file, **{"feat": features[5:]})  # *.npz
+
+    # Save embeddings for each image
+    for image_path in Path(image_dir).glob("*.png"):
+        save_DINOv3_embeddings_per_image(image_path, embed_dir)
+
+
+def save_DINOv3_embeddings(image_dir, embed_dir, batch_size=32):
+    feature_extractor = pipeline(
+        model="facebook/dinov3-vitl16-pretrain-lvd1689m",
+        task="image-feature-extraction",
+    )
+
+    paths = image_dir.glob("*.png")
+    batch_paths = [str(p) for p in paths]
+
+    def run_batch_and_save(batch_paths, batch_files):
+        # feats_list is a list of length N, each like tensor (1, 201, 1024)
+        import time
+
+        t0 = time.time()
+        feats_list = feature_extractor(
+            batch_paths, batch_size=batch_size, return_tensors=True
+        )
+        print("done feature", len(batch_paths), "in", time.time() - t0, "seconds")
+        t0 = time.time()
+        for fp, f in zip(batch_files, feats_list):
+            features = np.asarray(f, dtype=np.float32).squeeze(0)  # (201, 1024)
+            save_file = embed_dir / f"{fp.stem}.npz"
+            # drop class + 4 register tokens
+            np.savez(save_file, feat=features[5:])  # np.savez_compressed much slower
+        print("done saving", len(batch_paths), "in", time.time() - t0, "seconds")
+
+    batch_paths = []
+    batch_files = []
+
+    for p in image_dir.glob("*.png"):
+        batch_files.append(p)
+        batch_paths.append(str(p))
+
+        if len(batch_paths) == batch_size:
+            run_batch_and_save(batch_paths, batch_files)
+            batch_paths.clear()
+            batch_files.clear()
+
+    # flush remainder
+    if batch_paths:
+        run_batch_and_save(batch_paths, batch_files)
 
 
 def pack_embeddings_bbs_npz(
@@ -140,12 +217,3 @@ def pack_embeddings_polylines_npz(
         written += 1
 
     print(f"Written: {written}, Skipped: {skipped}, Output: {output_dir}")
-
-
-# dir_name = "test_256"
-# main_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
-# pack_embeddings_polylines_npz(
-#     embeddings_dir=main_dir / "embeddings",
-#     labels_dir=main_dir / "labels_processed",
-#     output_dir=main_dir / "embs_polylines",
-# )

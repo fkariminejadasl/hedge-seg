@@ -1,3 +1,10 @@
+"""
+Training data generation.
+  - Create image chips from source rasters
+  - Create initial labels for each chip (polylines and optionally masks / maps)
+  - Write images and raw label files to disk in a consistent directory structure
+"""
+
 import json
 import math
 import random
@@ -17,8 +24,6 @@ from rasterio.warp import Resampling, reproject
 from rasterio.windows import Window
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
-from transformers import pipeline
-from transformers.image_utils import load_image
 
 # ----------------------------
 # Utils
@@ -496,141 +501,3 @@ def generate_dataset(
             neg_done += 1
 
         print(f"Saved negatives: {neg_done}/{n_neg} (tries={neg_tries})")
-
-
-def save_DINOv3_embeddings_sequential(image_dir, embed_dir):
-    feature_extractor = pipeline(
-        model="facebook/dinov3-vitl16-pretrain-lvd1689m",
-        task="image-feature-extraction",
-    )
-
-    def save_DINOv3_embeddings_per_image(image_path, embed_dir):
-        image = load_image(str(image_path))
-        features = feature_extractor(image)
-        features = np.asarray(features, dtype=np.float32)  # (1, 201, 1024)
-        features = features.squeeze(0)  # (201, 1024)
-        #  1 class token + 4 register tokens + 196 patch tokens
-
-        save_file = embed_dir / f"{image_path.stem}.npz"
-        np.savez(save_file, **{"feat": features[5:]})  # *.npz
-
-    # Save embeddings for each image
-    for image_path in Path(image_dir).glob("*.png"):
-        save_DINOv3_embeddings_per_image(image_path, embed_dir)
-
-
-def save_DINOv3_embeddings(image_dir, embed_dir, batch_size=32):
-    feature_extractor = pipeline(
-        model="facebook/dinov3-vitl16-pretrain-lvd1689m",
-        task="image-feature-extraction",
-    )
-
-    paths = image_dir.glob("*.png")
-    batch_paths = [str(p) for p in paths]
-
-    def run_batch_and_save(batch_paths, batch_files):
-        # feats_list is a list of length N, each like tensor (1, 201, 1024)
-        import time
-
-        t0 = time.time()
-        feats_list = feature_extractor(
-            batch_paths, batch_size=batch_size, return_tensors=True
-        )
-        print("done feature", len(batch_paths), "in", time.time() - t0, "seconds")
-        t0 = time.time()
-        for fp, f in zip(batch_files, feats_list):
-            features = np.asarray(f, dtype=np.float32).squeeze(0)  # (201, 1024)
-            save_file = embed_dir / f"{fp.stem}.npz"
-            # drop class + 4 register tokens
-            np.savez(save_file, feat=features[5:])  # np.savez_compressed much slower
-        print("done saving", len(batch_paths), "in", time.time() - t0, "seconds")
-
-    batch_paths = []
-    batch_files = []
-
-    for p in image_dir.glob("*.png"):
-        batch_files.append(p)
-        batch_paths.append(str(p))
-
-        if len(batch_paths) == batch_size:
-            run_batch_and_save(batch_paths, batch_files)
-            batch_paths.clear()
-            batch_files.clear()
-
-    # flush remainder
-    if batch_paths:
-        run_batch_and_save(batch_paths, batch_files)
-
-
-label_mode = "polylines"
-n_pos = 300_000
-res = 256
-dir_name = f"test_{res}"
-shp_path = "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
-tif_path = "/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
-out_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
-image_dir = out_dir / "images"
-embed_dir = out_dir / "embeddings"
-embed_dir.mkdir(parents=True, exist_ok=True)
-
-chip = ChipSpec(
-    size_px=res,
-    band=1,
-    label_mode=label_mode,  # "polylines", "mask", "both"
-    line_width_px=2,
-)
-
-# generate_dataset(
-#     shp_path=shp_path,
-#     tif_path=tif_path,
-#     out_dir=out_dir,
-#     n_pos=n_pos,
-#     n_neg=0,
-#     chip=chip,
-#     seed=123,
-#     max_tries_per_sample=200,
-#     use_osm=False,
-# )
-
-
-# huggingface-cli login # from ~/.cache/huggingface/token
-save_DINOv3_embeddings(image_dir, embed_dir, batch_size=512)
-
-"""
-from pathlib import Path
-import json
-
-folder = Path("/home/fatemeh/Downloads/hedge/results/test_dataset/labels")
-n_lines_all = []
-n_lines_dic = dict()
-for json_path in folder.glob("*.json"):
-    with json_path.open("r") as f:
-        data = json.load(f)
-    n_lines = data.get("n_lines")  # None if missing
-    n_lines_all.append(n_lines)
-    n_lines_dic[json_path.stem] = n_lines
-"""
-
-"""
-# all LineString, point [2, 184], no empty, no invalid, all simple (no self crossing), closed=ring 318 items, 
-gdf = gpd.read_file(shp_path)
-a = [len(gdf.geometry.iloc[i].xy[0]) for i in range(len(gdf))] # [min(a),max(a)]=[2, 184]
-b = dict(Counter(a).most_common()) # from collections import Counter
-plt.bar(list(b.keys()), list(b.values()));plt.xlabel("n_points");plt.ylabel("n_polylines") # or [22:30]
-idxs = np.where(np.asarray(a)==max(a))[0].tolist() # 62070, 62087, 62092 # 13307 min 2 pts
-gdf.iloc[62070].geometry.bounds
-gdf.iloc[idxs].geometry.is_closed # closed, simple, ring (closed+simple), valid, empty
-a = [gdf.iloc[i].geometry.is_closed for i in range(len(gdf))]
-idxs = np.where(np.asarray(a)==True)[0].tolist()
-# 51399  388967 # pos_000000
-# 143904.612, 529319.225 # max
-# 27587.828  369991.498 # min
-folder = Path("/home/fatemeh/Downloads/hedge/results/test_dataset/labels")
-n_lines_by_file = {}
-for p in folder.glob("pos_*.json"):
-    with p.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    n_lines_by_file[p.name] = data.get("n_lines")
-max_file = max(n_lines_by_file, key=n_lines_by_file.get) # pos_000092.json, 423 polylines
-max_value = n_lines_by_file[max_file]
-"""
