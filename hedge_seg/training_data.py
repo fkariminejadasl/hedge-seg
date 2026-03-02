@@ -3,6 +3,7 @@ Training data generation.
   - Create image chips from source rasters
   - Create initial labels for each chip (polylines and optionally masks / maps)
   - Write images and raw label files to disk in a consistent directory structure
+  - Optional output upsampling (image, mask, polylines, osm) to out_size_px
 """
 
 import json
@@ -22,6 +23,7 @@ import rasterio
 from affine import Affine
 from pyproj import Transformer
 from rasterio.features import rasterize
+from rasterio.transform import from_bounds
 from rasterio.warp import Resampling, reproject
 from rasterio.windows import Window
 from rasterio.windows import bounds as win_bounds
@@ -95,8 +97,6 @@ def window_fits(src: rasterio.io.DatasetReader, win: Window) -> bool:
 def window_bounds(
     src: rasterio.io.DatasetReader, win: Window
 ) -> Tuple[float, float, float, float]:
-    # rasterio.windows.bounds expects window and transform
-
     return win_bounds(win, transform=src.transform)
 
 
@@ -128,6 +128,46 @@ def read_chip(
 
     img8 = float_to_uint8(arr)
     return img8, src.window_transform(win)
+
+
+def resize_outputs(
+    img8: np.ndarray,
+    polylines_px: List[List[List[int]]],
+    mask: Optional[np.ndarray],
+    *,
+    out_size_px: int,
+    img_interp: int = cv2.INTER_CUBIC,
+) -> Tuple[np.ndarray, List[List[List[int]]], Optional[np.ndarray], float]:
+    """
+    Resize image/mask and scale polyline pixel coordinates to out_size_px.
+    Returns (img_out, polylines_out, mask_out, scale).
+    """
+    in_h, in_w = img8.shape[:2]
+    if in_h != in_w:
+        raise ValueError(f"Expected square chip, got {img8.shape}.")
+    in_size = int(in_h)
+
+    if out_size_px == in_size:
+        return img8, polylines_px, mask, 1.0
+
+    scale = float(out_size_px) / float(in_size)
+
+    img_out = cv2.resize(img8, (out_size_px, out_size_px), interpolation=img_interp)
+
+    def scale_pt(pt: List[int]) -> List[int]:
+        return [int(round(pt[0] * scale)), int(round(pt[1] * scale))]
+
+    polylines_out: List[List[List[int]]] = []
+    for poly in polylines_px:
+        polylines_out.append([scale_pt(p) for p in poly])
+
+    mask_out = None
+    if mask is not None:
+        mask_out = cv2.resize(
+            mask, (out_size_px, out_size_px), interpolation=cv2.INTER_NEAREST
+        )
+
+    return img_out, polylines_out, mask_out, scale
 
 
 # ----------------------------
@@ -230,10 +270,9 @@ def save_osm_chip(
             src_crs="EPSG:3857",
             dst_transform=dst_transform,
             dst_crs=dst_crs,
-            resampling=Resampling.nearest,  # keep as-is for now
+            resampling=Resampling.nearest,
         )
 
-    # contextily returns RGB; convert to BGR for cv2
     img_bgr = cv2.cvtColor(dst, cv2.COLOR_RGB2BGR)
 
     osm_path = paths.osm / f"{sample_id}.png"
@@ -301,8 +340,6 @@ def make_mask_label(
     if res_m is None:
         res_m = (1.0, 1.0)
 
-    # buffer distance in world units (meters) so mask has roughly line_width_px thickness
-    # use max(res) so thickness is not too thin
     buf_dist = (line_width_px * max(res_m)) / 2.0
 
     shapes = []
@@ -368,6 +405,7 @@ def generate_dataset(
     use_osm: bool = False,
     # Chip parameters
     size_px: int = 256,
+    out_size_px: Optional[int] = None,  # if set, outputs are resized to this size
     label_mode: str = "polylines",  # "polylines", "mask", "both"
     band: int = 1,
     line_width_px: int = 2,
@@ -403,11 +441,16 @@ def generate_dataset(
         to_3857 = Transformer.from_crs(src.crs, "EPSG:3857", always_xy=True)
         to_wgs84 = Transformer.from_crs(src.crs, "EPSG:4326", always_xy=True)
 
-        # Build spatial index once
         sindex = gdf.sindex
 
-        size = chip.size_px
-        half = size // 2
+        in_size = chip.size_px
+        out_size = int(out_size_px) if out_size_px is not None else in_size
+        if out_size <= 0:
+            raise ValueError("out_size_px must be positive.")
+        if in_size <= 0:
+            raise ValueError("size_px must be positive.")
+
+        half = in_size // 2
 
         # ----------------------------
         # POSITIVES
@@ -418,7 +461,6 @@ def generate_dataset(
         while pos_done < n_pos and pos_tries < n_pos * max_tries_per_sample:
             pos_tries += 1
 
-            # pick random hedge
             idx = random.randrange(len(gdf))
             geom = gdf.geometry.iloc[idx]
             if geom.geom_type == "MultiLineString":
@@ -426,7 +468,7 @@ def generate_dataset(
 
             x, y = random_point_on_line(geom)
             row, col = src.index(x, y)
-            win = window_from_center(row, col, size)
+            win = window_from_center(row, col, in_size)
 
             if not window_fits(src, win):
                 continue
@@ -442,7 +484,6 @@ def generate_dataset(
 
             hit = lines_in_bbox(gdf, sindex, bbox_geom)
             if hit.empty:
-                # very rare if center is on a line, but can happen if geometry is tiny or indexing odd
                 continue
 
             polylines = []
@@ -456,31 +497,42 @@ def generate_dataset(
                     hit,
                     bbox_geom,
                     w_transform,
-                    out_shape=(size, size),
+                    out_shape=(in_size, in_size),
                     line_width_px=chip.line_width_px,
                     res_m=src.res,
                 )
+
+            # Resize outputs if requested
+            img_out, polylines_out, mask_out, scale = resize_outputs(
+                img8, polylines, mask, out_size_px=out_size
+            )
+
+            # Build a transform for the output grid based on the same world bbox
+            # This is what we use for OSM reprojection at the new size
+            out_transform = from_bounds(minx, miny, maxx, maxy, out_size, out_size)
 
             sample_id = f"pos_{pos_done:06d}"
             label_obj = {
                 "id": sample_id,
                 "type": "positive",
-                "chip_size_px": size,
+                "chip_size_px": out_size,
+                "base_chip_size_px": in_size,
+                "resize_scale": scale,
                 "raster_band": chip.band,
                 "bbox_world": [minx, miny, maxx, maxy],
                 "n_lines": len(hit),
-                "polylines_px": polylines,
+                "polylines_px": polylines_out,
             }
 
-            save_chip(paths, sample_id, img8, label_obj, mask)
+            save_chip(paths, sample_id, img_out, label_obj, mask_out)
 
             if use_osm:
                 save_osm_chip(
                     paths=paths,
                     sample_id=sample_id,
                     bbox_world=(minx, miny, maxx, maxy),
-                    size_px=size,
-                    dst_transform=w_transform,
+                    size_px=out_size,
+                    dst_transform=out_transform,
                     dst_crs=src.crs,
                     to_3857=to_3857,
                     to_wgs84=to_wgs84,
@@ -496,13 +548,12 @@ def generate_dataset(
         neg_done = 0
         neg_tries = 0
 
-        # sample centers directly in pixel space, so the window always fits
         while neg_done < n_neg and neg_tries < n_neg * max_tries_per_sample * 5:
             neg_tries += 1
 
             row = random.randint(half, src.height - half - 1)
             col = random.randint(half, src.width - half - 1)
-            win = window_from_center(row, col, size)
+            win = window_from_center(row, col, in_size)
 
             img8, w_transform = read_chip(
                 src, win, band=chip.band, max_nodata_frac=chip.max_nodata_frac
@@ -520,28 +571,35 @@ def generate_dataset(
             polylines = []
             mask = None
             if chip.label_mode in ("mask", "both"):
-                mask = np.zeros((size, size), dtype=np.uint8)
+                mask = np.zeros((in_size, in_size), dtype=np.uint8)
+
+            img_out, polylines_out, mask_out, scale = resize_outputs(
+                img8, polylines, mask, out_size_px=out_size
+            )
+            out_transform = from_bounds(minx, miny, maxx, maxy, out_size, out_size)
 
             sample_id = f"neg_{neg_done:06d}"
             label_obj = {
                 "id": sample_id,
                 "type": "negative",
-                "chip_size_px": size,
+                "chip_size_px": out_size,
+                "base_chip_size_px": in_size,
+                "resize_scale": scale,
                 "raster_band": chip.band,
                 "bbox_world": [minx, miny, maxx, maxy],
                 "n_lines": 0,
-                "polylines_px": polylines,
+                "polylines_px": polylines_out,
             }
 
-            save_chip(paths, sample_id, img8, label_obj, mask)
+            save_chip(paths, sample_id, img_out, label_obj, mask_out)
 
             if use_osm:
                 save_osm_chip(
                     paths=paths,
                     sample_id=sample_id,
                     bbox_world=(minx, miny, maxx, maxy),
-                    size_px=size,
-                    dst_transform=w_transform,
+                    size_px=out_size,
+                    dst_transform=out_transform,
                     dst_crs=src.crs,
                     to_3857=to_3857,
                     to_wgs84=to_wgs84,
@@ -560,15 +618,13 @@ def gererate_dataset_worker(
     n_pos_part: int,
     n_neg_part: int,
     size_px: int,
+    out_size_px: Optional[int],
     base_seed: int,
     label_mode: str,
     max_tries: int,
     use_osm: bool,
 ):
-    # Separate output per process to avoid filename collisions
     out_dir = out_root / f"part_{part_id:02d}"
-
-    # Different seed per process (still reproducible overall)
     seed = base_seed + part_id
 
     generate_dataset(
@@ -578,6 +634,7 @@ def gererate_dataset_worker(
         n_pos=n_pos_part,
         n_neg=n_neg_part,
         size_px=size_px,
+        out_size_px=out_size_px,
         seed=seed,
         max_tries_per_sample=max_tries,
         label_mode=label_mode,
@@ -593,15 +650,15 @@ def generate_dataset_mp(
     tif_path,
     out_dir,
     size_px,
+    out_size_px,
     seed,
     max_tries,
     label_mode,
     use_osm,
 ):
     """
-    Multiprocess wrapper around generate_dataset. Splits the total number of positives/negatives across processes
+    Multiprocess wrapper around generate_dataset. Splits the total number of positives/negatives across processes.
     """
-    # Split totals across processes. This distributes the remainder nicely
     pos_counts = [n_pos_total // n_proc] * n_proc
     for i in range(n_pos_total % n_proc):
         pos_counts[i] += 1
@@ -623,6 +680,7 @@ def generate_dataset_mp(
                 pos_counts[part_id],
                 neg_counts[part_id],
                 size_px,
+                out_size_px,
                 seed,
                 label_mode,
                 max_tries,

@@ -13,7 +13,7 @@ from hedge_seg.training_data import generate_dataset_mp, merge_parts
 n_pos = 30  # 300_000
 n_proc = 10  # or min(10, os.cpu_count())
 size_px = 256
-dir_name = "test_mini2"  # f"test_{res}"
+dir_name = "test_mini3"  # f"test_{res}"
 out_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
 shp_path = Path(
     "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
@@ -30,14 +30,18 @@ use_osm = False
 out_dir.mkdir(parents=True, exist_ok=True)
 
 print(f"Generating dataset with {n_pos} positive samples...")
+# from hedge_seg.training_data import generate_dataset
 # generate_dataset(
 #     shp_path=shp_path,
 #     tif_path=tif_path,
 #     out_dir=out_dir,
 #     n_pos=n_pos,
 #     n_neg=0,
-#     size_px=size_px,
+#     size_px=256,
+#     out_size_px=None, # 256
 #     seed=seed,
+#     label_mode=label_mode,
+#     use_osm=True,
 # )
 generate_dataset_mp(
     n_pos,
@@ -47,6 +51,7 @@ generate_dataset_mp(
     tif_path,
     out_dir,
     size_px,
+    2 * size_px,  # out_size_px
     seed,
     max_tries,
     label_mode,
