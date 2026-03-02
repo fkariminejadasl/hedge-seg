@@ -24,6 +24,7 @@ from pyproj import Transformer
 from rasterio.features import rasterize
 from rasterio.warp import Resampling, reproject
 from rasterio.windows import Window
+from rasterio.windows import bounds as win_bounds
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 
@@ -95,7 +96,6 @@ def window_bounds(
     src: rasterio.io.DatasetReader, win: Window
 ) -> Tuple[float, float, float, float]:
     # rasterio.windows.bounds expects window and transform
-    from rasterio.windows import bounds as win_bounds
 
     return win_bounds(win, transform=src.transform)
 
@@ -130,17 +130,114 @@ def read_chip(
     return img8, src.window_transform(win)
 
 
-def ensure_dirs(out_dir: Path) -> dict:
+# ----------------------------
+# Output structure and saving
+# ----------------------------
+
+
+@dataclass(frozen=True)
+class OutputPaths:
+    images: Path
+    labels: Path
+    masks: Path
+    osm: Path
+
+
+def ensure_dirs(out_dir: Path) -> OutputPaths:
     out_dir.mkdir(parents=True, exist_ok=True)
-    paths = {
-        "images": out_dir / "images",
-        "labels": out_dir / "labels",
-        "masks": out_dir / "masks",
-        "osm": out_dir / "osm",
-    }
-    for p in paths.values():
+    images = out_dir / "images"
+    labels = out_dir / "labels"
+    masks = out_dir / "masks"
+    osm = out_dir / "osm"
+    for p in (images, labels, masks, osm):
         p.mkdir(parents=True, exist_ok=True)
-    return paths
+    return OutputPaths(images=images, labels=labels, masks=masks, osm=osm)
+
+
+def save_chip(
+    paths: OutputPaths,
+    sample_id: str,
+    img8: np.ndarray,
+    label_obj: dict,
+    mask: Optional[np.ndarray],
+) -> None:
+    img_path = paths.images / f"{sample_id}.png"
+    cv2.imwrite(str(img_path), img8)
+
+    lab_path = paths.labels / f"{sample_id}.json"
+    with open(lab_path, "w", encoding="utf-8") as f:
+        json.dump(label_obj, f, ensure_ascii=False)
+
+    if mask is not None:
+        mask_path = paths.masks / f"{sample_id}.png"
+        cv2.imwrite(str(mask_path), mask)
+
+
+def save_osm_chip(
+    *,
+    paths: OutputPaths,
+    sample_id: str,
+    bbox_world: Tuple[float, float, float, float],
+    size_px: int,
+    dst_transform,
+    dst_crs,
+    to_3857: Transformer,
+    to_wgs84: Transformer,
+) -> None:
+    minx, miny, maxx, maxy = bbox_world
+
+    # Request tiles in EPSG:3857
+    minx_m, miny_m = to_3857.transform(minx, miny)
+    maxx_m, maxy_m = to_3857.transform(maxx, maxy)
+
+    # Estimate zoom so OSM pixel size roughly matches your chip size
+    cx, cy = (minx + maxx) * 0.5, (miny + maxy) * 0.5
+    lon, lat = to_wgs84.transform(cx, cy)
+    lat_rad = math.radians(lat)
+
+    meters_per_px = (maxx_m - minx_m) / float(size_px)
+    meters_per_px = max(meters_per_px, 1e-6)
+    z = math.log2((156543.03392804097 * math.cos(lat_rad)) / meters_per_px)
+    zoom = int(np.clip(int(round(z)), 0, 19))
+
+    img, extent = ctx.bounds2img(
+        minx_m,
+        miny_m,
+        maxx_m,
+        maxy_m,
+        zoom=zoom,
+        source=ctx.providers.OpenStreetMap.Mapnik,
+        ll=False,
+    )
+
+    if img.ndim == 3 and img.shape[2] == 4:
+        img = img[:, :, :3]
+
+    # Source georeferencing for the returned mosaic
+    xmin_e, xmax_e, ymin_e, ymax_e = extent
+    H, W = img.shape[0], img.shape[1]
+    src_transform = Affine(
+        (xmax_e - xmin_e) / W, 0.0, xmin_e, 0.0, -(ymax_e - ymin_e) / H, ymax_e
+    )
+
+    # Reproject OSM (EPSG:3857) onto your chip grid (dst_crs, dst_transform)
+    dst = np.zeros((size_px, size_px, 3), dtype=np.uint8)
+    for b in range(3):
+        reproject(
+            source=img[:, :, b],
+            destination=dst[:, :, b],
+            src_transform=src_transform,
+            src_crs="EPSG:3857",
+            dst_transform=dst_transform,
+            dst_crs=dst_crs,
+            resampling=Resampling.nearest,  # keep as-is for now
+        )
+
+    # contextily returns RGB; convert to BGR for cv2
+    img_bgr = cv2.cvtColor(dst, cv2.COLOR_RGB2BGR)
+
+    osm_path = paths.osm / f"{sample_id}.png"
+    cv2.imwrite(str(osm_path), img_bgr)
 
 
 # ----------------------------
@@ -181,7 +278,6 @@ def make_polyline_labels(
             pts = []
             for x, y in zip(xs, ys):
                 px, py = world_to_pixel_in_window(w_transform, x, y)
-                # keep points that are inside the chip bounds
                 pts.append([int(round(px)), int(round(py))])
             if len(pts) >= 2:
                 out.append(pts)
@@ -203,7 +299,6 @@ def make_mask_label(
         return np.zeros(out_shape, dtype=np.uint8)
 
     if res_m is None:
-        # fall back to 1.0 meters if unknown, but in practice we pass src.res
         res_m = (1.0, 1.0)
 
     # buffer distance in world units (meters) so mask has roughly line_width_px thickness
@@ -314,87 +409,6 @@ def generate_dataset(
         size = chip.size_px
         half = size // 2
 
-        def save_one(
-            sample_id: str,
-            img8: np.ndarray,
-            label_obj: dict,
-            mask: Optional[np.ndarray],
-            w_transform,
-        ):
-            img_path = paths["images"] / f"{sample_id}.png"
-            cv2.imwrite(str(img_path), img8)
-
-            lab_path = paths["labels"] / f"{sample_id}.json"
-            with open(lab_path, "w", encoding="utf-8") as f:
-                json.dump(label_obj, f, ensure_ascii=False)
-
-            if mask is not None:
-                mask_path = paths["masks"] / f"{sample_id}.png"
-                cv2.imwrite(str(mask_path), mask)
-
-            if use_osm:
-                save_osm_chip(
-                    sample_id, label_obj["bbox_world"], size, w_transform, src.crs
-                )
-
-        def save_osm_chip(
-            sample_id: str, bbox_world, size_px: int, dst_transform, dst_crs
-        ):
-            minx, miny, maxx, maxy = bbox_world
-
-            # Request tiles in EPSG:3857
-            minx_m, miny_m = to_3857.transform(minx, miny)
-            maxx_m, maxy_m = to_3857.transform(maxx, maxy)
-
-            # Estimate zoom so OSM pixel size roughly matches your chip size
-            cx, cy = (minx + maxx) * 0.5, (miny + maxy) * 0.5
-            lon, lat = to_wgs84.transform(cx, cy)
-            lat_rad = math.radians(lat)
-
-            meters_per_px = (maxx_m - minx_m) / float(size_px)
-            meters_per_px = max(meters_per_px, 1e-6)
-            z = math.log2((156543.03392804097 * math.cos(lat_rad)) / meters_per_px)
-            zoom = int(np.clip(int(round(z)), 0, 19))
-
-            img, extent = ctx.bounds2img(
-                minx_m,
-                miny_m,
-                maxx_m,
-                maxy_m,
-                zoom=zoom,
-                source=ctx.providers.OpenStreetMap.Mapnik,
-                ll=False,
-            )
-
-            if img.ndim == 3 and img.shape[2] == 4:
-                img = img[:, :, :3]
-
-            # Source georeferencing for the returned mosaic
-            xmin_e, xmax_e, ymin_e, ymax_e = extent
-            H, W = img.shape[0], img.shape[1]
-            src_transform = Affine(
-                (xmax_e - xmin_e) / W, 0.0, xmin_e, 0.0, -(ymax_e - ymin_e) / H, ymax_e
-            )
-
-            # Reproject OSM (EPSG:3857) onto your chip grid (dst_crs, dst_transform)
-            dst = np.zeros((size_px, size_px, 3), dtype=np.uint8)
-            for b in range(3):
-                reproject(
-                    source=img[:, :, b],
-                    destination=dst[:, :, b],
-                    src_transform=src_transform,
-                    src_crs="EPSG:3857",
-                    dst_transform=dst_transform,
-                    dst_crs=dst_crs,
-                    resampling=Resampling.nearest,  # use nearest for strict alignment check
-                )
-
-            # contextily returns RGB; convert to BGR for cv2
-            img_bgr = cv2.cvtColor(dst, cv2.COLOR_RGB2BGR)
-
-            osm_path = paths["osm"] / f"{sample_id}.png"
-            cv2.imwrite(str(osm_path), img_bgr)
-
         # ----------------------------
         # POSITIVES
         # ----------------------------
@@ -408,7 +422,6 @@ def generate_dataset(
             idx = random.randrange(len(gdf))
             geom = gdf.geometry.iloc[idx]
             if geom.geom_type == "MultiLineString":
-                # pick a part
                 geom = random.choice(list(geom.geoms))
 
             x, y = random_point_on_line(geom)
@@ -456,9 +469,22 @@ def generate_dataset(
                 "raster_band": chip.band,
                 "bbox_world": [minx, miny, maxx, maxy],
                 "n_lines": len(hit),
-                "polylines_px": polylines,  # list of polylines, each polyline is list of [x,y]
+                "polylines_px": polylines,
             }
-            save_one(sample_id, img8, label_obj, mask, w_transform)
+
+            save_chip(paths, sample_id, img8, label_obj, mask)
+
+            if use_osm:
+                save_osm_chip(
+                    paths=paths,
+                    sample_id=sample_id,
+                    bbox_world=(minx, miny, maxx, maxy),
+                    size_px=size,
+                    dst_transform=w_transform,
+                    dst_crs=src.crs,
+                    to_3857=to_3857,
+                    to_wgs84=to_wgs84,
+                )
 
             pos_done += 1
 
@@ -506,7 +532,20 @@ def generate_dataset(
                 "n_lines": 0,
                 "polylines_px": polylines,
             }
-            save_one(sample_id, img8, label_obj, mask, w_transform)
+
+            save_chip(paths, sample_id, img8, label_obj, mask)
+
+            if use_osm:
+                save_osm_chip(
+                    paths=paths,
+                    sample_id=sample_id,
+                    bbox_world=(minx, miny, maxx, maxy),
+                    size_px=size,
+                    dst_transform=w_transform,
+                    dst_crs=src.crs,
+                    to_3857=to_3857,
+                    to_wgs84=to_wgs84,
+                )
 
             neg_done += 1
 
@@ -617,7 +656,6 @@ def merge_parts(out_root: Path) -> Path:
                 new_id = f"neg_{neg_i:06d}"
                 neg_i += 1
 
-            # move image/mask/osm first (optional ordering)
             stem = lab_path.stem
 
             src_img = part / "images" / f"{stem}.png"
@@ -632,13 +670,11 @@ def merge_parts(out_root: Path) -> Path:
             if src_osm.exists():
                 src_osm.replace(out_root / "osm" / f"{new_id}.png")
 
-            # rewrite + move label json
             obj["id"] = new_id
             with open(lab_path, "w", encoding="utf-8") as f:
                 json.dump(obj, f, ensure_ascii=False)
             lab_path.replace(out_root / "labels" / f"{new_id}.json")
 
-    # remove part_* dirs (including any empty subfolders)
     for part in parts:
         shutil.rmtree(part)
 
