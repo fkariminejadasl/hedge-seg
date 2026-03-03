@@ -1,5 +1,8 @@
+import json
+
 import cv2
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.patches import Rectangle
 
 
@@ -20,6 +23,27 @@ def draw_rectangle_on_image(image_path, xmin, ymin, xmax, ymax):
     return ax
 
 
+def draw_polylines_on_image(image_path, json_path):
+    img_bgr = cv2.imread(str(image_path))
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    polylines = json.load(open(json_path))["polylines_px"]
+
+    fig, ax = plt.subplots()
+    ax.imshow(img_rgb)
+    for i in polylines:
+        i = np.array(i)
+        ax.plot(i[:, 0], i[:, 1])
+    plt.show(block=False)
+
+
+"""
+num = 9520 # 1400
+image_path = Path(f"/home/fatemeh/Downloads/hedge/results/test_mini3/images/pos_{num:06d}.png")
+json_path = Path(f"/home/fatemeh/Downloads/hedge/results/test_mini3/labels/pos_{num:06d}.json")
+draw_polylines_on_image(image_path, json_path)
+print("Done")
+"""
+
 """
 from pathlib import Path
 import numpy as np
@@ -31,19 +55,4 @@ image_path = Path(
 ax = draw_rectangle_on_image(image_path, xmin, ymin, xmax, ymax)
 ax.plot(a[:, 0], a[:, 1], "*r")
 plt.show(block=False)
-
-a = [
-    [[106, 99], [104, 104], [102, 106], [119, 108], [128, 109]],
-    [[110, 99], [106, 99]],
-    [[106, 99], [108, 95]],
-    [[69, 58], [69, 58], [69, 58], [69, 58], [66, 63], [64, 65], [49, 50]],
-    [[38, 34], [38, 34], [35, 36], [49, 49]],
-]
-img_bgr = cv2.imread(image_path)
-img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-fig, ax = plt.subplots()
-ax.imshow(img_rgb)
-for i in a:
-    i = np.array(i)
-    ax.plot(i[:, 0], i[:, 1])
 """
