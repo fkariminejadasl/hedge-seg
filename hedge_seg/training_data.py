@@ -194,6 +194,27 @@ def ensure_dirs(out_dir: Path) -> OutputPaths:
     return OutputPaths(images=images, labels=labels, masks=masks, osm=osm)
 
 
+def next_index(out_dir: Path, prefix: str) -> int:
+    """
+    Returns the next integer index for files like '{prefix}_000123.json' in out_dir/labels.
+    If none exist, returns 0.
+    """
+    labels_dir = out_dir / "labels"
+    if not labels_dir.exists():
+        return 0
+
+    best = -1
+    for p in labels_dir.glob(f"{prefix}_*.json"):
+        stem = p.stem  # e.g. "pos_000123"
+        try:
+            n = int(stem.split("_")[-1])
+            if n > best:
+                best = n
+        except ValueError:
+            continue
+    return best + 1
+
+
 def save_chip(
     paths: OutputPaths,
     sample_id: str,
@@ -417,10 +438,18 @@ def generate_dataset(
         line_width_px=line_width_px,
     )
 
-    random.seed(seed)
-    np.random.seed(seed)
-
     paths = ensure_dirs(out_dir)
+
+    # Append mode: continue numbering from what already exists on disk (in this out_dir).
+    pos_base = next_index(out_dir, "pos")
+    neg_base = next_index(out_dir, "neg")
+
+    # Make appended runs generate different samples while staying deterministic.
+    # NumPy requires a 32-bit unsigned seed.
+    run_seed = (int(seed) + pos_base * 1315423911 + neg_base * 2654435761) % (2**32)
+
+    random.seed(run_seed)
+    np.random.seed(run_seed)
 
     gdf = gpd.read_file(shp_path)
     if gdf.crs is None:
@@ -508,10 +537,9 @@ def generate_dataset(
             )
 
             # Build a transform for the output grid based on the same world bbox
-            # This is what we use for OSM reprojection at the new size
             out_transform = from_bounds(minx, miny, maxx, maxy, out_size, out_size)
 
-            sample_id = f"pos_{pos_done:06d}"
+            sample_id = f"pos_{(pos_base + pos_done):06d}"
             label_obj = {
                 "id": sample_id,
                 "type": "positive",
@@ -578,7 +606,7 @@ def generate_dataset(
             )
             out_transform = from_bounds(minx, miny, maxx, maxy, out_size, out_size)
 
-            sample_id = f"neg_{neg_done:06d}"
+            sample_id = f"neg_{(neg_base + neg_done):06d}"
             label_obj = {
                 "id": sample_id,
                 "type": "negative",
@@ -620,12 +648,15 @@ def gererate_dataset_worker(
     size_px: int,
     out_size_px: Optional[int],
     base_seed: int,
+    seed_salt: int,
     label_mode: str,
     max_tries: int,
     use_osm: bool,
 ):
     out_dir = out_root / f"part_{part_id:02d}"
-    seed = base_seed + part_id
+
+    # Salt makes later runs generate different chips when out_root already has data.
+    seed = (int(base_seed) + int(seed_salt) + int(part_id)) % (2**32)
 
     generate_dataset(
         shp_path=shp_path,
@@ -659,6 +690,13 @@ def generate_dataset_mp(
     """
     Multiprocess wrapper around generate_dataset. Splits the total number of positives/negatives across processes.
     """
+
+    # Salt the RNG stream based on what is already merged in out_dir.
+    # This is necessary for the multiprocess path because each run starts with fresh part_* folders.
+    pos_base = next_index(out_dir, "pos")
+    neg_base = next_index(out_dir, "neg")
+    seed_salt = (pos_base * 1315423911 + neg_base * 2654435761) % (2**32)
+
     pos_counts = [n_pos_total // n_proc] * n_proc
     for i in range(n_pos_total % n_proc):
         pos_counts[i] += 1
@@ -682,6 +720,7 @@ def generate_dataset_mp(
                 size_px,
                 out_size_px,
                 seed,
+                seed_salt,
                 label_mode,
                 max_tries,
                 use_osm,
@@ -699,8 +738,8 @@ def merge_parts(out_root: Path) -> Path:
 
     parts = sorted(p for p in out_root.glob("part_*") if p.is_dir())
 
-    pos_i = 0
-    neg_i = 0
+    pos_i = next_index(out_root, "pos")
+    neg_i = next_index(out_root, "neg")
 
     for part in parts:
         for lab_path in sorted((part / "labels").glob("*.json")):
