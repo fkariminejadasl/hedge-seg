@@ -37,16 +37,13 @@ def draw_polylines_on_image(image_path, json_path):
 
 
 """
+from pathlib import Path
 num = 9520 # 1400
 image_path = Path(f"/home/fatemeh/Downloads/hedge/results/test_mini3/images/pos_{num:06d}.png")
 json_path = Path(f"/home/fatemeh/Downloads/hedge/results/test_mini3/labels/pos_{num:06d}.json")
 draw_polylines_on_image(image_path, json_path)
 print("Done")
-"""
 
-"""
-from pathlib import Path
-import numpy as np
 a = np.array([[106, 99], [104, 104], [102, 106], [119, 108], [128, 109]])
 xmin, ymin, xmax, ymax = 102, 99, 128, 109
 image_path = Path(
