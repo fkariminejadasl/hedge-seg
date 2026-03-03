@@ -25,6 +25,7 @@ dependencies = [
     "opencv-python",
     "tqdm",
     "Pillow",
+    "pytest",
 
     # --- deep-learning
     "torch",
