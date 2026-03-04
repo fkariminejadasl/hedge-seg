@@ -1,3 +1,13 @@
+"""
+End-to-end dataset prep for hedge segmentation:
+
+1) Samples positive training patches (chips) from a hedge polyline shapefile and a LiDAR raster (multiprocessing),
+   then merges the generated dataset parts. This step can be rerun to generate additional data.
+2) Post-processes labels by resampling polylines to a fixed number of points and computing bounding boxes.
+3) Extracts DINOv3 image embeddings for all generated patches (chips).
+4) Packs embeddings together with the processed polylines into NPZ files for downstream training/experiments.
+"""
+
 from pathlib import Path
 
 from hedge_seg.embeddings_and_pack import (
@@ -10,9 +20,10 @@ from hedge_seg.training_data import generate_dataset_mp, merge_parts
 # ----------------------------
 # Training data generation
 # ----------------------------
-n_pos = 30  # 300_000
-n_proc = 10  # or min(10, os.cpu_count())
-size_px = 256
+n_pos = 15_000  # 300_000
+n_proc = 15  # or min(10, os.cpu_count())
+size_px = 64
+out_size_px = 4 * size_px
 dir_name = "test_mini3"  # f"test_{res}"
 out_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
 shp_path = Path(
@@ -51,7 +62,7 @@ generate_dataset_mp(
     tif_path,
     out_dir,
     size_px,
-    2 * size_px,  # out_size_px
+    out_size_px,
     seed,
     max_tries,
     label_mode,
@@ -105,42 +116,3 @@ pack_embeddings_polylines_npz(
     output_dir=main_dir / "embs_polylines",
 )
 # """
-
-"""
-from pathlib import Path
-import json
-
-folder = Path("/home/fatemeh/Downloads/hedge/results/test_dataset/labels")
-n_lines_all = []
-n_lines_dic = dict()
-for json_path in folder.glob("*.json"):
-    with json_path.open("r") as f:
-        data = json.load(f)
-    n_lines = data.get("n_lines")  # None if missing
-    n_lines_all.append(n_lines)
-    n_lines_dic[json_path.stem] = n_lines
-"""
-
-"""
-# all LineString, point [2, 184], no empty, no invalid, all simple (no self crossing), closed=ring 318 items, 
-gdf = gpd.read_file(shp_path)
-a = [len(gdf.geometry.iloc[i].xy[0]) for i in range(len(gdf))] # [min(a),max(a)]=[2, 184]
-b = dict(Counter(a).most_common()) # from collections import Counter
-plt.bar(list(b.keys()), list(b.values()));plt.xlabel("n_points");plt.ylabel("n_polylines") # or [22:30]
-idxs = np.where(np.asarray(a)==max(a))[0].tolist() # 62070, 62087, 62092 # 13307 min 2 pts
-gdf.iloc[62070].geometry.bounds
-gdf.iloc[idxs].geometry.is_closed # closed, simple, ring (closed+simple), valid, empty
-a = [gdf.iloc[i].geometry.is_closed for i in range(len(gdf))]
-idxs = np.where(np.asarray(a)==True)[0].tolist()
-# 51399  388967 # pos_000000
-# 143904.612, 529319.225 # max
-# 27587.828  369991.498 # min
-folder = Path("/home/fatemeh/Downloads/hedge/results/test_dataset/labels")
-n_lines_by_file = {}
-for p in folder.glob("pos_*.json"):
-    with p.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    n_lines_by_file[p.name] = data.get("n_lines")
-max_file = max(n_lines_by_file, key=n_lines_by_file.get) # pos_000092.json, 423 polylines
-max_value = n_lines_by_file[max_file]
-"""
