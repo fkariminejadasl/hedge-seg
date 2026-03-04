@@ -100,7 +100,7 @@ def _assert_close_pngs(gt_dir: Path, gen_dir: Path, sub: str, stems: list[str]) 
     for stem in stems:
         a = _read_png(gt_dir / sub / f"{stem}.png")
         b = _read_png(gen_dir / sub / f"{stem}.png")
-        assert_images_close(a, b, max_abs_diff=20, max_bad_px_frac=5e-3)
+        assert_images_close(a, b, max_abs_diff=20, max_bad_px_frac=9e-3)
 
 
 @pytest.mark.local

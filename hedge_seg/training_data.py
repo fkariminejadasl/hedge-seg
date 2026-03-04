@@ -339,7 +339,10 @@ def make_polyline_labels(
             for x, y in zip(xs, ys):
                 px, py = world_to_pixel_in_window(w_transform, x, y)
                 pts.append([int(round(px)), int(round(py))])
-            if len(pts) >= 2:
+            # rounding error might cause duplicate points.
+            if len(pts) >= 2 and (
+                pts[0] != pts[-1] or len({tuple(p) for p in pts}) > 1
+            ):
                 out.append(pts)
     return out
 
@@ -520,6 +523,8 @@ def generate_dataset(
 
             if chip.label_mode in ("polylines", "both"):
                 polylines = make_polyline_labels(hit, bbox_geom, w_transform)
+            if chip.label_mode in ("polylines", "both") and not polylines:
+                continue
 
             if chip.label_mode in ("mask", "both"):
                 mask = make_mask_label(

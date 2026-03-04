@@ -76,24 +76,21 @@ merged_dir = merge_parts(out_dir)
 # ----------------------------
 # Process labels (resample polylines, get bboxes)
 # ----------------------------
-main_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
-labels_dir = main_dir / "labels"
-out_dir = main_dir / "labels_processed"
-out_dir.mkdir(parents=True, exist_ok=True)
+labels_dir = out_dir / "labels"
+plabels_dir = out_dir / "labels_processed"
+plabels_dir.mkdir(parents=True, exist_ok=True)
 n_points = 20
 
 print(
     f"Processing labels: resampling polylines to {n_points} points, getting bboxes..."
 )
-process_labels_for_dir(labels_dir, out_dir, n_points)
+process_labels_for_dir(labels_dir, plabels_dir, n_points)
 
 
 # ----------------------------
 # Save DINOv3 embeddings
 # ----------------------------
 # huggingface-cli login # from ~/.cache/huggingface/token
-
-out_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
 image_dir = out_dir / "images"
 embed_dir = out_dir / "embeddings"
 embed_dir.mkdir(parents=True, exist_ok=True)
@@ -105,14 +102,12 @@ save_DINOv3_embeddings(image_dir, embed_dir, batch_size=512)
 # ----------------------------
 # Pack embeddings and polylines into npz
 # ----------------------------
-main_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
-
 print(
-    f"Packing embeddings and polylines into npz files in: {main_dir / 'embs_polylines'}..."
+    f"Packing embeddings and polylines into npz files in: {out_dir / 'embs_polylines'}..."
 )
 pack_embeddings_polylines_npz(
-    embeddings_dir=main_dir / "embeddings",
-    labels_dir=main_dir / "labels_processed",
-    output_dir=main_dir / "embs_polylines",
+    embeddings_dir=out_dir / "embeddings",
+    labels_dir=out_dir / "labels_processed",
+    output_dir=out_dir / "embs_polylines",
 )
 # """

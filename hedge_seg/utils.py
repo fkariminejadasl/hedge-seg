@@ -14,12 +14,35 @@ def get_n_polylines_from_json(json_dir):
     return n_lines_dic
 
 
+def get_n_points_stats_in_polylines_from_json(json_dir):
+    min_n_points_dic = dict()
+    max_n_points_dic = dict()
+    for json_path in json_dir.glob("*.json"):
+        with json_path.open("r") as f:
+            data = json.load(f)
+        polylines = data.get("polylines_px")
+        polylines_lengths = []
+        for polyline in polylines:
+            polylines_lengths.append(len(polyline))
+        min_n_points = min(polylines_lengths)  # if polylines_lengths else 0
+        min_n_points_dic[json_path.stem] = min_n_points
+        max_n_points = max(polylines_lengths)
+        max_n_points_dic[json_path.stem] = max_n_points
+    min_points = min(min_n_points_dic.values())
+    max_points = max(max_n_points_dic.values())
+    print(f"Min n_points: {min_points}")
+    print(f"Max n_points: {max_points}")
+    return min_n_points_dic, max_n_points_dic
+
+
 """
 # test_dataset (256), pos_000092, 423 polylines, (128) 180, (64) 81,
 from pathlib import Path
+
 folder = "test_mini3"  # "test_mini3" #"test_256" #"test_dataset"
 json_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{folder}/labels")
 n_lines_dic = get_n_polylines_from_json(json_dir)
+get_n_points_stats_in_polylines_from_json(json_dir)
 print("Done")
 """
 
