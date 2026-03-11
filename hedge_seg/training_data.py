@@ -325,6 +325,7 @@ def make_polyline_labels(
     lines_gdf: gpd.GeoDataFrame,
     bbox_geom: BaseGeometry,
     w_transform,
+    chip_size: int,
 ) -> List[List[List[int]]]:
     """
     Returns list of polylines; each polyline is list of [x,y] integer pixel coords in the chip.
@@ -338,8 +339,9 @@ def make_polyline_labels(
             pts = []
             for x, y in zip(xs, ys):
                 px, py = world_to_pixel_in_window(w_transform, x, y)
-                pts.append([int(round(px)), int(round(py))])
-            # rounding error might cause duplicate points.
+                ix = min(max(int(np.round(px,1)), 0), chip_size - 1)
+                iy = min(max(int(np.round(py,1)), 0), chip_size - 1)
+                pts.append([ix, iy])
             if len(pts) >= 2 and (
                 pts[0] != pts[-1] or len({tuple(p) for p in pts}) > 1
             ):
@@ -522,7 +524,7 @@ def generate_dataset(
             mask = None
 
             if chip.label_mode in ("polylines", "both"):
-                polylines = make_polyline_labels(hit, bbox_geom, w_transform)
+                polylines = make_polyline_labels(hit, bbox_geom, w_transform, in_size)
             if chip.label_mode in ("polylines", "both") and not polylines:
                 continue
 
