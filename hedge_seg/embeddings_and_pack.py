@@ -42,6 +42,12 @@ def save_DINOv3_embeddings(image_dir, embed_dir, batch_size=32):
     feature_extractor = pipeline(
         model="facebook/dinov3-vitl16-pretrain-lvd1689m",
         task="image-feature-extraction",
+        image_processor_kwargs={ # keep the image size, otherwise crop to 224x224
+            # "do_resize": True,
+            # "size": {"height": 256, "width": 256},
+            "do_resize": False,
+            "do_center_crop": False,
+        },
     )
 
     paths = image_dir.glob("*.png")
