@@ -500,8 +500,8 @@ class DetrPolylineEmbDataset(Dataset):
             H, W = d["image_size"].tolist()
 
             if polylines.numel() > 0:
-                polylines[..., 0] = polylines[..., 0] / float(W)
-                polylines[..., 1] = polylines[..., 1] / float(H)
+                polylines[..., 0] = polylines[..., 0] / float(W - 1)
+                polylines[..., 1] = polylines[..., 1] / float(H - 1)
                 polylines = polylines.clamp(0, 1)
 
         target = {"labels": labels, "polylines": polylines, "image_size": image_size}
@@ -667,8 +667,10 @@ def detr_polyline_inference(
 
         # convert to pixel coordinates
         polys_px = polys.clone()
-        polys_px[..., 0] = polys_px[..., 0] * float(W)
-        polys_px[..., 1] = polys_px[..., 1] * float(H)
+        polys_px[..., 0] = polys_px[..., 0] * float(W - 1)
+        polys_px[..., 1] = polys_px[..., 1] * float(H - 1)
+        polys_px[..., 0] = polys_px[..., 0].clamp(0, W - 1)
+        polys_px[..., 1] = polys_px[..., 1].clamp(0, H - 1)
 
         results.append(
             {
@@ -689,17 +691,21 @@ def detr_polyline_inference(
 
 def main():
     cfg = dict(
-        exp="detr_polyline_1",
+        exp="detr_polyline_9",
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/test_mini/embs_polylines"
+            "/home/fatemeh/Downloads/hedge/results/test_256_dino256/embs_polylines"
         ),
         # save_path=Path("/home/fkarimineja/exps/hedge"),
         # embed_dir=Path("/home/fkarimineja/data/hedge/test_256/embs_polylines"),
-        num_points=20,
+        num_points=10,
+        num_polylines=128, # 160
         num_classes=1,
+        # model
+        loss_bbox_giou = 0.0, # 1.0
+        eos_coef=0.2, # .3, .5
         # trining
-        n_epochs=5,  # 500
+        n_epochs=500,  # 500
         batch_size=256,  # 5x256=1280
         num_workers=15,  # 17
         max_lr=3e-4,  # 1e-3
@@ -734,26 +740,26 @@ def main():
     model = DetrPolylineFromEmbeddings(
         in_dim=1024,
         num_classes=cfg.num_classes,
-        num_queries=100,
+        num_queries=cfg.num_polylines,
         d_model=256,
         nhead=8,
         num_encoder_layers=4,
         num_decoder_layers=4,
         dim_feedforward=1024,
         dropout=0.1,
-        grid_size=(14, 14),
+        grid_size=(16, 16),
         num_points=cfg.num_points,
     )
 
     matcher = HungarianMatcherPolyline(
-        MatcherCost(class_cost=1.0, poly_cost=5.0, bbox_giou_cost=1.0)
+        MatcherCost(class_cost=1.0, poly_cost=5.0, bbox_giou_cost=cfg.loss_bbox_giou)
     )
     criterion = DetrPolylineCriterion(
         num_classes=cfg.num_classes,
         matcher=matcher,
-        eos_coef=0.1,
+        eos_coef=cfg.eos_coef,
         loss_poly=5.0,
-        loss_bbox_giou=1.0,
+        loss_bbox_giou=cfg.loss_bbox_giou,
         loss_smooth=0.0,  # set small value like 0.1 for smoother curves
     )
 

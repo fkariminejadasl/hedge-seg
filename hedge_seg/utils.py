@@ -35,13 +35,37 @@ def get_n_points_stats_in_polylines_from_json(json_dir):
     return min_n_points_dic, max_n_points_dic
 
 
+def get_min_polyline_length_from_json(json_dir):
+    min_length_dic = dict()
+    for json_path in json_dir.glob("*.json"):
+        with json_path.open("r") as f:
+            data = json.load(f)
+        polylines = data.get("polylines_px", [])
+
+        lengths = []
+        for polyline in polylines:
+            length = sum(
+                ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                for (x1, y1), (x2, y2) in zip(polyline[:-1], polyline[1:])
+            )
+            lengths.append(length)
+
+        min_length_dic[json_path.stem] = min(lengths) if lengths else None
+
+    # min_length = min(v for v in min_length_dic.values() if v is not None)
+    # min_filename = [n for n, v in min_length_dic.items() if v == min_length]
+    return min_length_dic
+
+
 """
 # test_dataset (256), pos_000092, 423 polylines, (128) 180, (64) 81,
 from pathlib import Path
 
-folder = "test_mini3"  # "test_mini3" #"test_256" #"test_dataset"
+folder = "test_mini6"  # "test_mini5" #"test_256" #"test_dataset"
 json_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{folder}/labels")
+# json_dir = Path(f"/home/fkarimineja/data/hedge/{folder}/labels_processed")
 n_lines_dic = get_n_polylines_from_json(json_dir)
+min_length_dic = get_min_polyline_length_from_json(json_dir)
 get_n_points_stats_in_polylines_from_json(json_dir)
 print("Done")
 """

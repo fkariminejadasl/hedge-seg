@@ -22,11 +22,12 @@ def main():
     # ----------------------------
     # Training data generation
     # ----------------------------
-    n_pos = 10  # 300_000
-    n_proc = 2  # or min(10, os.cpu_count())
-    size_px = 64
-    out_size_px = 4 * size_px
-    dir_name = "test_mini4"  # f"test_{res}"
+    n_pos = 2  # 17_000
+    n_proc = 1  # 17 or min(10, os.cpu_count())
+    size_px = 256
+    out_size_px = None  # 4 * size_px
+    n_points = 10
+    dir_name = "test_mini7"  # f"test_{size_px}_{out_size_px}"
     out_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{dir_name}")
     shp_path = Path(
         "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
@@ -34,12 +35,18 @@ def main():
     tif_path = Path(
         "/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
     )
+    # out_dir = Path(f"/home/fkarimineja/data/hedge/{dir_name}")
+    # shp_path = Path(
+    #     "/home/fkarimineja/data/hedge/shpgtiff/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
+    # )
+    # tif_path = Path(
+    #     "/home/fkarimineja/data/hedge/shpgtiff/ahn4_10m_perc_95_normalized_height.tif"
+    # )
     seed = 123
     max_tries = 200
     n_neg = 0
     label_mode = "polylines"
     use_osm = False
-    n_points = 20
 
     out_dir.mkdir(parents=True, exist_ok=True)
 

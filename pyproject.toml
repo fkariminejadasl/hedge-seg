@@ -66,6 +66,9 @@ notebook = [
 # testing extras
 # pip install .[test]
 test = [
+    "black",
+    "isort",
+    "pyflakes",
     "pytest",
     # "pytest-cov",
 ]
