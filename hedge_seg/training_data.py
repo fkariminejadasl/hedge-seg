@@ -155,7 +155,9 @@ def resize_outputs(
     img_out = cv2.resize(img8, (out_size_px, out_size_px), interpolation=img_interp)
 
     def scale_pt(pt: List[int]) -> List[int]:
-        return [int(round(pt[0] * scale)), int(round(pt[1] * scale))]
+        x = min(max(int(round(pt[0] * scale)), 0), out_size_px - 1)
+        y = min(max(int(round(pt[1] * scale)), 0), out_size_px - 1)
+        return [x, y]
 
     polylines_out: List[List[List[int]]] = []
     for poly in polylines_px:
