@@ -321,31 +321,67 @@ def lines_in_bbox(
     return hit
 
 
+def clip_px_point(px: float, py: float, chip_size: int) -> list[int]:
+    ix = min(max(int(np.floor(px)), 0), chip_size - 1)
+    iy = min(max(int(np.floor(py)), 0), chip_size - 1)
+    return [ix, iy]
+
+
+def dedupe_consecutive_points(pts: list[list[int]]) -> list[list[int]]:
+    if not pts:
+        return pts
+    out = [pts[0]]
+    for p in pts[1:]:
+        if p != out[-1]:
+            out.append(p)
+    return out
+
+
+def polyline_length_px(pts: list[list[int]]) -> float:
+    if len(pts) < 2:
+        return 0.0
+    total = 0.0
+    for a, b in zip(pts[:-1], pts[1:]):
+        total += math.hypot(b[0] - a[0], b[1] - a[1])
+    return total
+
+
 def make_polyline_labels(
     lines_gdf: gpd.GeoDataFrame,
     bbox_geom: BaseGeometry,
     w_transform,
     chip_size: int,
+    min_len_px: float | None = None,
 ) -> List[List[List[int]]]:
     """
-    Returns list of polylines; each polyline is list of [x,y] integer pixel coords in the chip.
+    Returns list of polylines; each polyline is list of [x,y] pixel coords in the chip.
     """
+    if min_len_px is None:
+        min_len_px = max(2.0, 10.0 * (chip_size / 256.0))
+
     out: List[List[List[int]]] = []
+
     for geom in lines_gdf.geometry:
         inter = geom.intersection(bbox_geom)
         parts = geom_to_lines(inter)
+
         for ls in parts:
             xs, ys = ls.xy
             pts = []
             for x, y in zip(xs, ys):
                 px, py = world_to_pixel_in_window(w_transform, x, y)
-                ix = min(max(int(np.round(px,1)), 0), chip_size - 1)
-                iy = min(max(int(np.round(py,1)), 0), chip_size - 1)
-                pts.append([ix, iy])
-            if len(pts) >= 2 and (
-                pts[0] != pts[-1] or len({tuple(p) for p in pts}) > 1
-            ):
-                out.append(pts)
+                pts.append(clip_px_point(px, py, chip_size))
+
+            pts = dedupe_consecutive_points(pts)
+
+            if len(pts) < 2:
+                continue
+
+            if polyline_length_px(pts) < min_len_px:
+                continue
+
+            out.append(pts)
+
     return out
 
 
@@ -524,7 +560,13 @@ def generate_dataset(
             mask = None
 
             if chip.label_mode in ("polylines", "both"):
-                polylines = make_polyline_labels(hit, bbox_geom, w_transform, in_size)
+                polylines = make_polyline_labels(
+                    hit,
+                    bbox_geom,
+                    w_transform,
+                    chip_size=in_size,
+                    min_len_px=max(2.0, 10.0 * (in_size / 256.0)),
+                )
             if chip.label_mode in ("polylines", "both") and not polylines:
                 continue
 
