@@ -160,7 +160,7 @@ class DetrPolylineFromEmbeddings(nn.Module):
         num_decoder_layers: int = 4,
         dim_feedforward: int = 1024,
         dropout: float = 0.1,
-        grid_size: Tuple[int, int] = (14, 14),
+        grid_size: Tuple[int, int] = (16, 16),
         num_points: int = 20,
     ):
         super().__init__()
@@ -691,25 +691,27 @@ def detr_polyline_inference(
 
 def main():
     cfg = dict(
-        exp="detr_polyline_9",
+        exp="detr_polyline_10",
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
             "/home/fatemeh/Downloads/hedge/results/test_256_dino256/embs_polylines"
         ),
         # save_path=Path("/home/fkarimineja/exps/hedge"),
-        # embed_dir=Path("/home/fkarimineja/data/hedge/test_256/embs_polylines"),
-        num_points=10,
-        num_polylines=128, # 160
+        # embed_dir=Path("/home/fkarimineja/data/hedge/test_256_None/embs_polylines"),
+        num_points=20,
+        num_polylines=100,  # 160
         num_classes=1,
+        grid_size=(16, 16),
         # model
-        loss_bbox_giou = 0.0, # 1.0
-        eos_coef=0.2, # .3, .5
+        loss_bbox_giou=1.0,  # 1.0
+        eos_coef=0.1,  # .3, .5
         # trining
-        n_epochs=500,  # 500
-        batch_size=256,  # 5x256=1280
-        num_workers=15,  # 17
+        n_epochs=3000,  # 500
+        batch_size=256,  # 4x256=1024 (dino256), 5x256=1280 (dino224)
+        num_workers=17,  # 17
         max_lr=3e-4,  # 1e-3
         weight_decay=1e-2,  # default 1e-2
+        dropout=0.01,  # default 0.1
         use_tqdm=True,
     )
     cfg = OmegaConf.create(cfg)
@@ -746,8 +748,8 @@ def main():
         num_encoder_layers=4,
         num_decoder_layers=4,
         dim_feedforward=1024,
-        dropout=0.1,
-        grid_size=(16, 16),
+        dropout=cfg.dropout,
+        grid_size=cfg.grid_size,
         num_points=cfg.num_points,
     )
 

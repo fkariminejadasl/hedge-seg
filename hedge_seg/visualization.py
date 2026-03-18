@@ -26,7 +26,10 @@ def draw_rectangle_on_image(image_path, xmin, ymin, xmax, ymax):
 def draw_polylines_on_image(image_path, json_path):
     img_bgr = cv2.imread(str(image_path))
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    polylines = json.load(open(json_path))["polylines_px"]
+    if json_path.suffix == ".json":
+        polylines = json.load(open(json_path))["polylines_px"]
+    if json_path.suffix == ".npz":
+        polylines = np.load(json_path)["polylines"]
 
     fig, ax = plt.subplots()
     ax.imshow(img_rgb)
@@ -40,10 +43,10 @@ def draw_polylines_on_image(image_path, json_path):
 from pathlib import Path
 
 main_path = Path(f"/home/fatemeh/Downloads/hedge/results")
-num = 9520  # 1400
-folder = "test_mini3"  # "test_mini5" #"test_256" #"test_dataset"
+num = 1  # 1400
+folder = "test_256_dino256"  # "test_mini5" #"test_256" #"test_dataset"
 image_path = main_path / f"{folder}/images/pos_{num:06d}.png"
-json_path = main_path / f"{folder}/labels/pos_{num:06d}.json"
+json_path = main_path / f"{folder}/embs_polylines/pos_{num:06d}.npz"
 draw_polylines_on_image(image_path, json_path)
 print("Done")
 

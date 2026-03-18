@@ -61,10 +61,18 @@ def get_min_polyline_length_from_json(json_dir):
 # test_dataset (256), pos_000092, 423 polylines, (128) 180, (64) 81,
 from pathlib import Path
 
-folder = "test_mini6"  # "test_mini5" #"test_256" #"test_dataset"
+folder = "test_mini6"  # "test_256_None"
 json_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{folder}/labels")
 # json_dir = Path(f"/home/fkarimineja/data/hedge/{folder}/labels_processed")
 n_lines_dic = get_n_polylines_from_json(json_dir)
+
+from collections import Counter
+a = Counter(n_lines_dic.values()).most_common()
+f = [(p, p*c) for p, c in a]
+b = [(p, (128-p)*c) for p, c in a if p<=128]
+sum([c for p, c in f]) / sum([c for p, c in b]) # 691006 / 1564050=.44 polylines to non-polylines ratio
+sum([c for p, c in a if p>128]) / sum([c for p, c in a if p<=128]) # 1599 / 15401=.1 images with more than 128 polylines to less than 128 ratio
+
 min_length_dic = get_min_polyline_length_from_json(json_dir)
 get_n_points_stats_in_polylines_from_json(json_dir)
 print("Done")

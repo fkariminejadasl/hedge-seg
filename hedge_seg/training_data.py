@@ -599,7 +599,7 @@ def generate_dataset(
                 "resize_scale": scale,
                 "raster_band": chip.band,
                 "bbox_world": [minx, miny, maxx, maxy],
-                "n_lines": len(hit),
+                "n_lines": len(polylines_out),
                 "polylines_px": polylines_out,
             }
 
