@@ -546,6 +546,7 @@ def train_one_epoch(loader, model, criterion, optimizer, device):
         loss_dict = criterion(outputs, targets)
         loss = loss_dict["loss_total"]
         loss.backward()
+        # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
         optimizer.step()
 
         bs = feats.size(0)
@@ -691,14 +692,14 @@ def detr_polyline_inference(
 
 def main():
     cfg = dict(
-        exp="detr_polyline_10",
+        exp="detr_polyline_11",
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/test_256_dino256/embs_polylines"
+            "/home/fatemeh/Downloads/hedge/results/test_256_None/embs_polylines"
         ),
         # save_path=Path("/home/fkarimineja/exps/hedge"),
         # embed_dir=Path("/home/fkarimineja/data/hedge/test_256_None/embs_polylines"),
-        num_points=20,
+        num_points=10,
         num_polylines=100,  # 160
         num_classes=1,
         grid_size=(16, 16),
@@ -708,10 +709,11 @@ def main():
         # trining
         n_epochs=3000,  # 500
         batch_size=256,  # 4x256=1024 (dino256), 5x256=1280 (dino224)
-        num_workers=17,  # 17
+        num_workers=15,  # 17
         max_lr=3e-4,  # 1e-3
         weight_decay=1e-2,  # default 1e-2
         dropout=0.01,  # default 0.1
+        save_every=1000,
         use_tqdm=True,
     )
     cfg = OmegaConf.create(cfg)
@@ -774,6 +776,9 @@ def main():
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=cfg.max_lr, weight_decay=cfg.weight_decay
     )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=cfg.n_epochs, eta_min=1e-6
+    )
 
     best_val = 1e9
     tb_dir = cfg.save_path / f"tensorboard/{cfg.exp}"
@@ -813,6 +818,12 @@ def main():
                     cfg.save_path / f"best_{cfg.exp}.pt",
                 )
                 print(f"Saved best: {best_val:.4f} at epoch {epoch}")
+            if epoch % cfg.save_every == 0:
+                torch.save(
+                    {"model": model.state_dict(), "epoch": epoch},
+                    cfg.save_path / f"{cfg.exp}_{epoch}.pt",
+                )
+            # scheduler.step()
     torch.save(
         {"model": model.state_dict(), "epoch": epoch},
         cfg.save_path / f"{cfg.exp}.pt",

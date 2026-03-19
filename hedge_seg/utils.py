@@ -1,7 +1,9 @@
 import json
 
+import numpy as np
 
-def get_n_polylines_from_json(json_dir):
+
+def get_n_polylines(json_dir):
     n_lines_dic = dict()
     for json_path in json_dir.glob("*.json"):
         with json_path.open("r") as f:
@@ -14,7 +16,7 @@ def get_n_polylines_from_json(json_dir):
     return n_lines_dic
 
 
-def get_n_points_stats_in_polylines_from_json(json_dir):
+def get_n_points_stats_in_polylines(json_dir):
     min_n_points_dic = dict()
     max_n_points_dic = dict()
     for json_path in json_dir.glob("*.json"):
@@ -35,7 +37,7 @@ def get_n_points_stats_in_polylines_from_json(json_dir):
     return min_n_points_dic, max_n_points_dic
 
 
-def get_min_polyline_length_from_json(json_dir):
+def get_min_polyline_length(json_dir):
     min_length_dic = dict()
     for json_path in json_dir.glob("*.json"):
         with json_path.open("r") as f:
@@ -57,6 +59,22 @@ def get_min_polyline_length_from_json(json_dir):
     return min_length_dic
 
 
+def get_closed_polylines(json_dir):
+    closed_polylines_dic = dict()
+    for json_path in json_dir.glob("*.json"):
+        with json_path.open("r") as f:
+            data = json.load(f)
+        polylines = data.get("polylines_px")
+        closed_polylines = []
+        for polyline in polylines:
+            polyline = np.array(polyline)
+            if np.array_equal(polyline[0], polyline[-1]):
+                closed_polylines.append(polyline[0])
+        if closed_polylines:
+            closed_polylines_dic[json_path.stem] = closed_polylines
+    return closed_polylines_dic
+
+
 """
 # test_dataset (256), pos_000092, 423 polylines, (128) 180, (64) 81,
 from pathlib import Path
@@ -64,17 +82,22 @@ from pathlib import Path
 folder = "test_mini6"  # "test_256_None"
 json_dir = Path(f"/home/fatemeh/Downloads/hedge/results/{folder}/labels")
 # json_dir = Path(f"/home/fkarimineja/data/hedge/{folder}/labels_processed")
-n_lines_dic = get_n_polylines_from_json(json_dir)
+n_lines_dic = get_n_polylines(json_dir)
+closed_polylines_dic = get_closed_polylines(json_dir)
 
 from collections import Counter
-a = Counter(n_lines_dic.values()).most_common()
+a = Counter(n_lines_dic.values()).most_common() # test_256_None
 f = [(p, p*c) for p, c in a]
 b = [(p, (128-p)*c) for p, c in a if p<=128]
 sum([c for p, c in f]) / sum([c for p, c in b]) # 691006 / 1564050=.44 polylines to non-polylines ratio
 sum([c for p, c in a if p>128]) / sum([c for p, c in a if p<=128]) # 1599 / 15401=.1 images with more than 128 polylines to less than 128 ratio
 
-min_length_dic = get_min_polyline_length_from_json(json_dir)
-get_n_points_stats_in_polylines_from_json(json_dir)
+closed_counts = {k: len(v) for k, v in closed_polylines_dic.items()}
+sum(closed_counts.values()) # 4121
+sum(n_lines_dic.values()) # 691006
+
+min_length_dic = get_min_polyline_length(json_dir)
+get_n_points_stats_in_polylines(json_dir)
 print("Done")
 """
 

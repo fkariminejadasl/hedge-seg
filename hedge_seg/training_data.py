@@ -535,6 +535,8 @@ def generate_dataset(
 
             idx = random.randrange(len(gdf))
             geom = gdf.geometry.iloc[idx]
+            # if geom.is_closed: # remove closed polylines
+            #     continue
             if geom.geom_type == "MultiLineString":
                 geom = random.choice(list(geom.geoms))
 
