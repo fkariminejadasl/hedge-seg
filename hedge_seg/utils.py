@@ -86,11 +86,12 @@ n_lines_dic = get_n_polylines(json_dir)
 closed_polylines_dic = get_closed_polylines(json_dir)
 
 from collections import Counter
-a = Counter(n_lines_dic.values()).most_common() # test_256_None
+max_pl = max(n_lines_dic.values()) # 276 # 128 max polylines
+a = Counter(n_lines_dic.values()).most_common()
 f = [(p, p*c) for p, c in a]
-b = [(p, (128-p)*c) for p, c in a if p<=128]
-sum([c for p, c in f]) / sum([c for p, c in b]) # 691006 / 1564050=.44 polylines to non-polylines ratio
-sum([c for p, c in a if p>128]) / sum([c for p, c in a if p<=128]) # 1599 / 15401=.1 images with more than 128 polylines to less than 128 ratio
+b = [(p, (max_pl-p)*c) for p, c in a if p<=max_pl]
+sum([c for p, c in f]) / sum([c for p, c in b]) # 691006, 4000994 = 0.17 (max 276), 691006 / 1564050=.44 (128) polylines to non-polylines ratio
+sum([c for p, c in a if p>max_pl]) / sum([c for p, c in a if p<=max_pl]) # 1599 / 15401=.1 images with more than 128 polylines to less than 128 ratio
 
 closed_counts = {k: len(v) for k, v in closed_polylines_dic.items()}
 sum(closed_counts.values()) # 4121

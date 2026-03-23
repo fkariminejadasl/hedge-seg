@@ -1,17 +1,16 @@
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import OmegaConf
 from scipy.optimize import linear_sum_assignment
-from torch.utils import tensorboard
 from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
 
 from hedge_seg.training_utils import set_seed
 
@@ -160,7 +159,7 @@ class DetrPolylineFromEmbeddings(nn.Module):
         num_decoder_layers: int = 4,
         dim_feedforward: int = 1024,
         dropout: float = 0.1,
-        grid_size: Tuple[int, int] = (16, 16),
+        grid_size: Tuple[int, int] = (14, 14),
         num_points: int = 20,
     ):
         super().__init__()
@@ -500,8 +499,8 @@ class DetrPolylineEmbDataset(Dataset):
             H, W = d["image_size"].tolist()
 
             if polylines.numel() > 0:
-                polylines[..., 0] = polylines[..., 0] / float(W - 1)
-                polylines[..., 1] = polylines[..., 1] / float(H - 1)
+                polylines[..., 0] = polylines[..., 0] / float(W)
+                polylines[..., 1] = polylines[..., 1] / float(H)
                 polylines = polylines.clamp(0, 1)
 
         target = {"labels": labels, "polylines": polylines, "image_size": image_size}
@@ -546,9 +545,6 @@ def train_one_epoch(loader, model, criterion, optimizer, device):
         loss_dict = criterion(outputs, targets)
         loss = loss_dict["loss_total"]
         loss.backward()
-        # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
-        # a = {n:round(p.grad.max().item(),2) for n, p in model.named_parameters()}
-        # {k:v for k, v in a.items() if v == max(a.values())}
         optimizer.step()
 
         bs = feats.size(0)
@@ -562,7 +558,7 @@ def train_one_epoch(loader, model, criterion, optimizer, device):
 
 
 @torch.no_grad()
-def eval_one_epoch(loader, model, criterion, device):
+def eval_one_epoch(feats, targets, model, criterion, device):
     model.eval()
     sums = {
         "loss_ce": 0.0,
@@ -573,19 +569,19 @@ def eval_one_epoch(loader, model, criterion, device):
     }
     n = 0
 
-    for feats, targets in loader:
-        feats = feats.to(device)
-        for t in targets:
-            t["labels"] = t["labels"].to(device)
-            t["polylines"] = t["polylines"].to(device)
+    # for feats, targets in loader:
+    feats = feats.to(device)
+    for t in targets:
+        t["labels"] = t["labels"].to(device)
+        t["polylines"] = t["polylines"].to(device)
 
-        outputs = model(feats)
-        loss_dict = criterion(outputs, targets)
+    outputs = model(feats)
+    loss_dict = criterion(outputs, targets)
 
-        bs = feats.size(0)
-        n += bs
-        for k in sums:
-            sums[k] += float(loss_dict[k].detach().item()) * bs
+    bs = feats.size(0)
+    n += bs
+    for k in sums:
+        sums[k] += float(loss_dict[k].detach().item()) * bs
 
     for k in sums:
         sums[k] /= max(n, 1)
@@ -694,28 +690,28 @@ def detr_polyline_inference(
 
 def main():
     cfg = dict(
-        exp="detr_polyline_11",
+        exp="detr_polyline_9",
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
             "/home/fatemeh/Downloads/hedge/results/test_256_None/embs_polylines"
         ),
+        checkpoint="/home/fatemeh/Downloads/hedge/snellius/best_detr_polyline_5.pt",  # "/home/fatemeh/Downloads/hedge/results/training//best_detr_polyline_9.pt", #"/home/fatemeh/Downloads/hedge/snellius/best_detr_polyline_1.pt"
         # save_path=Path("/home/fkarimineja/exps/hedge"),
-        # embed_dir=Path("/home/fkarimineja/data/hedge/test_256_None/embs_polylines"),
+        # embed_dir=Path("/home/fkarimineja/data/hedge/test_256/embs_polylines"),
         num_points=10,
-        num_polylines=100,  # 276
+        num_polylines=276,  # 160
         num_classes=1,
         grid_size=(16, 16),
         # model
         loss_bbox_giou=1.0,  # 1.0
         eos_coef=0.1,  # .3, .5
         # trining
-        n_epochs=3000,  # 500
-        batch_size=256,  # 4x256=1024 (dino256), 5x256=1280 (dino224)
+        n_epochs=500,  # 500
+        batch_size=256,  # 5x256=1280
         num_workers=15,  # 17
         max_lr=3e-4,  # 1e-3
         weight_decay=1e-2,  # default 1e-2
-        dropout=0.01,  # default 0.1
-        save_every=1000,
+        dropout=0.1,
         use_tqdm=True,
     )
     cfg = OmegaConf.create(cfg)
@@ -728,6 +724,13 @@ def main():
     train_ds, val_ds = torch.utils.data.random_split(dataset, [n_train, n_val])
     print(f"Dataset: total={len(dataset)}, train={len(train_ds)}, val={len(val_ds)}")
 
+    loader = DataLoader(
+        dataset,
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        num_workers=cfg.num_workers,
+        collate_fn=detr_polyline_collate_fn,
+    )
     train_loader = DataLoader(
         train_ds,
         batch_size=cfg.batch_size,
@@ -775,103 +778,75 @@ def main():
     if device.type == "cuda":
         print(f"Using device: {torch.cuda.get_device_properties()}")
 
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=cfg.max_lr, weight_decay=cfg.weight_decay
-    )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=cfg.n_epochs, eta_min=1e-6
-    )
+    model.load_state_dict(torch.load(cfg.checkpoint, map_location=device)["model"])
+    model.eval()
 
-    best_val = 1e9
-    tb_dir = cfg.save_path / f"tensorboard/{cfg.exp}"
-    tb_dir.mkdir(parents=True, exist_ok=True)
-
-    with tensorboard.SummaryWriter(tb_dir) as writer:
-        for epoch in tqdm(range(1, cfg.n_epochs + 1), disable=cfg.use_tqdm):
-            s_time = datetime.now().replace(microsecond=0)
-            print(f"Epoch {epoch:03d}/{cfg.n_epochs} starting at {s_time}")
-
-            train_losses = train_one_epoch(
-                train_loader, model, criterion, optimizer, device
-            )
-            eval_losses = eval_one_epoch(eval_loader, model, criterion, device)
-
-            e_time = datetime.now().replace(microsecond=0)
-            print(
-                f"Epoch {epoch:03d}/{cfg.n_epochs} "
-                f"train_total={train_losses['loss_total']:.4f} "
-                f"(ce={train_losses['loss_ce']:.4f}, poly={train_losses['loss_poly']:.4f}, "
-                f"bbox_giou={train_losses['loss_bbox_giou']:.4f}, smooth={train_losses['loss_smooth']:.4f}) "
-                f"eval_total={eval_losses['loss_total']:.4f} "
-                f"(ce={eval_losses['loss_ce']:.4f}, poly={eval_losses['loss_poly']:.4f}, "
-                f"bbox_giou={eval_losses['loss_bbox_giou']:.4f}, smooth={eval_losses['loss_smooth']:.4f})"
-            )
-            print(
-                f"Epoch {epoch:03d}/{cfg.n_epochs} finished at {e_time} (duration {e_time - s_time})"
-            )
-
-            tb_add_losses(writer, epoch, train_losses, "train")
-            tb_add_losses(writer, epoch, eval_losses, "eval")
-
-            if eval_losses["loss_total"] < best_val:
-                best_val = eval_losses["loss_total"]
-                torch.save(
-                    {"model": model.state_dict(), "epoch": epoch},
-                    cfg.save_path / f"best_{cfg.exp}.pt",
-                )
-                print(f"Saved best: {best_val:.4f} at epoch {epoch}")
-            if epoch % cfg.save_every == 0:
-                torch.save(
-                    {"model": model.state_dict(), "epoch": epoch},
-                    cfg.save_path / f"{cfg.exp}_{epoch}.pt",
-                )
-            # scheduler.step()
-    torch.save(
-        {"model": model.state_dict(), "epoch": epoch},
-        cfg.save_path / f"{cfg.exp}.pt",
-    )
-    print(f"Saved final model: {best_val:.4f} at epoch {epoch}")
-
-
-"""
-    model.load_state_dict(
-        torch.load("/home/fatemeh/Downloads/hedge/snellius/best_detr_polyline_1.pt", map_location=device)["model"]
-    )
     # Example inference on eval set
-    feats, targets = next(iter(eval_loader))
+    feats, targets = next(iter(loader))  #
     image_sizes = [t["image_size"].tolist() for t in targets]
     preds = detr_polyline_inference(
         model=model,
         feats=feats,
         image_sizes=image_sizes,
-        score_thresh=0.9,
-        topk=20,
+        score_thresh=0.0,  # 0.9,
+        topk=11,
         device=device,
     )
+    eval_losses = eval_one_epoch(feats, targets, model, criterion, device)
 
     # preds[0]["polylines_px"] is (M,K,2) in pixel coords
     print(preds[0]["scores"].shape, preds[0]["polylines_px"].shape)
-    import cv2
-    import matplotlib.pyplot as plt
+
     def visualize_polylines(im, polylines):
         plt.figure()
         plt.imshow(im)
         for poly in polylines:
             plt.plot(poly[:, 0], poly[:, 1], "*")
         plt.show(block=False)
+
+    def visualize_per_image(i, score_thresh=0.0, topk=11):
+        inp = dataset.files[i]
+        sample = np.load(inp)
+
+        # feat (1,196|256,1024)
+        feat = torch.tensor(sample["feat"], dtype=torch.float32).unsqueeze(0)
+        image_size = [tuple(sample["image_size"].tolist())]
+
+        preds = detr_polyline_inference(
+            model=model,
+            feats=feat,
+            image_sizes=image_size,
+            score_thresh=score_thresh,
+            topk=len(sample["polylines"]),  # topk,
+            device=device,
+        )  # [M,K,2]
+
+        im = cv2.imread(str(inp.parent.parent / f"images/{inp.stem}.png"))
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+
+        gt_polylines = sample["polylines"]
+        pred_polylines = preds[0]["polylines_px"].numpy()
+
+        print(inp.stem)
+        visualize_polylines(im, pred_polylines)
+        visualize_polylines(im, gt_polylines)
+        return preds
+
     i = 0
-    inp = dataset.files[val_ds.indices[i]]
-    im = cv2.imread(str(inp.parent.parent/f"images/{inp.stem}.png"))
-    polylines = np.load(inp.parent.parent/f"embs_polylines/{inp.stem}.npz")["polylines"]
-    pred_polylines = preds[i]["polylines_px"] # [M,K,2]
-
-    visualize_polylines(im, pred_polylines)
-    visualize_polylines(im, polylines)
-
-    a = np.load(inp) # /home/fatemeh/Downloads/hedge/results/test_mini/embs_polylines/pos_000003.npz
+    cfg.checkpoint = "/home/fatemeh/Downloads/hedge/snellius/detr_polyline_5.pt"
+    model.load_state_dict(torch.load(cfg.checkpoint, map_location=device)["model"])
+    model.eval()
+    preds = visualize_per_image(i=1)
+    a = np.load(dataset.files[i])  # embs_polylines/pos_000003.npz
     a = torch.tensor(a["feat"], dtype=torch.float32).unsqueeze(0)
-    preds = detr_polyline_inference(model=model,feats=a,image_sizes=[image_sizes[0]],score_thresh=0.9,topk=20,device=device)
-"""
+    preds = detr_polyline_inference(
+        model=model,
+        feats=a,
+        image_sizes=[image_sizes[0]],
+        score_thresh=0.9,
+        topk=20,
+        device=device,
+    )
 
 
 if __name__ == "__main__":

@@ -51,3 +51,26 @@ These refernce are the DETR-like model, which from BEV images they get the vecto
 - [TOPO10NL](https://essd.copernicus.org/articles/17/3641/2025). Ground truth data for hedge, tree, road, and building. Data is provided by PDOK platform. There is also Germany: ATKIS, Great Britain: Mastermap, Denmark: TOP10DK in Chapter 6 https://kadaster.github.io/imbrt .
 - [Beeldmateriaal aerial images](https://www.beeldmateriaal.nl/bekijk-luchtfotos)
 - [Map2ImLas](https://doi.org/10.1016/j.ophoto.2025.100112): Large-scale 2D-3D airborne dataset with map-based annotations.
+
+
+<!-- ================================= -->
+## Issues and some possible solutions
+
+- Data:
+    - Short-length data (minimum 10 pixels per 256x256 image) are removed. -> Done
+    - Low-quality data. Maybe use the self-driving data. -> Not Done
+    - Closed polylines: There are 691,006 polylines and 4,121 closed shapes. Some are not originally closed, but their start and end points are very close. -> Not Done
+    - Data leakage. Use data from different locations for training and validation. -> Not Done
+- Model and Loss:
+    - Auxiliary loss:
+        - Diffusion model on coordinates. Add an extra decoder to inject noise into the coordinates and denoise them with classifier-free guidance.
+        - Semantic segmentation decoder as an auxiliary loss to help the model converge better.
+        - Auxiliary loss on every decoder layer, similar to DETR.
+        - Cardinality (polyline count), length, direction, and curvature loss.
+    - Use only the semantic segmentation network to show that the data and DINOv3 are fine. This might not be necessary, since the binary background/foreground classifier already shows good results.
+    - Train DINOv3 as well: the transformer decoder head acts like an adapter, so there is most likely no need to train DINOv3.
+- Optimization and Hyperparameters
+    - Gradient clipping
+    - Scheduler
+    - Batch size (lower), learning rate (lower), EOS (lower)
+        

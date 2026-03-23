@@ -42,12 +42,13 @@ def draw_polylines_on_image(image_path, json_path):
 """
 from pathlib import Path
 
-main_path = Path(f"/home/fatemeh/Downloads/hedge/results")
+main_path = Path(f"/home/fatemeh/snellius") # /home/fatemeh/Downloads/hedge/results
 num = 1  # 1400
-folder = "test_256_dino256"  # "test_mini5" #"test_256" #"test_dataset"
-image_path = main_path / f"{folder}/images/pos_{num:06d}.png"
-json_path = main_path / f"{folder}/embs_polylines/pos_{num:06d}.npz"
-draw_polylines_on_image(image_path, json_path)
+def visualize_by_num(num, folder="test_256_None"): # test_256_dino256
+    image_path = main_path / f"{folder}/images/pos_{num:06d}.png"
+    json_path = main_path / f"{folder}/embs_polylines/pos_{num:06d}.npz"
+    draw_polylines_on_image(image_path, json_path)
+visualize_by_num(num)
 print("Done")
 
 a = np.array([[106, 99], [104, 104], [102, 106], [119, 108], [128, 109]])
