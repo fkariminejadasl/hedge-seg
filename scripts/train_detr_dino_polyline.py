@@ -520,7 +520,7 @@ def detr_polyline_collate_fn(batch):
 
 
 def tb_add_losses(writer, epoch: int, losses: dict, stage: str):
-    d = {f"{stage}_{k}": float(v) for k, v in losses.items()}
+    d = {f"{stage}_{k}": float(v) for k, v in losses.items() if k == "loss_total"}
     writer.add_scalars("losses", d, epoch)
 
 
