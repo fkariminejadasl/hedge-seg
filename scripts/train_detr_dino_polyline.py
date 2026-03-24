@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -141,12 +142,489 @@ class MLP(nn.Module):
         return x
 
 
+# =========================================================
+# DETR-style transformer
+# =========================================================
+
+
+def _get_clones(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
+
+
+def _with_pos_embed(tensor: torch.Tensor, pos: Optional[torch.Tensor]):
+    return tensor if pos is None else tensor + pos
+
+
+class DETRTransformer(nn.Module):
+    def __init__(
+        self,
+        d_model=256,
+        nhead=8,
+        num_encoder_layers=6,
+        num_decoder_layers=6,
+        dim_feedforward=2048,
+        dropout=0.1,
+        activation="relu",
+        normalize_before=False,
+        return_intermediate_dec=True,
+    ):
+        super().__init__()
+
+        encoder_layer = DETRTransformerEncoderLayer(
+            d_model, nhead, dim_feedforward, dropout, activation, normalize_before
+        )
+        encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
+        self.encoder = DETRTransformerEncoder(
+            encoder_layer, num_encoder_layers, encoder_norm
+        )
+
+        decoder_layer = DETRTransformerDecoderLayer(
+            d_model, nhead, dim_feedforward, dropout, activation, normalize_before
+        )
+        decoder_norm = nn.LayerNorm(d_model)
+        self.decoder = DETRTransformerDecoder(
+            decoder_layer,
+            num_decoder_layers,
+            decoder_norm,
+            return_intermediate=return_intermediate_dec,
+        )
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(
+        self,
+        src: torch.Tensor,  # (B, L, D)
+        query_embed: torch.Tensor,  # (Q, D)
+        pos_embed: Optional[torch.Tensor] = None,  # (B, L, D)
+        mask: Optional[torch.Tensor] = None,  # (B, L)
+    ):
+        B, _, _ = src.shape
+        query_embed = query_embed.unsqueeze(0).expand(B, -1, -1)  # (B,Q,D)
+        tgt = torch.zeros_like(query_embed)
+
+        memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
+        hs = self.decoder(
+            tgt,
+            memory,
+            memory_key_padding_mask=mask,
+            pos=pos_embed,
+            query_pos=query_embed,
+        )
+        # hs: (num_layers, B, Q, D)
+        return hs, memory
+
+
+class DETRTransformerEncoder(nn.Module):
+    def __init__(self, encoder_layer, num_layers, norm=None):
+        super().__init__()
+        self.layers = _get_clones(encoder_layer, num_layers)
+        self.norm = norm
+
+    def forward(
+        self,
+        src,
+        mask: Optional[torch.Tensor] = None,
+        src_key_padding_mask: Optional[torch.Tensor] = None,
+        pos: Optional[torch.Tensor] = None,
+    ):
+        output = src
+        for layer in self.layers:
+            output = layer(
+                output,
+                src_mask=mask,
+                src_key_padding_mask=src_key_padding_mask,
+                pos=pos,
+            )
+        if self.norm is not None:
+            output = self.norm(output)
+        return output
+
+
+class DETRTransformerDecoder(nn.Module):
+    def __init__(self, decoder_layer, num_layers, norm=None, return_intermediate=False):
+        super().__init__()
+        self.layers = _get_clones(decoder_layer, num_layers)
+        self.norm = norm
+        self.return_intermediate = return_intermediate
+
+    def forward(
+        self,
+        tgt,
+        memory,
+        tgt_mask: Optional[torch.Tensor] = None,
+        memory_mask: Optional[torch.Tensor] = None,
+        tgt_key_padding_mask: Optional[torch.Tensor] = None,
+        memory_key_padding_mask: Optional[torch.Tensor] = None,
+        pos: Optional[torch.Tensor] = None,
+        query_pos: Optional[torch.Tensor] = None,
+    ):
+        output = tgt
+        intermediate = []
+
+        for layer in self.layers:
+            output = layer(
+                output,
+                memory,
+                tgt_mask=tgt_mask,
+                memory_mask=memory_mask,
+                tgt_key_padding_mask=tgt_key_padding_mask,
+                memory_key_padding_mask=memory_key_padding_mask,
+                pos=pos,
+                query_pos=query_pos,
+            )
+            if self.return_intermediate:
+                intermediate.append(
+                    self.norm(output) if self.norm is not None else output
+                )
+
+        if self.norm is not None:
+            output = self.norm(output)
+
+        if self.return_intermediate:
+            if self.norm is not None:
+                intermediate[-1] = output
+            return torch.stack(intermediate)
+
+        return output.unsqueeze(0)
+
+
+class DETRTransformerEncoderLayer(nn.Module):
+    def __init__(
+        self,
+        d_model,
+        nhead,
+        dim_feedforward=2048,
+        dropout=0.1,
+        activation="relu",
+        normalize_before=False,
+    ):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(
+            d_model, nhead, dropout=dropout, batch_first=True
+        )
+
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+
+        self.activation = F.relu if activation == "relu" else F.gelu
+        self.normalize_before = normalize_before
+
+    def forward_post(
+        self,
+        src,
+        src_mask: Optional[torch.Tensor] = None,
+        src_key_padding_mask: Optional[torch.Tensor] = None,
+        pos: Optional[torch.Tensor] = None,
+    ):
+        q = k = _with_pos_embed(src, pos)
+        src2 = self.self_attn(
+            q,
+            k,
+            value=src,
+            attn_mask=src_mask,
+            key_padding_mask=src_key_padding_mask,
+            need_weights=False,
+        )[0]
+        src = src + self.dropout1(src2)
+        src = self.norm1(src)
+
+        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+        src = src + self.dropout2(src2)
+        src = self.norm2(src)
+        return src
+
+    def forward_pre(
+        self,
+        src,
+        src_mask: Optional[torch.Tensor] = None,
+        src_key_padding_mask: Optional[torch.Tensor] = None,
+        pos: Optional[torch.Tensor] = None,
+    ):
+        src2 = self.norm1(src)
+        q = k = _with_pos_embed(src2, pos)
+        src2 = self.self_attn(
+            q,
+            k,
+            value=src2,
+            attn_mask=src_mask,
+            key_padding_mask=src_key_padding_mask,
+            need_weights=False,
+        )[0]
+        src = src + self.dropout1(src2)
+
+        src2 = self.norm2(src)
+        src2 = self.linear2(self.dropout(self.activation(self.linear1(src2))))
+        src = src + self.dropout2(src2)
+        return src
+
+    def forward(
+        self,
+        src,
+        src_mask: Optional[torch.Tensor] = None,
+        src_key_padding_mask: Optional[torch.Tensor] = None,
+        pos: Optional[torch.Tensor] = None,
+    ):
+        if self.normalize_before:
+            return self.forward_pre(src, src_mask, src_key_padding_mask, pos)
+        return self.forward_post(src, src_mask, src_key_padding_mask, pos)
+
+
+class DETRTransformerDecoderLayer(nn.Module):
+    def __init__(
+        self,
+        d_model,
+        nhead,
+        dim_feedforward=2048,
+        dropout=0.1,
+        activation="relu",
+        normalize_before=False,
+    ):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(
+            d_model, nhead, dropout=dropout, batch_first=True
+        )
+        self.multihead_attn = nn.MultiheadAttention(
+            d_model, nhead, dropout=dropout, batch_first=True
+        )
+
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
+
+        self.activation = F.relu if activation == "relu" else F.gelu
+        self.normalize_before = normalize_before
+
+    def forward_post(
+        self,
+        tgt,
+        memory,
+        tgt_mask: Optional[torch.Tensor] = None,
+        memory_mask: Optional[torch.Tensor] = None,
+        tgt_key_padding_mask: Optional[torch.Tensor] = None,
+        memory_key_padding_mask: Optional[torch.Tensor] = None,
+        pos: Optional[torch.Tensor] = None,
+        query_pos: Optional[torch.Tensor] = None,
+    ):
+        q = k = _with_pos_embed(tgt, query_pos)
+        tgt2 = self.self_attn(
+            q,
+            k,
+            value=tgt,
+            attn_mask=tgt_mask,
+            key_padding_mask=tgt_key_padding_mask,
+            need_weights=False,
+        )[0]
+        tgt = tgt + self.dropout1(tgt2)
+        tgt = self.norm1(tgt)
+
+        tgt2 = self.multihead_attn(
+            query=_with_pos_embed(tgt, query_pos),
+            key=_with_pos_embed(memory, pos),
+            value=memory,
+            attn_mask=memory_mask,
+            key_padding_mask=memory_key_padding_mask,
+            need_weights=False,
+        )[0]
+        tgt = tgt + self.dropout2(tgt2)
+        tgt = self.norm2(tgt)
+
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
+        tgt = tgt + self.dropout3(tgt2)
+        tgt = self.norm3(tgt)
+        return tgt
+
+    def forward_pre(
+        self,
+        tgt,
+        memory,
+        tgt_mask: Optional[torch.Tensor] = None,
+        memory_mask: Optional[torch.Tensor] = None,
+        tgt_key_padding_mask: Optional[torch.Tensor] = None,
+        memory_key_padding_mask: Optional[torch.Tensor] = None,
+        pos: Optional[torch.Tensor] = None,
+        query_pos: Optional[torch.Tensor] = None,
+    ):
+        tgt2 = self.norm1(tgt)
+        q = k = _with_pos_embed(tgt2, query_pos)
+        tgt2 = self.self_attn(
+            q,
+            k,
+            value=tgt2,
+            attn_mask=tgt_mask,
+            key_padding_mask=tgt_key_padding_mask,
+            need_weights=False,
+        )[0]
+        tgt = tgt + self.dropout1(tgt2)
+
+        tgt2 = self.norm2(tgt)
+        tgt2 = self.multihead_attn(
+            query=_with_pos_embed(tgt2, query_pos),
+            key=_with_pos_embed(memory, pos),
+            value=memory,
+            attn_mask=memory_mask,
+            key_padding_mask=memory_key_padding_mask,
+            need_weights=False,
+        )[0]
+        tgt = tgt + self.dropout2(tgt2)
+
+        tgt2 = self.norm3(tgt)
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt2))))
+        tgt = tgt + self.dropout3(tgt2)
+        return tgt
+
+    def forward(
+        self,
+        tgt,
+        memory,
+        tgt_mask: Optional[torch.Tensor] = None,
+        memory_mask: Optional[torch.Tensor] = None,
+        tgt_key_padding_mask: Optional[torch.Tensor] = None,
+        memory_key_padding_mask: Optional[torch.Tensor] = None,
+        pos: Optional[torch.Tensor] = None,
+        query_pos: Optional[torch.Tensor] = None,
+    ):
+        if self.normalize_before:
+            return self.forward_pre(
+                tgt,
+                memory,
+                tgt_mask,
+                memory_mask,
+                tgt_key_padding_mask,
+                memory_key_padding_mask,
+                pos,
+                query_pos,
+            )
+        return self.forward_post(
+            tgt,
+            memory,
+            tgt_mask,
+            memory_mask,
+            tgt_key_padding_mask,
+            memory_key_padding_mask,
+            pos,
+            query_pos,
+        )
+
+
+# =========================================================
+# Legacy mode transformer wrapper
+# =========================================================
+
+
+class LegacyTransformerWrapper(nn.Module):
+    """
+    Your original style:
+      - add pos before encoder
+      - add query to tgt before decoder
+      - optionally collect intermediate decoder layers
+    """
+
+    def __init__(
+        self,
+        d_model=256,
+        nhead=8,
+        num_encoder_layers=6,
+        num_decoder_layers=6,
+        dim_feedforward=2048,
+        dropout=0.1,
+        return_intermediate_dec=True,
+    ):
+        super().__init__()
+
+        enc_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(enc_layer, num_layers=num_encoder_layers)
+
+        dec_layer = nn.TransformerDecoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.decoder = nn.TransformerDecoder(dec_layer, num_layers=num_decoder_layers)
+
+        self.return_intermediate_dec = return_intermediate_dec
+
+    def forward(
+        self,
+        src: torch.Tensor,  # (B,L,D)
+        query_embed: torch.Tensor,  # (Q,D)
+        pos_embed: Optional[torch.Tensor] = None,  # (B,L,D)
+        mask: Optional[torch.Tensor] = None,  # (B,L)
+    ):
+        B, _, _ = src.shape
+
+        if pos_embed is not None:
+            src = src + pos_embed
+
+        memory = self.encoder(src, src_key_padding_mask=mask)
+
+        query = query_embed.unsqueeze(0).expand(B, -1, -1)  # (B,Q,D)
+        output = torch.zeros_like(query) + query
+
+        if self.return_intermediate_dec:
+            intermediate = []
+            for layer in self.decoder.layers:
+                output = layer(
+                    output,
+                    memory,
+                    tgt_key_padding_mask=None,
+                    memory_key_padding_mask=mask,
+                )
+                intermediate.append(
+                    self.decoder.norm(output)
+                    if self.decoder.norm is not None
+                    else output
+                )
+            hs = torch.stack(intermediate)  # (num_layers,B,Q,D)
+        else:
+            output = self.decoder(
+                output,
+                memory,
+                tgt_key_padding_mask=None,
+                memory_key_padding_mask=mask,
+            )
+            hs = output.unsqueeze(0)
+
+        return hs, memory
+
+
+# =========================================================
+# Polyline model with switchable query/pos style
+# =========================================================
+
+
 class DetrPolylineFromEmbeddings(nn.Module):
     """
-    Input: x (B, 196, 1024) from DINO v3.
+    Input: x (B, L, in_dim), with L = grid_h * grid_w
     Output:
       pred_logits: (B, Q, num_classes+1)
-      pred_polylines: (B, Q, K, 2) normalized in [0,1]
+      pred_polylines: (B, Q, K, 2) in [0,1]
+      aux_outputs: list[dict], optional
     """
 
     def __init__(
@@ -162,57 +640,96 @@ class DetrPolylineFromEmbeddings(nn.Module):
         dropout: float = 0.1,
         grid_size: Tuple[int, int] = (16, 16),
         num_points: int = 20,
+        aux_loss: bool = True,
+        normalize_before: bool = False,
+        query_embed_mode: str = "detr",  # "detr" or "legacy"
     ):
         super().__init__()
+        assert query_embed_mode in {"detr", "legacy"}
+
         self.num_classes = num_classes
         self.num_queries = num_queries
         self.grid_h, self.grid_w = grid_size
         self.num_points = num_points
+        self.aux_loss = aux_loss
+        self.query_embed_mode = query_embed_mode
 
         self.input_proj = nn.Linear(in_dim, d_model)
         self.pos_embed = PositionEmbeddingSine2D(num_pos_feats=d_model // 2)
-
-        self.transformer = nn.Transformer(
-            d_model=d_model,
-            nhead=nhead,
-            num_encoder_layers=num_encoder_layers,
-            num_decoder_layers=num_decoder_layers,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            batch_first=True,
-        )
-
         self.query_embed = nn.Embedding(num_queries, d_model)
+
+        if query_embed_mode == "detr":
+            self.transformer = DETRTransformer(
+                d_model=d_model,
+                nhead=nhead,
+                num_encoder_layers=num_encoder_layers,
+                num_decoder_layers=num_decoder_layers,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                normalize_before=normalize_before,
+                return_intermediate_dec=aux_loss,
+            )
+        else:
+            self.transformer = LegacyTransformerWrapper(
+                d_model=d_model,
+                nhead=nhead,
+                num_encoder_layers=num_encoder_layers,
+                num_decoder_layers=num_decoder_layers,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                return_intermediate_dec=aux_loss,
+            )
 
         self.class_embed = nn.Linear(d_model, num_classes + 1)
         self.poly_embed = MLP(d_model, d_model, 2 * num_points, num_layers=3)
+
+    def _decode_polylines(self, hs: torch.Tensor) -> torch.Tensor:
+        # hs: (..., Q, D)
+        poly = self.poly_embed(hs)
+        poly = poly.view(*hs.shape[:-1], self.num_points, 2).sigmoid()
+        return poly
+
+    @torch.jit.unused
+    def _set_aux_loss(self, outputs_class, outputs_poly):
+        return [
+            {"pred_logits": a, "pred_polylines": b}
+            for a, b in zip(outputs_class[:-1], outputs_poly[:-1])
+        ]
 
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
         B, L, _ = x.shape
         assert (
             L == self.grid_h * self.grid_w
-        ), f"Expected {self.grid_h*self.grid_w} tokens, got {L}"
+        ), f"Expected {self.grid_h * self.grid_w} tokens, got {L}"
 
-        x = self.input_proj(x)  # (B,L,D)
+        src = self.input_proj(x)  # (B,L,D)
         pos = self.pos_embed(
             B=B, H=self.grid_h, W=self.grid_w, device=x.device
         )  # (B,L,D)
-        src = x + pos
 
-        memory = self.transformer.encoder(src)  # (B,L,D)
+        # fixed DINO grid, no padding
+        mask = None
 
-        query = self.query_embed.weight.unsqueeze(0).repeat(B, 1, 1)  # (B,Q,D)
-        tgt = torch.zeros_like(query)
-        hs = self.transformer.decoder(tgt=tgt + query, memory=memory)  # (B,Q,D)
+        hs, memory = self.transformer(
+            src=src,
+            query_embed=self.query_embed.weight,
+            pos_embed=pos,
+            mask=mask,
+        )
+        # hs: (num_layers,B,Q,D)
 
-        logits = self.class_embed(hs)  # (B,Q,K+1)
+        outputs_class = self.class_embed(hs)  # (num_layers,B,Q,C+1)
+        outputs_poly = self._decode_polylines(hs)  # (num_layers,B,Q,K,2)
 
-        poly = self.poly_embed(hs)  # (B,Q,2*num_points)
-        poly = poly.view(
-            B, self.num_queries, self.num_points, 2
-        ).sigmoid()  # normalized [0,1]
+        out = {
+            "pred_logits": outputs_class[-1],
+            "pred_polylines": outputs_poly[-1],
+        }
 
-        return {"pred_logits": logits, "pred_polylines": poly}
+        if self.aux_loss:
+            out["aux_outputs"] = self._set_aux_loss(outputs_class, outputs_poly)
+
+        return out
 
 
 # -------------------------
@@ -314,7 +831,7 @@ class DetrPolylineCriterion(nn.Module):
         eos_coef: float = 0.1,
         loss_poly: float = 5.0,
         loss_bbox_giou: float = 1.0,
-        loss_smooth: float = 0.0,  # optional regularizer
+        loss_smooth: float = 0.0,
     ):
         super().__init__()
         self.num_classes = num_classes
@@ -329,25 +846,27 @@ class DetrPolylineCriterion(nn.Module):
         empty_weight[-1] = eos_coef
         self.register_buffer("empty_weight", empty_weight)
 
-    def forward(
-        self, outputs: Dict[str, torch.Tensor], targets: List[Dict[str, torch.Tensor]]
-    ):
+    def _compute_losses(
+        self,
+        outputs: Dict[str, torch.Tensor],
+        targets: List[Dict[str, torch.Tensor]],
+    ) -> Dict[str, torch.Tensor]:
         indices = self.matcher(outputs, targets)
 
         loss_ce = self.loss_labels(outputs, targets, indices)
         loss_poly = self.loss_polylines(outputs, targets, indices)
-        loss_giou = (
-            self.loss_bbox_giou(outputs, targets, indices)
-            if self.loss_bbox_giou_w != 0.0
-            else torch.tensor(0.0, device=outputs["pred_logits"].device)
-        )
-        loss_smooth = (
-            self.loss_smoothness(outputs, indices)
-            if self.loss_smooth_w != 0.0
-            else torch.tensor(0.0, device=outputs["pred_logits"].device)
-        )
 
-        total = (
+        if self.loss_bbox_giou_w != 0.0:
+            loss_giou = self.loss_bbox_giou(outputs, targets, indices)
+        else:
+            loss_giou = outputs["pred_logits"].new_tensor(0.0)
+
+        if self.loss_smooth_w != 0.0:
+            loss_smooth = self.loss_smoothness(outputs, indices)
+        else:
+            loss_smooth = outputs["pred_logits"].new_tensor(0.0)
+
+        loss_total = (
             loss_ce
             + self.loss_poly_w * loss_poly
             + self.loss_bbox_giou_w * loss_giou
@@ -359,8 +878,34 @@ class DetrPolylineCriterion(nn.Module):
             "loss_poly": loss_poly,
             "loss_bbox_giou": loss_giou,
             "loss_smooth": loss_smooth,
-            "loss_total": total,
+            "loss_total": loss_total,
         }
+
+    def forward(
+        self,
+        outputs: Dict[str, torch.Tensor],
+        targets: List[Dict[str, torch.Tensor]],
+    ) -> Dict[str, torch.Tensor]:
+        # final decoder layer only
+        outputs_without_aux = {k: v for k, v in outputs.items() if k != "aux_outputs"}
+
+        losses = self._compute_losses(outputs_without_aux, targets)
+
+        # auxiliary decoder layers
+        if "aux_outputs" in outputs:
+            aux_total = outputs_without_aux["pred_logits"].new_tensor(0.0)
+
+            for i, aux_outputs in enumerate(outputs["aux_outputs"]):
+                l_dict = self._compute_losses(aux_outputs, targets)
+
+                for k, v in l_dict.items():
+                    losses[f"{k}_{i}"] = v
+
+                aux_total = aux_total + l_dict["loss_total"]
+
+            losses["loss_total"] = losses["loss_total"] + aux_total
+
+        return losses
 
     def loss_labels(self, outputs, targets, indices):
         src_logits = outputs["pred_logits"]  # (B,Q,C+1)
@@ -694,28 +1239,30 @@ def detr_polyline_inference(
 
 def main():
     cfg = dict(
-        exp="detr_polyline_11",
+        exp="detr_polyline_12",
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/test_256_None/embs_polylines"
+            "/home/fatemeh/Downloads/hedge/results/test_256_dino256/embs_polylines"
         ),
         # save_path=Path("/home/fkarimineja/exps/hedge"),
         # embed_dir=Path("/home/fkarimineja/data/hedge/test_256_None/embs_polylines"),
-        num_points=10,
+        num_points=20,
         num_polylines=100,  # 276
         num_classes=1,
         grid_size=(16, 16),
         # model
         loss_bbox_giou=1.0,  # 1.0
         eos_coef=0.1,  # .3, .5
+        aux_loss=True,
+        query_embed_mode="detr",  # "detr" or "legacy"
         # trining
         n_epochs=3000,  # 500
         batch_size=256,  # 4x256=1024 (dino256), 5x256=1280 (dino224)
         num_workers=15,  # 17
         max_lr=3e-4,  # 1e-3
         weight_decay=1e-2,  # default 1e-2
-        dropout=0.01,  # default 0.1
-        save_every=1000,
+        dropout=0.0,  # default 0.1
+        save_every=3000,
         use_tqdm=True,
     )
     cfg = OmegaConf.create(cfg)
@@ -755,6 +1302,8 @@ def main():
         dropout=cfg.dropout,
         grid_size=cfg.grid_size,
         num_points=cfg.num_points,
+        aux_loss=cfg.aux_loss,
+        query_embed_mode=cfg.query_embed_mode,
     )
 
     matcher = HungarianMatcherPolyline(
