@@ -1207,16 +1207,16 @@ def detr_polyline_inference(
 
 def main():
     cfg = dict(
-        exp="detr_polyline_9",
+        model_name="model_with_diffusion",  # model
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/test_256_dino256/embs_polylines"
+            "/home/fatemeh/Downloads/hedge/results/test_256_None/embs_polylines"  # test_256_dino256
         ),
-        checkpoint="/home/fatemeh/Downloads/hedge/results/training//best_detr_polyline_12.pt",  # "/home/fatemeh/Downloads/hedge/results/training//best_detr_polyline_9.pt", #"/home/fatemeh/Downloads/hedge/snellius/best_detr_polyline_1.pt"
+        checkpoint=None,  # "/home/fatemeh/Downloads/hedge/results/training/best_detr_polyline_9.pt", #"/home/fatemeh/Downloads/hedge/snellius/best_detr_polyline_1.pt"
         # save_path=Path("/home/fkarimineja/exps/hedge"),
         # embed_dir=Path("/home/fkarimineja/data/hedge/test_256/embs_polylines"),
-        num_points=20,
-        num_polylines=100,  # 160
+        num_points=10,
+        num_polylines=276,  # 160
         num_classes=1,
         grid_size=(16, 16),
         # model
@@ -1299,25 +1299,6 @@ def main():
     if device.type == "cuda":
         print(f"Using device: {torch.cuda.get_device_properties()}")
 
-    model.load_state_dict(torch.load(cfg.checkpoint, map_location=device)["model"])
-    model.eval()
-
-    # Example inference on eval set
-    feats, targets = next(iter(loader))  #
-    image_sizes = [t["image_size"].tolist() for t in targets]
-    preds = detr_polyline_inference(
-        model=model,
-        feats=feats,
-        image_sizes=image_sizes,
-        score_thresh=0.0,  # 0.9,
-        topk=11,
-        device=device,
-    )
-    eval_losses = eval_one_epoch(feats, targets, model, criterion, device)
-
-    # preds[0]["polylines_px"] is (M,K,2) in pixel coords
-    print(preds[0]["scores"].shape, preds[0]["polylines_px"].shape)
-
     def visualize_polylines(im, polylines):
         plt.figure()
         plt.imshow(im)
@@ -1353,14 +1334,44 @@ def main():
         visualize_polylines(im, gt_polylines)
         return preds
 
+    cfg.model_name = "model"  # model_with_diffusion, model
     cfg.checkpoint = (
-        "/home/fatemeh/Downloads/hedge/results/training//best_detr_polyline_12.pt"
+        "/home/fatemeh/Downloads/hedge/snellius/detr_polyline_7.pt"
+        # "/home/fatemeh/Downloads/hedge/results/training/best_detr_polyline_11_stage3.pt"
     )
-    model.load_state_dict(torch.load(cfg.checkpoint, map_location=device)["model"])
+    state = torch.load(cfg.checkpoint, map_location=device)[cfg.model_name]
+    if cfg.model_name == "model_with_diffusion":
+        state = {
+            k[len("base_model.") :]: v
+            for k, v in state.items()
+            if k.startswith("base_model.")
+        }
+    missing, unexpected = model.load_state_dict(state, strict=True)
+    # model.load_state_dict(torch.load(cfg.checkpoint, map_location=device)[cfg.model_name], strict=False)
     model.eval()
     preds = visualize_per_image(i=0)
+    print("Done")
+
+    """
     a = np.load(dataset.files[0])  # embs_polylines/pos_000003.npz
     a = torch.tensor(a["feat"], dtype=torch.float32).unsqueeze(0)
+    
+    # Example inference on eval set
+    feats, targets = next(iter(loader))  #
+    image_sizes = [t["image_size"].tolist() for t in targets]
+    preds = detr_polyline_inference(
+        model=model,
+        feats=feats,
+        image_sizes=image_sizes,
+        score_thresh=0.0,  # 0.9,
+        topk=11,
+        device=device,
+    )
+    eval_losses = eval_one_epoch(feats, targets, model, criterion, device)
+
+    # preds[0]["polylines_px"] is (M,K,2) in pixel coords
+    print(preds[0]["scores"].shape, preds[0]["polylines_px"].shape)
+
     preds = detr_polyline_inference(
         model=model,
         feats=a,
@@ -1369,6 +1380,7 @@ def main():
         topk=20,
         device=device,
     )
+    """
 
 
 if __name__ == "__main__":
