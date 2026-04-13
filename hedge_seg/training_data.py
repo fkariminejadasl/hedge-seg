@@ -47,18 +47,19 @@ def float_to_uint8(
     Uses per-chip percentiles by default.
     """
     data = np.nan_to_num(data, nan=0.0)
+    return np.round(data, 0).astype(np.uint8)
 
-    if vmin is None:
-        vmin = float(np.percentile(data, pmin))
-    if vmax is None:
-        vmax = float(np.percentile(data, pmax))
+    # if vmin is None:
+    #     vmin = float(np.percentile(data, pmin))
+    # if vmax is None:
+    #     vmax = float(np.percentile(data, pmax))
 
-    if vmax <= vmin:
-        return np.zeros_like(data, dtype=np.uint8)
+    # if vmax <= vmin:
+    #     return np.zeros_like(data, dtype=np.uint8)
 
-    data_clipped = np.clip(data, vmin, vmax)
-    norm = (data_clipped - vmin) / (vmax - vmin + 1e-12)
-    return (norm * 255).astype(np.uint8)
+    # data_clipped = np.clip(data, vmin, vmax)
+    # norm = (data_clipped - vmin) / (vmax - vmin + 1e-12)
+    # return (norm * 255).astype(np.uint8)
 
 
 def geom_to_lines(geom: BaseGeometry) -> List[BaseGeometry]:

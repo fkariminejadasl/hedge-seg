@@ -122,4 +122,50 @@ gdf.iloc[62070].geometry.bounds
 gdf.iloc[idxs].geometry.is_closed # closed, simple, ring (closed+simple), valid, empty
 a = [gdf.iloc[i].geometry.is_closed for i in range(len(gdf))]
 idxs = np.where(np.asarray(a)==True)[0].tolist()
+
+
+
+def get_polyline_length(xs, ys):
+    pl_len = 0
+    for x1, y1, x2, y2 in zip (xs[:-1], ys[:-1], xs[1:], ys[1:]):
+        pl_len += ((x2-x1)**2 + (y2-y1)**2 )**0.5
+    return pl_len
+
+lengths = dict()
+for i in range(len(gdf)):
+    xs, ys = gdf.geometry.iloc[i].xy
+    pl_len = get_polyline_length(xs, ys)
+    lengths[i] = pl_len
+
+max_len = int(round(max(lengths.values()), 0))
+min_len = int(round(min(lengths.values()), 0))
+bins = np.arange(min_len, max_len + 10, 10)
+plt.figure()
+plt.hist(lengths.values(), bins=bins)
+plt.xlabel("length");plt.ylabel("n_polylines")
+
+
+min_len = min(lengths.values())
+[k for k, v in lengths.items() if v == min_len] # 42645 254463, 539087 -> length .1
+len([int(round(v,0)) for k, v in lengths.items() if v < 10]) # 110
+
+
+def get_line_segment_lengths(xs, ys):
+    lengths = []
+    for x1, y1, x2, y2 in zip (xs[:-1], ys[:-1], xs[1:], ys[1:]):
+        length = ((x2-x1)**2 +  (y2-y1)**2 )**0.5
+        lengths.append(length)
+    return lengths
+
+
+seg_lens = []
+for i in range(len(gdf)):
+    xs, ys = gdf.geometry.iloc[i].xy
+    seg_lens.extend(get_line_segment_lengths(xs, ys))
+
+
+bins = np.arange(int(min(seg_lens)), int(max(seg_lens)) + 10, 10)
+plt.figure()
+plt.hist(seg_lens, bins=bins)
+plt.xlabel("segment lengths");plt.ylabel("n_polylines")
 """
