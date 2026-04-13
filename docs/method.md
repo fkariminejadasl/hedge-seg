@@ -47,10 +47,16 @@ These refernce are the DETR-like model, which from BEV images they get the vecto
 
 <!-- ================================= -->
 ## Data Sources
-- [Data](https://essd.copernicus.org/articles/17/3641/2025) from AHN4.
-- [TOPO10NL](https://essd.copernicus.org/articles/17/3641/2025). Ground truth data for hedge, tree, road, and building. Data is provided by PDOK platform. There is also Germany: ATKIS, Great Britain: Mastermap, Denmark: TOP10DK in Chapter 6 https://kadaster.github.io/imbrt .
+- [Data](https://essd.copernicus.org/articles/17/3641/2025) from AHN4 (GeoTIFF).
+- TOPO10NL: Ground truth data for hedge, tree, road, and building. Data is provided by PDOK platform. There is also Germany: ATKIS, Great Britain: Mastermap, Denmark: TOP10DK in Chapter 6 https://kadaster.github.io/imbrt .
 - [Beeldmateriaal aerial images](https://www.beeldmateriaal.nl/bekijk-luchtfotos)
 - [Map2ImLas](https://doi.org/10.1016/j.ophoto.2025.100112): Large-scale 2D-3D airborne dataset with map-based annotations.
+
+PDOK aerial images
+- [download data](https://www.beeldmateriaal.nl/dataroom)
+- [viewer](https://app.pdok.nl/viewer)
+- QGIS: WMTS https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0?request=GetCapabilities&service=wmts
+<!-- # 194297  408398 -->
 
 
 <!-- ================================= -->
