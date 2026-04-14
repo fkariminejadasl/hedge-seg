@@ -1,6 +1,13 @@
 import json
+from pathlib import Path
 
+import geopandas as gpd
+import matplotlib.pyplot as plt
 import numpy as np
+import rasterio
+from rasterio.features import rasterize
+from rasterio.windows import from_bounds
+from tqdm import tqdm
 
 
 def get_n_polylines(json_dir):
@@ -75,6 +82,98 @@ def get_closed_polylines(json_dir):
     return closed_polylines_dic
 
 
+def get_polyline_length(xs, ys):
+    pl_len = 0
+    for x1, y1, x2, y2 in zip(xs[:-1], ys[:-1], xs[1:], ys[1:]):
+        pl_len += ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+    return pl_len
+
+
+def get_line_segment_lengths(xs, ys):
+    lengths = []
+    for x1, y1, x2, y2 in zip(xs[:-1], ys[:-1], xs[1:], ys[1:]):
+        length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+        lengths.append(length)
+    return lengths
+
+
+def get_polyline_intensities(shp_path, tif_path):
+    gdf = gpd.read_file(shp_path)
+
+    with rasterio.open(tif_path) as src:
+        if gdf.crs != src.crs:
+            gdf = gdf.to_crs(src.crs)
+
+        gdf = gdf[gdf.geometry.notna()]
+        gdf = gdf[~gdf.geometry.is_empty]
+        gdf = gdf[gdf.geometry.geom_type.isin(["LineString", "MultiLineString"])]
+
+        all_values = []
+
+        for geom in tqdm(gdf.geometry):
+            minx, miny, maxx, maxy = geom.bounds
+            win = from_bounds(minx, miny, maxx, maxy, src.transform)
+            win = win.round_offsets().round_lengths()
+
+            row_off = max(0, int(win.row_off))
+            col_off = max(0, int(win.col_off))
+            height = min(src.height - row_off, int(win.height))
+            width = min(src.width - col_off, int(win.width))
+
+            if height <= 0 or width <= 0:
+                continue
+
+            win = rasterio.windows.Window(col_off, row_off, width, height)
+            arr = src.read(1, window=win, masked=True)
+            transform = src.window_transform(win)
+
+            mask = rasterize(
+                [(geom, 1)],
+                out_shape=(height, width),
+                transform=transform,
+                fill=0,
+                all_touched=True,
+                dtype=np.uint8,
+            ).astype(bool)
+
+            vals = arr[mask]
+            if np.ma.isMaskedArray(vals):
+                vals = vals.compressed()
+
+            all_values.extend(vals.tolist())
+
+    all_values = np.asarray(all_values, dtype=float)
+    return all_values
+
+
+"""
+# Get raster values on hedge polylines and plot histogram and CDF
+shp_path = Path(
+    "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
+)
+tif_path = Path(
+    "/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
+)
+all_values = get_polyline_intensities(shp_path, tif_path)
+bins = np.arange(int(round(min(all_values), 0)), int(round(max(all_values), 0)) + 1, 1)
+counts, bin_edges = np.histogram(all_values, bins=bins)
+cdf = np.cumsum(counts) / np.sum(counts)
+
+print("n_values:", len(all_values))
+plt.figure()
+plt.hist(all_values, bins=bins)
+plt.xlabel("Intensity value")
+plt.ylabel("Count")
+plt.title("Histogram of raster values on hedge polylines")
+
+plt.figure()
+plt.plot(cdf)
+plt.xlabel("Intensity value")
+plt.ylabel("CDF")
+plt.title("CDF of raster values on hedge polylines")
+plt.grid(True)
+"""
+
 """
 # test_dataset (256), pos_000092, 423 polylines, (128) 180, (64) 81,
 from pathlib import Path
@@ -125,12 +224,8 @@ idxs = np.where(np.asarray(a)==True)[0].tolist()
 
 
 
-def get_polyline_length(xs, ys):
-    pl_len = 0
-    for x1, y1, x2, y2 in zip (xs[:-1], ys[:-1], xs[1:], ys[1:]):
-        pl_len += ((x2-x1)**2 + (y2-y1)**2 )**0.5
-    return pl_len
-
+# Get polyline lengths and plot histogram
+# ========
 lengths = dict()
 for i in range(len(gdf)):
     xs, ys = gdf.geometry.iloc[i].xy
@@ -150,14 +245,8 @@ min_len = min(lengths.values())
 len([int(round(v,0)) for k, v in lengths.items() if v < 10]) # 110
 
 
-def get_line_segment_lengths(xs, ys):
-    lengths = []
-    for x1, y1, x2, y2 in zip (xs[:-1], ys[:-1], xs[1:], ys[1:]):
-        length = ((x2-x1)**2 +  (y2-y1)**2 )**0.5
-        lengths.append(length)
-    return lengths
-
-
+# Get line segment lengths and plot histogram
+# =========
 seg_lens = []
 for i in range(len(gdf)):
     xs, ys = gdf.geometry.iloc[i].xy
