@@ -1,12 +1,13 @@
 import requests
 
+
 def example_download_pdok_aerial_image():
     """
     Example of how to download an aerial image from PDOK using the WMS service.
-    This example downloads a 500x500 m area around a point in the Netherlands at high resolution (8 cm) and saves it as "pdok_aerial.png". 
+    This example downloads a 500x500 m area around a point in the Netherlands at high resolution (8 cm) and saves it as "pdok_aerial.png".
     Image size is set to 2000x2000 pixels to achieve the 8 cm resolution (500 m / 2000 px = 0.25 m/px = 25 cm/px, but PDOK's high-res imagery is actually 8 cm/px).
     """
-    
+
     # Center point in EPSG:28992 (RD New)
     x, y = 194297, 408398
 

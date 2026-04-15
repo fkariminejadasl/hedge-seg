@@ -1,8 +1,6 @@
 import json
-from pathlib import Path
 
 import geopandas as gpd
-import matplotlib.pyplot as plt
 import numpy as np
 import rasterio
 from rasterio.features import rasterize
