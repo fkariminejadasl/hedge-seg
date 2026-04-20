@@ -44,33 +44,6 @@ def box_iou_xyxy(
     return iou, union
 
 
-def generalized_box_iou_xyxy(
-    boxes1: torch.Tensor, boxes2: torch.Tensor
-) -> torch.Tensor:
-    iou, union = box_iou_xyxy(boxes1, boxes2)
-
-    lt = torch.min(boxes1[:, None, :2], boxes2[None, :, :2])
-    rb = torch.max(boxes1[:, None, 2:], boxes2[None, :, 2:])
-
-    wh = (rb - lt).clamp(min=0)
-    area_c = wh[:, :, 0] * wh[:, :, 1]
-    return iou - (area_c - union) / area_c.clamp(min=1e-6)
-
-
-def polyline_to_bbox_xyxy(poly: torch.Tensor) -> torch.Tensor:
-    """
-    poly: (..., K, 2) normalized in [0,1]
-    returns: (..., 4) xyxy normalized
-    """
-    x = poly[..., :, 0]
-    y = poly[..., :, 1]
-    x0 = x.min(dim=-1).values
-    y0 = y.min(dim=-1).values
-    x1 = x.max(dim=-1).values
-    y1 = y.max(dim=-1).values
-    return torch.stack([x0, y0, x1, y1], dim=-1)
-
-
 # -------------------------
 # Positional encoding (2D sine)
 # -------------------------
@@ -739,245 +712,6 @@ class DetrPolylineFromEmbeddings(nn.Module):
 
 
 # -------------------------
-# Matcher + Criterion for polylines
-# -------------------------
-
-
-@dataclass
-class MatcherCost:
-    class_cost: float = 1.0
-    poly_cost: float = 5.0
-    bbox_giou_cost: float = 1.0  # optional stabilizer using bbox(polyline)
-
-
-class HungarianMatcherPolyline(nn.Module):
-    def __init__(self, cost: MatcherCost):
-        super().__init__()
-        self.cost = cost
-
-    @torch.no_grad()
-    def forward(
-        self, outputs: Dict[str, torch.Tensor], targets: List[Dict[str, torch.Tensor]]
-    ):
-        """
-        outputs:
-          pred_logits: (B,Q,C+1)
-          pred_polylines: (B,Q,K,2) normalized
-        targets: list length B:
-          labels: (Ni,)
-          polylines: (Ni,K,2) normalized
-        returns: list of (idx_pred, idx_tgt)
-        """
-        bs, num_queries = outputs["pred_logits"].shape[:2]
-        out_prob = outputs["pred_logits"].softmax(-1)  # (B,Q,C+1)
-        out_poly = outputs["pred_polylines"]  # (B,Q,K,2)
-
-        indices = []
-        for b in range(bs):
-            tgt_ids = targets[b]["labels"]  # (Ni,)
-            tgt_poly = targets[b]["polylines"]  # (Ni,K,2)
-
-            if tgt_poly.numel() == 0:
-                indices.append(
-                    (
-                        torch.empty(0, dtype=torch.int64),
-                        torch.empty(0, dtype=torch.int64),
-                    )
-                )
-                continue
-
-            # Class cost: negative prob of tgt class
-            cost_class = -out_prob[b][:, tgt_ids]  # (Q,Ni)
-
-            # Polyline cost: reverse-invariant mean L1 across points
-            # Compute L1 distance to the target polyline in both directions (forward and reversed),
-            # then take the minimum cost for each (query, target) pair.
-            # Implementation: flatten to (Q, 2K) and (Ni, 2K), use cdist(L1) for forward and reversed,
-            # then cost_poly = min(cost_fwd, cost_rev).
-            # It can be replaced by either the Hausdorff or Chamfer distance.
-            Q = out_poly[b].shape[0]
-            K = out_poly[b].shape[1]
-            out_flat = out_poly[b].reshape(Q, 2 * K)  # (Q,2K)
-            tgt_flat = tgt_poly.reshape(tgt_poly.shape[0], 2 * K)  # (Ni,2K)
-            tgt_rev = torch.flip(tgt_poly, dims=[1]).reshape(
-                tgt_poly.shape[0], 2 * K
-            )  # (Ni,2K)
-            cost_fwd = torch.cdist(out_flat, tgt_flat, p=1) / float(2 * K)  # (Q,Ni)
-            cost_rev = torch.cdist(out_flat, tgt_rev, p=1) / float(2 * K)  # (Q,Ni)
-            cost_poly = torch.minimum(cost_fwd, cost_rev)
-
-            # Optional bbox GIoU cost from polylines
-            cost_giou = 0.0
-            if self.cost.bbox_giou_cost != 0.0:
-                out_bbox = polyline_to_bbox_xyxy(out_poly[b])  # (Q,4)
-                tgt_bbox = polyline_to_bbox_xyxy(tgt_poly)  # (Ni,4)
-                cost_giou = -generalized_box_iou_xyxy(out_bbox, tgt_bbox)  # (Q,Ni)
-
-            C = (
-                self.cost.class_cost * cost_class
-                + self.cost.poly_cost * cost_poly
-                + self.cost.bbox_giou_cost * cost_giou
-            ).cpu()
-
-            row_ind, col_ind = linear_sum_assignment(C)
-            indices.append(
-                (
-                    torch.as_tensor(row_ind, dtype=torch.int64),
-                    torch.as_tensor(col_ind, dtype=torch.int64),
-                )
-            )
-        return indices
-
-
-class DetrPolylineCriterion(nn.Module):
-    def __init__(
-        self,
-        num_classes: int,
-        matcher: HungarianMatcherPolyline,
-        eos_coef: float = 0.1,
-        loss_poly: float = 5.0,
-        loss_bbox_giou: float = 1.0,
-        loss_smooth: float = 0.0,  # optional regularizer
-    ):
-        super().__init__()
-        self.num_classes = num_classes
-        self.matcher = matcher
-        self.eos_coef = eos_coef
-
-        self.loss_poly_w = loss_poly
-        self.loss_bbox_giou_w = loss_bbox_giou
-        self.loss_smooth_w = loss_smooth
-
-        empty_weight = torch.ones(num_classes + 1)
-        empty_weight[-1] = eos_coef
-        self.register_buffer("empty_weight", empty_weight)
-
-    def forward(
-        self, outputs: Dict[str, torch.Tensor], targets: List[Dict[str, torch.Tensor]]
-    ):
-        indices = self.matcher(outputs, targets)
-
-        loss_ce = self.loss_labels(outputs, targets, indices)
-        loss_poly = self.loss_polylines(outputs, targets, indices)
-        loss_giou = (
-            self.loss_bbox_giou(outputs, targets, indices)
-            if self.loss_bbox_giou_w != 0.0
-            else torch.tensor(0.0, device=outputs["pred_logits"].device)
-        )
-        loss_smooth = (
-            self.loss_smoothness(outputs, indices)
-            if self.loss_smooth_w != 0.0
-            else torch.tensor(0.0, device=outputs["pred_logits"].device)
-        )
-
-        total = (
-            loss_ce
-            + self.loss_poly_w * loss_poly
-            + self.loss_bbox_giou_w * loss_giou
-            + self.loss_smooth_w * loss_smooth
-        )
-
-        return {
-            "loss_ce": loss_ce,
-            "loss_poly": loss_poly,
-            "loss_bbox_giou": loss_giou,
-            "loss_smooth": loss_smooth,
-            "loss_total": total,
-        }
-
-    def loss_labels(self, outputs, targets, indices):
-        src_logits = outputs["pred_logits"]  # (B,Q,C+1)
-        B, Q, _ = src_logits.shape
-
-        target_classes = torch.full(
-            (B, Q), self.num_classes, dtype=torch.int64, device=src_logits.device
-        )
-
-        for b, (src_idx, tgt_idx) in enumerate(indices):
-            if len(src_idx) == 0:
-                continue
-            target_classes[b, src_idx] = targets[b]["labels"][tgt_idx]
-
-        loss_ce = F.cross_entropy(
-            src_logits.transpose(1, 2), target_classes, weight=self.empty_weight
-        )
-        return loss_ce
-
-    def loss_polylines(self, outputs, targets, indices):
-        pred_poly = outputs["pred_polylines"]  # (B,Q,K,2)
-        loss = torch.tensor(0.0, device=pred_poly.device)
-        n_matched = 0
-
-        for b, (src_idx, tgt_idx) in enumerate(indices):
-            if len(src_idx) == 0:
-                continue
-
-            s = pred_poly[b, src_idx]  # (M,K,2)
-            t = targets[b]["polylines"][tgt_idx]  # (M,K,2)
-            t_rev = torch.flip(t, dims=[1])  # (M,K,2)
-
-            # Per-instance forward and reversed L1
-            # (sum over K and xy, keep instance dimension)
-            l1_fwd = F.l1_loss(s, t, reduction="none").sum(dim=(1, 2))  # (M,)
-            l1_rev = F.l1_loss(s, t_rev, reduction="none").sum(dim=(1, 2))  # (M,)
-            l1 = torch.minimum(l1_fwd, l1_rev).sum()  # scalar
-
-            loss = loss + l1
-            n_matched += s.shape[0]
-
-        n_matched = max(n_matched, 1)
-        # average per matched instance and per point coordinate
-        K = pred_poly.shape[2]
-        loss = loss / (n_matched * K * 2.0)
-        return loss
-
-    def loss_bbox_giou(self, outputs, targets, indices):
-        pred_poly = outputs["pred_polylines"]
-        loss = torch.tensor(0.0, device=pred_poly.device)
-        n_matched = 0
-
-        for b, (src_idx, tgt_idx) in enumerate(indices):
-            if len(src_idx) == 0:
-                continue
-            s_poly = pred_poly[b, src_idx]  # (M,K,2)
-            t_poly = targets[b]["polylines"][tgt_idx]  # (M,K,2)
-
-            s_bbox = polyline_to_bbox_xyxy(s_poly)  # (M,4)
-            t_bbox = polyline_to_bbox_xyxy(t_poly)  # (M,4)
-
-            giou = generalized_box_iou_xyxy(s_bbox, t_bbox).diag()
-            loss = loss + (1.0 - giou).sum()
-            n_matched += s_bbox.shape[0]
-
-        n_matched = max(n_matched, 1)
-        loss = loss / n_matched
-        return loss
-
-    def loss_smoothness(self, outputs, indices):
-        """
-        Optional: encourages consecutive points to be close (prevents wild oscillations).
-        This is a simple second-difference penalty.
-        """
-        pred_poly = outputs["pred_polylines"]  # (B,Q,K,2)
-        loss = torch.tensor(0.0, device=pred_poly.device)
-        n = 0
-
-        for b, (src_idx, _) in enumerate(indices):
-            if len(src_idx) == 0:
-                continue
-            p = pred_poly[b, src_idx]  # (M,K,2)
-            if p.shape[1] < 3:
-                continue
-            d2 = p[:, 2:] - 2 * p[:, 1:-1] + p[:, :-2]  # (M,K-2,2)
-            loss = loss + (d2**2).mean()
-            n += 1
-
-        if n == 0:
-            return torch.tensor(0.0, device=pred_poly.device)
-        return loss / n
-
-
-# -------------------------
 # Dataset and collate
 # -------------------------
 
@@ -1031,85 +765,9 @@ class DetrPolylineEmbDataset(Dataset):
         return feat, target
 
 
-def detr_polyline_collate_fn(batch):
-    feats, targets = zip(*batch)
-    feats = torch.stack(feats, dim=0)  # (B,196,1024)
-    return feats, list(targets)
-
-
 # -------------------------
-# Training / eval / inference
+# Inference
 # -------------------------
-
-
-def tb_add_losses(writer, epoch: int, losses: dict, stage: str):
-    d = {f"{stage}_{k}": float(v) for k, v in losses.items()}
-    writer.add_scalars("losses", d, epoch)
-
-
-def train_one_epoch(loader, model, criterion, optimizer, device):
-    model.train()
-    sums = {
-        "loss_ce": 0.0,
-        "loss_poly": 0.0,
-        "loss_bbox_giou": 0.0,
-        "loss_smooth": 0.0,
-        "loss_total": 0.0,
-    }
-    n = 0
-
-    for feats, targets in loader:
-        feats = feats.to(device)
-        for t in targets:
-            t["labels"] = t["labels"].to(device)
-            t["polylines"] = t["polylines"].to(device)
-
-        optimizer.zero_grad(set_to_none=True)
-        outputs = model(feats)
-        loss_dict = criterion(outputs, targets)
-        loss = loss_dict["loss_total"]
-        loss.backward()
-        optimizer.step()
-
-        bs = feats.size(0)
-        n += bs
-        for k in sums:
-            sums[k] += float(loss_dict[k].detach().item()) * bs
-
-    for k in sums:
-        sums[k] /= max(n, 1)
-    return sums
-
-
-@torch.no_grad()
-def eval_one_epoch(feats, targets, model, criterion, device):
-    model.eval()
-    sums = {
-        "loss_ce": 0.0,
-        "loss_poly": 0.0,
-        "loss_bbox_giou": 0.0,
-        "loss_smooth": 0.0,
-        "loss_total": 0.0,
-    }
-    n = 0
-
-    # for feats, targets in loader:
-    feats = feats.to(device)
-    for t in targets:
-        t["labels"] = t["labels"].to(device)
-        t["polylines"] = t["polylines"].to(device)
-
-    outputs = model(feats)
-    loss_dict = criterion(outputs, targets)
-
-    bs = feats.size(0)
-    n += bs
-    for k in sums:
-        sums[k] += float(loss_dict[k].detach().item()) * bs
-
-    for k in sums:
-        sums[k] /= max(n, 1)
-    return sums
 
 
 @torch.no_grad()
@@ -1774,10 +1432,6 @@ def main():
     dataset = DetrPolylineEmbDataset(
         embed_dir=cfg.embed_dir, num_points=cfg.num_points, normalize=True
     )
-    n_train = int(0.8 * len(dataset))
-    n_val = len(dataset) - n_train
-    train_ds, val_ds = torch.utils.data.random_split(dataset, [n_train, n_val])
-    print(f"Dataset: total={len(dataset)}, train={len(train_ds)}, val={len(val_ds)}")
 
     base_model = DetrPolylineFromEmbeddings(
         in_dim=1024,
@@ -1793,18 +1447,6 @@ def main():
         num_points=cfg.num_points,
         aux_loss=cfg.aux_loss,
         query_embed_mode=cfg.query_embed_mode,
-    )
-
-    matcher = HungarianMatcherPolyline(
-        MatcherCost(class_cost=1.0, poly_cost=5.0, bbox_giou_cost=cfg.loss_bbox_giou)
-    )
-    criterion = DetrPolylineCriterion(
-        num_classes=cfg.num_classes,
-        matcher=matcher,
-        eos_coef=cfg.eos_coef,
-        loss_poly=5.0,
-        loss_bbox_giou=cfg.loss_bbox_giou,
-        loss_smooth=0.0,  # set small value like 0.1 for smoother curves
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1865,7 +1507,7 @@ def main():
         raise ValueError(f"Unknown model_name: {cfg.model_name}")
 
     model.to(device)
-    criterion.to(device)
+
     if device.type == "cuda":
         print(f"Using device: {torch.cuda.get_device_properties()}")
 
