@@ -1,4 +1,5 @@
 import copy
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -695,20 +696,21 @@ class DetrPolylineFromEmbeddings(nn.Module):
             for a, b in zip(outputs_class[:-1], outputs_poly[:-1])
         ]
 
-    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor, return_features: bool = False
+    ) -> Dict[str, torch.Tensor]:
         B, L, _ = x.shape
         assert (
             L == self.grid_h * self.grid_w
         ), f"Expected {self.grid_h * self.grid_w} tokens, got {L}"
 
+        dino_tokens = x
         src = self.input_proj(x)  # (B,L,D)
         pos = self.pos_embed(
             B=B, H=self.grid_h, W=self.grid_w, device=x.device
         )  # (B,L,D)
 
-        # fixed DINO grid, no padding
         mask = None
-
         hs, memory = self.transformer(
             src=src,
             query_embed=self.query_embed.weight,
@@ -724,6 +726,11 @@ class DetrPolylineFromEmbeddings(nn.Module):
             "pred_logits": outputs_class[-1],
             "pred_polylines": outputs_poly[-1],
         }
+
+        if return_features:
+            out["memory"] = memory
+            out["hs_last"] = hs[-1]
+            out["dino_tokens"] = dino_tokens
 
         if self.aux_loss:
             out["aux_outputs"] = self._set_aux_loss(outputs_class, outputs_poly)
@@ -1016,8 +1023,8 @@ class DetrPolylineEmbDataset(Dataset):
             H, W = d["image_size"].tolist()
 
             if polylines.numel() > 0:
-                polylines[..., 0] = polylines[..., 0] / float(W)
-                polylines[..., 1] = polylines[..., 1] / float(H)
+                polylines[..., 0] = polylines[..., 0] / float(W - 1)
+                polylines[..., 1] = polylines[..., 1] / float(H - 1)
                 polylines = polylines.clamp(0, 1)
 
         target = {"labels": labels, "polylines": polylines, "image_size": image_size}
@@ -1200,6 +1207,520 @@ def detr_polyline_inference(
     return results
 
 
+# =========================================================
+# Diffusion Model Components
+# =========================================================
+
+
+def coords_01_to_m11(x: torch.Tensor) -> torch.Tensor:
+    return x * 2.0 - 1.0
+
+
+def coords_m11_to_01(x: torch.Tensor) -> torch.Tensor:
+    return ((x + 1.0) * 0.5).clamp(0.0, 1.0)
+
+
+def extract(a: torch.Tensor, t: torch.Tensor, x_shape: Tuple[int, ...]) -> torch.Tensor:
+    b = t.shape[0]
+    out = a.gather(0, t)
+    return out.view(b, *([1] * (len(x_shape) - 1)))
+
+
+class SinusoidalTimeEmbedding(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, t: torch.Tensor) -> torch.Tensor:
+        half = self.dim // 2
+        device = t.device
+        emb = math.log(10000.0) / max(half - 1, 1)
+        emb = torch.exp(torch.arange(half, device=device, dtype=torch.float32) * -emb)
+        emb = t.float()[:, None] * emb[None, :]
+        emb = torch.cat([emb.sin(), emb.cos()], dim=-1)
+        if self.dim % 2 == 1:
+            emb = F.pad(emb, (0, 1))
+        return emb
+
+
+class AdaLNModulation(nn.Module):
+    def __init__(self, hidden_dim: int, cond_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(cond_dim, hidden_dim * 2),
+        )
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        scale, shift = self.net(cond).chunk(2, dim=-1)
+        return x * (1.0 + scale[:, None, :]) + shift[:, None, :]
+
+
+class DiffusionDecoderLayer(nn.Module):
+    def __init__(
+        self,
+        hidden_dim: int,
+        nhead: int,
+        dim_feedforward: int = 1024,
+        dropout: float = 0.1,
+        use_cross_attn: bool = True,
+    ):
+        super().__init__()
+        self.use_cross_attn = use_cross_attn
+
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.self_attn = nn.MultiheadAttention(
+            hidden_dim, nhead, dropout=dropout, batch_first=True
+        )
+        self.drop1 = nn.Dropout(dropout)
+
+        if use_cross_attn:
+            self.norm2 = nn.LayerNorm(hidden_dim)
+            self.cross_attn = nn.MultiheadAttention(
+                hidden_dim, nhead, dropout=dropout, batch_first=True
+            )
+            self.drop2 = nn.Dropout(dropout)
+        else:
+            self.norm2 = None
+            self.cross_attn = None
+            self.drop2 = None
+
+        self.norm3 = nn.LayerNorm(hidden_dim)
+        self.ff = nn.Sequential(
+            nn.Linear(hidden_dim, dim_feedforward),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, hidden_dim),
+        )
+        self.drop3 = nn.Dropout(dropout)
+
+        self.ada1 = AdaLNModulation(hidden_dim, hidden_dim)
+        self.ada2 = AdaLNModulation(hidden_dim, hidden_dim) if use_cross_attn else None
+        self.ada3 = AdaLNModulation(hidden_dim, hidden_dim)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        time_cond: torch.Tensor,
+        memory: Optional[torch.Tensor] = None,
+        memory_key_padding_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        h = self.ada1(self.norm1(x), time_cond)
+        h = self.self_attn(h, h, h, need_weights=False)[0]
+        x = x + self.drop1(h)
+
+        if self.use_cross_attn and memory is not None:
+            h = self.ada2(self.norm2(x), time_cond)
+            h = self.cross_attn(
+                query=h,
+                key=memory,
+                value=memory,
+                key_padding_mask=memory_key_padding_mask,
+                need_weights=False,
+            )[0]
+            x = x + self.drop2(h)
+
+        h = self.ada3(self.norm3(x), time_cond)
+        h = self.ff(h)
+        x = x + self.drop3(h)
+        return x
+
+
+class PolylineDiffusionDecoder(nn.Module):
+    def __init__(
+        self,
+        num_queries: int,
+        num_points: int,
+        hidden_dim: int = 256,
+        nhead: int = 8,
+        num_layers: int = 4,
+        dim_feedforward: int = 1024,
+        dropout: float = 0.1,
+        cond_dim: int = 256,
+        query_dim: int = 256,
+        use_cond_tokens: bool = True,
+        use_query_context: bool = True,
+        use_coarse_polylines: bool = True,
+    ):
+        super().__init__()
+        self.num_queries = num_queries
+        self.num_points = num_points
+        self.hidden_dim = hidden_dim
+        self.use_cond_tokens = use_cond_tokens
+        self.use_query_context = use_query_context
+        self.use_coarse_polylines = use_coarse_polylines
+
+        in_dim = num_points * 2
+        if use_coarse_polylines:
+            in_dim += num_points * 2
+
+        self.input_proj = nn.Linear(in_dim, hidden_dim)
+        self.slot_embed = nn.Embedding(num_queries, hidden_dim)
+        self.time_embed = nn.Sequential(
+            SinusoidalTimeEmbedding(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+
+        self.cond_proj = nn.Linear(cond_dim, hidden_dim) if use_cond_tokens else None
+        self.query_proj = (
+            nn.Linear(query_dim, hidden_dim) if use_query_context else None
+        )
+
+        self.layers = nn.ModuleList(
+            [
+                DiffusionDecoderLayer(
+                    hidden_dim=hidden_dim,
+                    nhead=nhead,
+                    dim_feedforward=dim_feedforward,
+                    dropout=dropout,
+                    use_cross_attn=use_cond_tokens,
+                )
+                for _ in range(num_layers)
+            ]
+        )
+        self.final_norm = nn.LayerNorm(hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, num_points * 2)
+
+    def forward(
+        self,
+        x_t: torch.Tensor,
+        t: torch.Tensor,
+        cond_tokens: Optional[torch.Tensor] = None,
+        query_context: Optional[torch.Tensor] = None,
+        coarse_polys: Optional[torch.Tensor] = None,
+        cond_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        B, Q, K, _ = x_t.shape
+
+        x_flat = x_t.reshape(B, Q, K * 2)
+        pieces = [x_flat]
+
+        if self.use_coarse_polylines:
+            if coarse_polys is None:
+                coarse_polys = torch.zeros_like(x_t)
+            pieces.append(coarse_polys.reshape(B, Q, K * 2))
+
+        x = self.input_proj(torch.cat(pieces, dim=-1))
+
+        slot_ids = torch.arange(Q, device=x.device)
+        x = x + self.slot_embed(slot_ids)[None, :, :]
+
+        if self.use_query_context:
+            if query_context is None:
+                query_context = torch.zeros(
+                    B, Q, self.hidden_dim, device=x.device, dtype=x.dtype
+                )
+            else:
+                query_context = self.query_proj(query_context)
+            x = x + query_context
+
+        time_cond = self.time_embed(t)
+
+        memory = None
+        if self.use_cond_tokens and cond_tokens is not None:
+            memory = self.cond_proj(cond_tokens)
+
+        for layer in self.layers:
+            x = layer(
+                x, time_cond=time_cond, memory=memory, memory_key_padding_mask=cond_mask
+            )
+
+        x = self.final_norm(x)
+        out = self.out_proj(x).view(B, Q, K, 2)
+        return out
+
+
+class GaussianPolylineDiffusion(nn.Module):
+    def __init__(
+        self,
+        model: PolylineDiffusionDecoder,
+        timesteps: int = 1000,
+        beta_start: float = 1e-4,
+        beta_end: float = 2e-2,
+    ):
+        super().__init__()
+        self.model = model
+        self.timesteps = timesteps
+
+        betas = torch.linspace(beta_start, beta_end, timesteps, dtype=torch.float32)
+        alphas = 1.0 - betas
+        alphas_cumprod = torch.cumprod(alphas, dim=0)
+        alphas_cumprod_prev = torch.cat([torch.ones(1), alphas_cumprod[:-1]], dim=0)
+
+        self.register_buffer("betas", betas)
+        self.register_buffer("alphas", alphas)
+        self.register_buffer("alphas_cumprod", alphas_cumprod)
+        self.register_buffer("alphas_cumprod_prev", alphas_cumprod_prev)
+        self.register_buffer("sqrt_alphas_cumprod", torch.sqrt(alphas_cumprod))
+        self.register_buffer(
+            "sqrt_one_minus_alphas_cumprod", torch.sqrt(1.0 - alphas_cumprod)
+        )
+        self.register_buffer("sqrt_recip_alphas", torch.sqrt(1.0 / alphas))
+
+        posterior_variance = (
+            betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
+        )
+        self.register_buffer("posterior_variance", posterior_variance.clamp(min=1e-20))
+
+    @torch.no_grad()
+    def p_sample(
+        self,
+        x: torch.Tensor,
+        t: torch.Tensor,
+        t_index: int,
+        cond_tokens: Optional[torch.Tensor] = None,
+        query_context: Optional[torch.Tensor] = None,
+        coarse_polys: Optional[torch.Tensor] = None,
+        cond_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        pred_noise = self.model(
+            x_t=x,
+            t=t,
+            cond_tokens=cond_tokens,
+            query_context=query_context,
+            coarse_polys=coarse_polys,
+            cond_mask=cond_mask,
+        )
+
+        betas_t = extract(self.betas, t, x.shape)
+        sqrt_one_minus_alphas_cumprod_t = extract(
+            self.sqrt_one_minus_alphas_cumprod, t, x.shape
+        )
+        sqrt_recip_alphas_t = extract(self.sqrt_recip_alphas, t, x.shape)
+
+        model_mean = sqrt_recip_alphas_t * (
+            x - betas_t * pred_noise / sqrt_one_minus_alphas_cumprod_t
+        )
+
+        if t_index == 0:
+            return model_mean
+
+        posterior_variance_t = extract(self.posterior_variance, t, x.shape)
+        noise = torch.randn_like(x)
+        return model_mean + posterior_variance_t.sqrt() * noise
+
+    @torch.no_grad()
+    def sample(
+        self,
+        shape: Tuple[int, int, int, int],
+        cond_tokens: Optional[torch.Tensor] = None,
+        query_context: Optional[torch.Tensor] = None,
+        coarse_polys: Optional[torch.Tensor] = None,
+        cond_mask: Optional[torch.Tensor] = None,
+        clamp: bool = True,
+    ) -> torch.Tensor:
+        device = next(self.parameters()).device
+        x = torch.randn(shape, device=device)
+        for i in reversed(range(self.timesteps)):
+            t = torch.full((shape[0],), i, device=device, dtype=torch.long)
+            x = self.p_sample(
+                x=x,
+                t=t,
+                t_index=i,
+                cond_tokens=cond_tokens,
+                query_context=query_context,
+                coarse_polys=coarse_polys,
+                cond_mask=cond_mask,
+            )
+        return x.clamp(-1.0, 1.0) if clamp else x
+
+
+class DetrWithDiffusion(nn.Module):
+    def __init__(
+        self,
+        base_model: nn.Module,
+        diffusion: GaussianPolylineDiffusion,
+        num_queries: int,
+        num_points: int,
+        condition_source: str = "encoder",
+        use_query_context: bool = True,
+        use_coarse_polylines: bool = True,
+    ):
+        super().__init__()
+        assert condition_source in {"encoder", "dino"}
+        self.base_model = base_model
+        self.diffusion = diffusion
+        self.num_queries = num_queries
+        self.num_points = num_points
+        self.condition_source = condition_source
+        self.use_query_context = use_query_context
+        self.use_coarse_polylines = use_coarse_polylines
+
+    def _pick_cond_tokens(
+        self, feats: torch.Tensor, outputs: Dict[str, torch.Tensor]
+    ) -> Optional[torch.Tensor]:
+        if self.condition_source == "encoder":
+            return outputs.get("memory", None)
+        if self.condition_source == "dino":
+            return outputs.get("dino_tokens", feats)
+        return None
+
+    def _pick_query_context(
+        self, outputs: Dict[str, torch.Tensor]
+    ) -> Optional[torch.Tensor]:
+        if not self.use_query_context:
+            return None
+        return outputs.get("hs_last", None)
+
+    def forward(
+        self, feats: torch.Tensor, return_features: bool = True
+    ) -> Dict[str, torch.Tensor]:
+        outputs = self.base_model(feats, return_features=return_features)
+        if "dino_tokens" not in outputs:
+            outputs["dino_tokens"] = feats
+        return outputs
+
+
+@torch.no_grad()
+def refine_polylines_with_diffusion(
+    model_with_diffusion: DetrWithDiffusion,
+    feats: torch.Tensor,
+    pred_score_thresh: float = 0.5,
+    refine_only_positive: bool = True,
+) -> Dict[str, torch.Tensor]:
+    outputs = model_with_diffusion(feats, return_features=True)
+
+    logits = outputs["pred_logits"]
+    probs = logits.softmax(dim=-1)
+    fg_scores = probs[..., :-1].max(dim=-1).values
+    keep = fg_scores >= pred_score_thresh
+
+    coarse_m11 = coords_01_to_m11(outputs["pred_polylines"])
+    cond_tokens = model_with_diffusion._pick_cond_tokens(feats, outputs)
+    query_context = model_with_diffusion._pick_query_context(outputs)
+
+    refined_m11 = model_with_diffusion.diffusion.sample(
+        shape=coarse_m11.shape,
+        cond_tokens=cond_tokens,
+        query_context=query_context,
+        coarse_polys=coarse_m11 if model_with_diffusion.use_coarse_polylines else None,
+        cond_mask=None,
+        clamp=True,
+    )
+
+    if refine_only_positive:
+        refined_m11 = torch.where(keep[:, :, None, None], refined_m11, coarse_m11)
+
+    outputs["pred_polylines_refined"] = coords_m11_to_01(refined_m11)
+    outputs["pred_keep_mask"] = keep
+    outputs["pred_scores_fg"] = fg_scores
+    return outputs
+
+
+# =========================================================
+# Inference Helpers
+# =========================================================
+
+
+@torch.no_grad()
+def detr_polyline_inference_with_diffusion(
+    model_with_diffusion,
+    feats: torch.Tensor,
+    image_sizes: List[Tuple[int, int]],
+    score_thresh: float = 0.5,
+    topk: int = 20,
+    device: str = "cuda",
+    use_refined: bool = True,
+):
+    model_with_diffusion.eval()
+    feats = feats.to(device)
+
+    outputs = refine_polylines_with_diffusion(
+        model_with_diffusion=model_with_diffusion,
+        feats=feats,
+        pred_score_thresh=score_thresh,
+        refine_only_positive=True,
+    )
+
+    logits = outputs["pred_logits"]
+    if use_refined:
+        polylines = outputs["pred_polylines_refined"]
+    else:
+        polylines = outputs["pred_polylines"]
+
+    prob = F.softmax(logits, dim=-1)
+    scores_all, labels_all = prob[..., :-1].max(dim=-1)
+
+    B, Q = scores_all.shape
+    results = []
+
+    for b in range(B):
+        H, W = image_sizes[b]
+
+        scores = scores_all[b]
+        labels = labels_all[b]
+        polys = polylines[b]
+
+        keep = scores >= score_thresh
+        if keep.any():
+            scores = scores[keep]
+            labels = labels[keep]
+            polys = polys[keep]
+        else:
+            results.append(
+                {
+                    "scores": scores.new_zeros((0,)),
+                    "labels": labels.new_zeros((0,), dtype=torch.long),
+                    "polylines_norm": polys.new_zeros((0, polys.shape[1], 2)),
+                    "polylines_px": polys.new_zeros((0, polys.shape[1], 2)),
+                }
+            )
+            continue
+
+        if scores.numel() > topk:
+            top_idx = torch.topk(scores, k=topk, largest=True).indices
+            scores = scores[top_idx]
+            labels = labels[top_idx]
+            polys = polys[top_idx]
+
+        polys_px = polys.clone()
+        polys_px[..., 0] = polys_px[..., 0] * float(W - 1)
+        polys_px[..., 1] = polys_px[..., 1] * float(H - 1)
+        polys_px[..., 0] = polys_px[..., 0].clamp(0, W - 1)
+        polys_px[..., 1] = polys_px[..., 1].clamp(0, H - 1)
+
+        results.append(
+            {
+                "scores": scores.detach().cpu(),
+                "labels": labels.detach().cpu(),
+                "polylines_norm": polys.detach().cpu(),
+                "polylines_px": polys_px.detach().cpu(),
+            }
+        )
+
+    return results
+
+
+# =========================================================
+# Checkpoint Helpers
+# =========================================================
+
+
+def load_checkpoint_flexible(
+    module: nn.Module, ckpt_path: Path, key_candidates=None, strict: bool = True
+):
+    ckpt = torch.load(ckpt_path)
+    if key_candidates is None:
+        key_candidates = ["model_with_diffusion", "model", "state_dict"]
+
+    state = None
+    for k in key_candidates:
+        if k in ckpt:
+            state = ckpt[k]
+            break
+
+    if state is None:
+        state = ckpt
+
+    missing, unexpected = module.load_state_dict(state, strict=strict)
+    print(f"Loaded checkpoint from {ckpt_path}")
+    print(f"  missing keys: {len(missing)}")
+    print(f"  unexpected keys: {len(unexpected)}")
+    return ckpt
+
+
 # -------------------------
 # Main
 # -------------------------
@@ -1207,12 +1728,17 @@ def detr_polyline_inference(
 
 def main():
     cfg = dict(
-        model_name="model_with_diffusion",  # model
+        # model_name="model",  # model_with_diffusion, model
+        # checkpoint=Path("/home/fatemeh/Downloads/hedge/snellius/detr_polyline_7.pt"),
+        model_name="model_with_diffusion",  # model_with_diffusion, model
+        checkpoint=Path(
+            "/home/fatemeh/Downloads/hedge/snellius/detr_polyline_7_stage3.pt"
+        ),
+        # checkpoint=None,  # "/home/fatemeh/Downloads/hedge/results/training/best_detr_polyline_9.pt", #"/home/fatemeh/Downloads/hedge/snellius/best_detr_polyline_1.pt"
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
             "/home/fatemeh/Downloads/hedge/results/test_256_None/embs_polylines"  # test_256_dino256
         ),
-        checkpoint=None,  # "/home/fatemeh/Downloads/hedge/results/training/best_detr_polyline_9.pt", #"/home/fatemeh/Downloads/hedge/snellius/best_detr_polyline_1.pt"
         # save_path=Path("/home/fkarimineja/exps/hedge"),
         # embed_dir=Path("/home/fkarimineja/data/hedge/test_256/embs_polylines"),
         num_points=10,
@@ -1224,6 +1750,16 @@ def main():
         eos_coef=0.1,  # .3, .5
         aux_loss=True,
         query_embed_mode="detr",  # "detr" or "legacy"
+        # diffusion
+        diff_hidden_dim=256,
+        diff_nhead=8,
+        diff_num_layers=4,
+        diff_dim_feedforward=1024,
+        diff_dropout=0.1,
+        diff_timesteps=100,
+        condition_source="encoder",  # "encoder" or "dino"
+        use_query_context=True,
+        use_coarse_polylines=True,
         # trining
         n_epochs=500,  # 500
         batch_size=256,  # 5x256=1280
@@ -1243,29 +1779,7 @@ def main():
     train_ds, val_ds = torch.utils.data.random_split(dataset, [n_train, n_val])
     print(f"Dataset: total={len(dataset)}, train={len(train_ds)}, val={len(val_ds)}")
 
-    loader = DataLoader(
-        dataset,
-        batch_size=cfg.batch_size,
-        shuffle=False,
-        num_workers=cfg.num_workers,
-        collate_fn=detr_polyline_collate_fn,
-    )
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=cfg.batch_size,
-        shuffle=True,
-        num_workers=cfg.num_workers,
-        collate_fn=detr_polyline_collate_fn,
-    )
-    eval_loader = DataLoader(
-        val_ds,
-        batch_size=cfg.batch_size,
-        shuffle=False,
-        num_workers=cfg.num_workers,
-        collate_fn=detr_polyline_collate_fn,
-    )
-
-    model = DetrPolylineFromEmbeddings(
+    base_model = DetrPolylineFromEmbeddings(
         in_dim=1024,
         num_classes=cfg.num_classes,
         num_queries=cfg.num_polylines,
@@ -1294,6 +1808,62 @@ def main():
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if cfg.model_name == "model":
+        model = base_model.to(device)
+
+        load_checkpoint_flexible(
+            model,
+            cfg.checkpoint,
+            key_candidates=["model"],
+            strict=True,
+        )
+        model.eval()
+
+    elif cfg.model_name == "model_with_diffusion":
+        diffusion_decoder = PolylineDiffusionDecoder(
+            num_queries=cfg.num_polylines,
+            num_points=cfg.num_points,
+            hidden_dim=cfg.diff_hidden_dim,
+            nhead=cfg.diff_nhead,
+            num_layers=cfg.diff_num_layers,
+            dim_feedforward=cfg.diff_dim_feedforward,
+            dropout=cfg.diff_dropout,
+            cond_dim=256 if cfg.condition_source == "encoder" else 1024,
+            query_dim=256,
+            use_cond_tokens=True,
+            use_query_context=cfg.use_query_context,
+            use_coarse_polylines=cfg.use_coarse_polylines,
+        )
+
+        diffusion = GaussianPolylineDiffusion(
+            model=diffusion_decoder,
+            timesteps=cfg.diff_timesteps,
+            beta_start=1e-4,
+            beta_end=2e-2,
+        )
+
+        model = DetrWithDiffusion(
+            base_model=base_model,
+            diffusion=diffusion,
+            num_queries=cfg.num_polylines,
+            num_points=cfg.num_points,
+            condition_source=cfg.condition_source,
+            use_query_context=cfg.use_query_context,
+            use_coarse_polylines=cfg.use_coarse_polylines,
+        ).to(device)
+
+        load_checkpoint_flexible(
+            model,
+            cfg.checkpoint,
+            key_candidates=["model_with_diffusion"],
+            strict=True,
+        )
+        model.eval()
+
+    else:
+        raise ValueError(f"Unknown model_name: {cfg.model_name}")
+
     model.to(device)
     criterion.to(device)
     if device.type == "cuda":
@@ -1314,14 +1884,25 @@ def main():
         feat = torch.tensor(sample["feat"], dtype=torch.float32).unsqueeze(0)
         image_size = [tuple(sample["image_size"].tolist())]
 
-        preds = detr_polyline_inference(
-            model=model,
-            feats=feat,
-            image_sizes=image_size,
-            score_thresh=score_thresh,
-            topk=len(sample["polylines"]),  # topk,
-            device=device,
-        )  # [M,K,2]
+        if cfg.model_name == "model":
+            preds = detr_polyline_inference(
+                model=model,
+                feats=feat,
+                image_sizes=image_size,
+                score_thresh=score_thresh,
+                topk=len(sample["polylines"]),  # topk,
+                device=device,
+            )  # [M,K,2]
+        else:
+            preds = detr_polyline_inference_with_diffusion(
+                model_with_diffusion=model,
+                feats=feat,
+                image_sizes=image_size,
+                score_thresh=score_thresh,
+                topk=len(sample["polylines"]),
+                device=device,
+                use_refined=True,
+            )
 
         im = cv2.imread(str(inp.parent.parent / f"images/{inp.stem}.png"))
         im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
@@ -1334,53 +1915,23 @@ def main():
         visualize_polylines(im, gt_polylines)
         return preds
 
-    cfg.model_name = "model"  # model_with_diffusion, model
-    cfg.checkpoint = (
-        "/home/fatemeh/Downloads/hedge/snellius/detr_polyline_7.pt"
-        # "/home/fatemeh/Downloads/hedge/results/training/best_detr_polyline_11_stage3.pt"
-    )
-    state = torch.load(cfg.checkpoint, map_location=device)[cfg.model_name]
-    if cfg.model_name == "model_with_diffusion":
-        state = {
-            k[len("base_model.") :]: v
-            for k, v in state.items()
-            if k.startswith("base_model.")
-        }
-    missing, unexpected = model.load_state_dict(state, strict=True)
-    # model.load_state_dict(torch.load(cfg.checkpoint, map_location=device)[cfg.model_name], strict=False)
-    model.eval()
+    # # Only DetrPolylineFromEmbeddings test
+    # cfg.model_name = "model_with_diffusion"  # model_with_diffusion, model
+    # cfg.checkpoint = (
+    #     "/home/fatemeh/Downloads/hedge/snellius/detr_polyline_7_stage3.pt"
+    #     # "/home/fatemeh/Downloads/hedge/results/training/best_detr_polyline_11_stage3.pt"
+    # )
+    # state = torch.load(cfg.checkpoint, map_location=device)[cfg.model_name]
+    # if cfg.model_name == "model_with_diffusion":
+    #     state = {
+    #         k[len("base_model.") :]: v
+    #         for k, v in state.items()
+    #         if k.startswith("base_model.")
+    #     }
+    # missing, unexpected = model.load_state_dict(state, strict=True)
+    # model.eval()
     preds = visualize_per_image(i=0)
     print("Done")
-
-    """
-    a = np.load(dataset.files[0])  # embs_polylines/pos_000003.npz
-    a = torch.tensor(a["feat"], dtype=torch.float32).unsqueeze(0)
-    
-    # Example inference on eval set
-    feats, targets = next(iter(loader))  #
-    image_sizes = [t["image_size"].tolist() for t in targets]
-    preds = detr_polyline_inference(
-        model=model,
-        feats=feats,
-        image_sizes=image_sizes,
-        score_thresh=0.0,  # 0.9,
-        topk=11,
-        device=device,
-    )
-    eval_losses = eval_one_epoch(feats, targets, model, criterion, device)
-
-    # preds[0]["polylines_px"] is (M,K,2) in pixel coords
-    print(preds[0]["scores"].shape, preds[0]["polylines_px"].shape)
-
-    preds = detr_polyline_inference(
-        model=model,
-        feats=a,
-        image_sizes=[image_sizes[0]],
-        score_thresh=0.9,
-        topk=20,
-        device=device,
-    )
-    """
 
 
 if __name__ == "__main__":

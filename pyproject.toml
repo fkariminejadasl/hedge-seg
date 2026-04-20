@@ -39,6 +39,7 @@ dependencies = [
     "torchmetrics", # torchmetrics[detection]
     "wandb",
     "tensorboard",
+    "huggingface_hub",
 
     # --- geospatial
     "rasterio",

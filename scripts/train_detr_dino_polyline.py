@@ -1654,15 +1654,6 @@ class GaussianPolylineDiffusion(nn.Module):
 # =========================================================
 
 
-@dataclass
-class DiffusionTrainConfig:
-    lambda_diff: float = 0.1
-    timesteps: int = 1000
-    train_condition_source: str = "encoder"  # "encoder" or "dino"
-    use_query_context: bool = True
-    use_coarse_polylines: bool = True
-
-
 class DetrWithDiffusion(nn.Module):
     """
     Wraps an existing DETR-like polyline model and adds a diffusion branch.
@@ -1814,47 +1805,6 @@ def compute_diffusion_loss_from_matches(
         "coarse_m11": coarse_m11,
     }
     return {"loss_diff": diff_loss}, extra
-
-
-# =========================================================
-# Inference utilities
-# =========================================================
-
-
-@torch.no_grad()
-def refine_polylines_with_diffusion(
-    model_with_diffusion: DetrWithDiffusion,
-    feats: torch.Tensor,
-    pred_score_thresh: float = 0.5,
-    refine_only_positive: bool = True,
-) -> Dict[str, torch.Tensor]:
-    outputs = model_with_diffusion(feats, return_features=True)
-
-    logits = outputs["pred_logits"]
-    probs = logits.softmax(dim=-1)
-    fg_scores = probs[..., :-1].max(dim=-1).values
-    keep = fg_scores >= pred_score_thresh
-
-    coarse_m11 = coords_01_to_m11(outputs["pred_polylines"])
-    cond_tokens = model_with_diffusion._pick_cond_tokens(feats, outputs)
-    query_context = model_with_diffusion._pick_query_context(outputs)
-
-    refined_m11 = model_with_diffusion.diffusion.sample(
-        shape=coarse_m11.shape,
-        cond_tokens=cond_tokens,
-        query_context=query_context,
-        coarse_polys=coarse_m11 if model_with_diffusion.use_coarse_polylines else None,
-        cond_mask=None,
-        clamp=True,
-    )
-
-    if refine_only_positive:
-        refined_m11 = torch.where(keep[:, :, None, None], refined_m11, coarse_m11)
-
-    outputs["pred_polylines_refined"] = coords_m11_to_01(refined_m11)
-    outputs["pred_keep_mask"] = keep
-    outputs["pred_scores_fg"] = fg_scores
-    return outputs
 
 
 # =========================================================
@@ -2120,8 +2070,8 @@ def main():
         num_decoder_layers=4,
         dim_feedforward=1024,
         dropout=0.01,  # default 0.1
-        aux_loss=False,
-        query_embed_mode="legacy",  # "detr" or "legacy"
+        aux_loss=True,
+        query_embed_mode="detr",  # "detr" or "legacy"
         loss_bbox_giou=1.0,  # 1.0
         eos_coef=0.1,  # .3, .5
         # diffusion
