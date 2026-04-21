@@ -10,12 +10,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import OmegaConf
-from torch.utils.data import Dataset
 
 from hedge_seg.training_utils import set_seed
 
 # -------------------------
-# Utilities: boxes for optional GIoU-from-polyline
+# Utilities: boxes
 # -------------------------
 
 
@@ -40,6 +39,51 @@ def box_iou_xyxy(
     union = area1[:, None] + area2[None, :] - inter
     iou = inter / union.clamp(min=1e-6)
     return iou, union
+
+
+def generalized_box_iou_xyxy(
+    boxes1: torch.Tensor, boxes2: torch.Tensor
+) -> torch.Tensor:
+    iou, union = box_iou_xyxy(boxes1, boxes2)
+
+    lt = torch.min(boxes1[:, None, :2], boxes2[None, :, :2])
+    rb = torch.max(boxes1[:, None, 2:], boxes2[None, :, 2:])
+
+    wh = (rb - lt).clamp(min=0)
+    area_c = wh[:, :, 0] * wh[:, :, 1]
+    return iou - (area_c - union) / area_c.clamp(min=1e-6)
+
+
+def polyline_to_bbox_xyxy(poly: torch.Tensor) -> torch.Tensor:
+    """
+    poly: (..., K, 2) normalized in [0,1]
+    returns: (..., 4) xyxy normalized
+    """
+    x = poly[..., :, 0]
+    y = poly[..., :, 1]
+    x0 = x.min(dim=-1).values
+    y0 = y.min(dim=-1).values
+    x1 = x.max(dim=-1).values
+    y1 = y.max(dim=-1).values
+    return torch.stack([x0, y0, x1, y1], dim=-1)
+
+
+def box_xyxy_to_cxcywh(boxes: torch.Tensor) -> torch.Tensor:
+    x0, y0, x1, y1 = boxes.unbind(-1)
+    cx = (x0 + x1) * 0.5
+    cy = (y0 + y1) * 0.5
+    w = (x1 - x0).clamp(min=1e-6)
+    h = (y1 - y0).clamp(min=1e-6)
+    return torch.stack([cx, cy, w, h], dim=-1)
+
+
+def box_cxcywh_to_xyxy(boxes: torch.Tensor) -> torch.Tensor:
+    cx, cy, w, h = boxes.unbind(-1)
+    x0 = cx - 0.5 * w
+    y0 = cy - 0.5 * h
+    x1 = cx + 0.5 * w
+    y1 = cy + 0.5 * h
+    return torch.stack([x0, y0, x1, y1], dim=-1)
 
 
 # -------------------------
@@ -594,6 +638,7 @@ class DetrPolylineFromEmbeddings(nn.Module):
     Input: x (B, L, in_dim), with L = grid_h * grid_w
     Output:
       pred_logits: (B, Q, num_classes+1)
+      pred_boxes: (B, Q, 4) in [0,1], cxcywh
       pred_polylines: (B, Q, K, 2) in [0,1]
       aux_outputs: list[dict], optional
     """
@@ -652,19 +697,39 @@ class DetrPolylineFromEmbeddings(nn.Module):
             )
 
         self.class_embed = nn.Linear(d_model, num_classes + 1)
-        self.poly_embed = MLP(d_model, d_model, 2 * num_points, num_layers=3)
 
-    def _decode_polylines(self, hs: torch.Tensor) -> torch.Tensor:
-        # hs: (..., Q, D)
-        poly = self.poly_embed(hs)
-        poly = poly.view(*hs.shape[:-1], self.num_points, 2).sigmoid()
-        return poly
+        # New heads
+        self.bbox_embed = MLP(d_model, d_model, 4, num_layers=3)  # cx, cy, w, h
+        self.offset_embed = MLP(d_model, d_model, 2 * num_points, num_layers=3)
+
+    def _decode_polylines(
+        self,
+        hs: torch.Tensor,  # (..., Q, D)
+        pred_boxes: torch.Tensor,  # (..., Q, 4) in cxcywh
+    ) -> torch.Tensor:
+        cxcy = pred_boxes[..., :2]
+        wh = pred_boxes[..., 2:].clamp(min=1e-3)
+
+        offsets = self.offset_embed(hs)
+        offsets = offsets.view(*hs.shape[:-1], self.num_points, 2)
+
+        # local offsets relative to the predicted box
+        offsets = 0.5 * torch.tanh(offsets)
+
+        poly = cxcy.unsqueeze(-2) + offsets * wh.unsqueeze(-2)
+        return poly.clamp(0.0, 1.0)
 
     @torch.jit.unused
-    def _set_aux_loss(self, outputs_class, outputs_poly):
+    def _set_aux_loss(self, outputs_class, outputs_boxes, outputs_poly):
         return [
-            {"pred_logits": a, "pred_polylines": b}
-            for a, b in zip(outputs_class[:-1], outputs_poly[:-1])
+            {
+                "pred_logits": a,
+                "pred_boxes": b,
+                "pred_polylines": c,
+            }
+            for a, b, c in zip(
+                outputs_class[:-1], outputs_boxes[:-1], outputs_poly[:-1]
+            )
         ]
 
     def forward(
@@ -691,10 +756,12 @@ class DetrPolylineFromEmbeddings(nn.Module):
         # hs: (num_layers,B,Q,D)
 
         outputs_class = self.class_embed(hs)  # (num_layers,B,Q,C+1)
-        outputs_poly = self._decode_polylines(hs)  # (num_layers,B,Q,K,2)
+        outputs_boxes = self.bbox_embed(hs).sigmoid()  # (num_layers,B,Q,4)
+        outputs_poly = self._decode_polylines(hs, outputs_boxes)  # (num_layers,B,Q,K,2)
 
         out = {
             "pred_logits": outputs_class[-1],
+            "pred_boxes": outputs_boxes[-1],
             "pred_polylines": outputs_poly[-1],
         }
 
@@ -704,7 +771,9 @@ class DetrPolylineFromEmbeddings(nn.Module):
             out["dino_tokens"] = dino_tokens
 
         if self.aux_loss:
-            out["aux_outputs"] = self._set_aux_loss(outputs_class, outputs_poly)
+            out["aux_outputs"] = self._set_aux_loss(
+                outputs_class, outputs_boxes, outputs_poly
+            )
 
         return out
 
@@ -714,7 +783,7 @@ class DetrPolylineFromEmbeddings(nn.Module):
 # -------------------------
 
 
-class DetrPolylineEmbDataset(Dataset):
+class DetrPolylineEmbDataset(torch.utils.data.Dataset):
     """
     Expected per file:
       feat: (196,1024)
@@ -743,17 +812,13 @@ class DetrPolylineEmbDataset(Dataset):
         polylines = torch.from_numpy(np.ascontiguousarray(polylines)).float()
         labels = torch.from_numpy(np.ascontiguousarray(labels)).long()
 
-        if polylines.numel() > 0:
-            if polylines.shape[1] != self.num_points:
-                raise ValueError(
-                    f"{self.files[idx].name}: expected K={self.num_points}, got {polylines.shape[1]}"
-                )
+        if polylines.numel() > 0 and polylines.shape[1] != self.num_points:
+            raise ValueError(
+                f"{self.files[idx].name}: expected K={self.num_points}, got {polylines.shape[1]}"
+            )
 
         if self.normalize:
-            if "image_size" not in d:
-                raise ValueError(f"{self.files[idx].name} missing image_size")
             H, W = d["image_size"].tolist()
-
             if polylines.numel() > 0:
                 polylines[..., 0] = polylines[..., 0] / float(W - 1)
                 polylines[..., 1] = polylines[..., 1] / float(H - 1)
@@ -795,6 +860,8 @@ def detr_polyline_inference(
             "labels": (M,),
             "polylines_norm": (M,K,2) in [0,1],
             "polylines_px": (M,K,2) in pixel coords,
+            "boxes_norm": (M,4) in cxcywh,
+            "boxes_px_xyxy": (M,4) in pixel coords,
           }
         where M <= topk
     """
@@ -806,6 +873,7 @@ def detr_polyline_inference(
     outputs = model(feats)
     logits = outputs["pred_logits"]  # (B,Q,C+1)
     polylines = outputs["pred_polylines"]  # (B,Q,K,2) normalized
+    boxes = outputs["pred_boxes"]  # (B,Q,4) normalized cxcywh
 
     prob = F.softmax(logits, dim=-1)  # (B,Q,C+1)
     scores_all, labels_all = prob[..., :-1].max(dim=-1)  # exclude "no-object" -> (B,Q)
@@ -819,37 +887,47 @@ def detr_polyline_inference(
         scores = scores_all[b]
         labels = labels_all[b]
         polys = polylines[b]  # (Q,K,2)
+        bx = boxes[b]  # (Q,4)
 
         keep = scores >= score_thresh
         if keep.any():
             scores = scores[keep]
             labels = labels[keep]
             polys = polys[keep]
+            bx = bx[keep]
         else:
-            # nothing passed threshold
             results.append(
                 {
                     "scores": scores.new_zeros((0,)),
                     "labels": labels.new_zeros((0,), dtype=torch.long),
                     "polylines_norm": polys.new_zeros((0, polys.shape[1], 2)),
                     "polylines_px": polys.new_zeros((0, polys.shape[1], 2)),
+                    "boxes_norm": bx.new_zeros((0, 4)),
+                    "boxes_px_xyxy": bx.new_zeros((0, 4)),
                 }
             )
             continue
 
-        # topk
         if scores.numel() > topk:
             top_idx = torch.topk(scores, k=topk, largest=True).indices
             scores = scores[top_idx]
             labels = labels[top_idx]
             polys = polys[top_idx]
+            bx = bx[top_idx]
 
-        # convert to pixel coordinates
+        # convert polyline to pixel coordinates
         polys_px = polys.clone()
         polys_px[..., 0] = polys_px[..., 0] * float(W - 1)
         polys_px[..., 1] = polys_px[..., 1] * float(H - 1)
         polys_px[..., 0] = polys_px[..., 0].clamp(0, W - 1)
         polys_px[..., 1] = polys_px[..., 1].clamp(0, H - 1)
+
+        # convert predicted boxes to pixel xyxy
+        bx_xyxy = box_cxcywh_to_xyxy(bx).clone()
+        bx_xyxy[..., 0] = (bx_xyxy[..., 0] * float(W - 1)).clamp(0, W - 1)
+        bx_xyxy[..., 1] = (bx_xyxy[..., 1] * float(H - 1)).clamp(0, H - 1)
+        bx_xyxy[..., 2] = (bx_xyxy[..., 2] * float(W - 1)).clamp(0, W - 1)
+        bx_xyxy[..., 3] = (bx_xyxy[..., 3] * float(H - 1)).clamp(0, H - 1)
 
         results.append(
             {
@@ -857,6 +935,8 @@ def detr_polyline_inference(
                 "labels": labels.detach().cpu(),
                 "polylines_norm": polys.detach().cpu(),
                 "polylines_px": polys_px.detach().cpu(),
+                "boxes_norm": bx.detach().cpu(),
+                "boxes_px_xyxy": bx_xyxy.detach().cpu(),
             }
         )
 
@@ -1238,12 +1318,12 @@ def refine_polylines_with_diffusion(
 ) -> Dict[str, torch.Tensor]:
     outputs = model_with_diffusion(feats, return_features=True)
 
-    logits = outputs["pred_logits"]
+    logits = outputs["pred_logits"]  # (B,Q,C+1)
     probs = logits.softmax(dim=-1)
-    fg_scores = probs[..., :-1].max(dim=-1).values
+    fg_scores = probs[..., :-1].max(dim=-1).values  # (B,Q)
     keep = fg_scores >= pred_score_thresh
 
-    coarse_m11 = coords_01_to_m11(outputs["pred_polylines"])
+    coarse_m11 = coords_01_to_m11(outputs["pred_polylines"])  # (B,Q,K,2)
     cond_tokens = model_with_diffusion._pick_cond_tokens(feats, outputs)
     query_context = model_with_diffusion._pick_query_context(outputs)
 
@@ -1280,6 +1360,20 @@ def detr_polyline_inference_with_diffusion(
     device: str = "cuda",
     use_refined: bool = True,
 ):
+    """
+    Run inference for the DETR + diffusion model.
+
+    Returns:
+        list of length B. Each element is a dict:
+          {
+            "scores": (M,),
+            "labels": (M,),
+            "polylines_norm": (M,K,2) in [0,1],
+            "polylines_px": (M,K,2) in pixel coords,
+            "boxes_norm": (M,4) in cxcywh,
+            "boxes_px_xyxy": (M,4) in pixel coords,
+          }
+    """
     model_with_diffusion.eval()
     feats = feats.to(device)
 
@@ -1290,14 +1384,14 @@ def detr_polyline_inference_with_diffusion(
         refine_only_positive=True,
     )
 
-    logits = outputs["pred_logits"]
-    if use_refined:
-        polylines = outputs["pred_polylines_refined"]
-    else:
-        polylines = outputs["pred_polylines"]
+    logits = outputs["pred_logits"]  # (B,Q,C+1)
+    boxes = outputs["pred_boxes"]  # (B,Q,4)
+    polylines = (
+        outputs["pred_polylines_refined"] if use_refined else outputs["pred_polylines"]
+    )  # (B,Q,K,2)
 
     prob = F.softmax(logits, dim=-1)
-    scores_all, labels_all = prob[..., :-1].max(dim=-1)
+    scores_all, labels_all = prob[..., :-1].max(dim=-1)  # (B,Q)
 
     B, Q = scores_all.shape
     results = []
@@ -1307,13 +1401,15 @@ def detr_polyline_inference_with_diffusion(
 
         scores = scores_all[b]
         labels = labels_all[b]
-        polys = polylines[b]
+        polys = polylines[b]  # (Q,K,2)
+        bx = boxes[b]  # (Q,4)
 
         keep = scores >= score_thresh
         if keep.any():
             scores = scores[keep]
             labels = labels[keep]
             polys = polys[keep]
+            bx = bx[keep]
         else:
             results.append(
                 {
@@ -1321,6 +1417,8 @@ def detr_polyline_inference_with_diffusion(
                     "labels": labels.new_zeros((0,), dtype=torch.long),
                     "polylines_norm": polys.new_zeros((0, polys.shape[1], 2)),
                     "polylines_px": polys.new_zeros((0, polys.shape[1], 2)),
+                    "boxes_norm": bx.new_zeros((0, 4)),
+                    "boxes_px_xyxy": bx.new_zeros((0, 4)),
                 }
             )
             continue
@@ -1330,6 +1428,7 @@ def detr_polyline_inference_with_diffusion(
             scores = scores[top_idx]
             labels = labels[top_idx]
             polys = polys[top_idx]
+            bx = bx[top_idx]
 
         polys_px = polys.clone()
         polys_px[..., 0] = polys_px[..., 0] * float(W - 1)
@@ -1337,12 +1436,20 @@ def detr_polyline_inference_with_diffusion(
         polys_px[..., 0] = polys_px[..., 0].clamp(0, W - 1)
         polys_px[..., 1] = polys_px[..., 1].clamp(0, H - 1)
 
+        bx_xyxy = box_cxcywh_to_xyxy(bx).clone()
+        bx_xyxy[..., 0] = (bx_xyxy[..., 0] * float(W - 1)).clamp(0, W - 1)
+        bx_xyxy[..., 1] = (bx_xyxy[..., 1] * float(H - 1)).clamp(0, H - 1)
+        bx_xyxy[..., 2] = (bx_xyxy[..., 2] * float(W - 1)).clamp(0, W - 1)
+        bx_xyxy[..., 3] = (bx_xyxy[..., 3] * float(H - 1)).clamp(0, H - 1)
+
         results.append(
             {
                 "scores": scores.detach().cpu(),
                 "labels": labels.detach().cpu(),
                 "polylines_norm": polys.detach().cpu(),
                 "polylines_px": polys_px.detach().cpu(),
+                "boxes_norm": bx.detach().cpu(),
+                "boxes_px_xyxy": bx_xyxy.detach().cpu(),
             }
         )
 
@@ -1357,7 +1464,7 @@ def detr_polyline_inference_with_diffusion(
 def load_checkpoint_flexible(
     module: nn.Module, ckpt_path: Path, key_candidates=None, strict: bool = True
 ):
-    ckpt = torch.load(ckpt_path)
+    ckpt = torch.load(ckpt_path, map_location="cpu")
     if key_candidates is None:
         key_candidates = ["model_with_diffusion", "model", "state_dict"]
 
@@ -1386,26 +1493,29 @@ def main():
     cfg = dict(
         # model_name="model",  # model_with_diffusion, model
         # checkpoint=Path("/home/fatemeh/Downloads/hedge/snellius/detr_polyline_7.pt"),
-        model_name="model_with_diffusion",  # model_with_diffusion, model
+        model_name="model",  # model_with_diffusion, model
         checkpoint=Path(
-            "/home/fatemeh/Downloads/hedge/snellius/detr_polyline_7_stage3.pt"
+            "/home/fatemeh/Downloads/hedge/results/training/detr_polyline_11_stage1.pt"
         ),
         # checkpoint=None,  # "/home/fatemeh/Downloads/hedge/results/training/best_detr_polyline_9.pt", #"/home/fatemeh/Downloads/hedge/snellius/best_detr_polyline_1.pt"
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/test_256_None/embs_polylines"  # test_256_dino256
+            "/home/fatemeh/Downloads/hedge/results/test_256_dino256/embs_polylines"  # test_256_dino256
         ),
         # save_path=Path("/home/fkarimineja/exps/hedge"),
         # embed_dir=Path("/home/fkarimineja/data/hedge/test_256/embs_polylines"),
-        num_points=10,
-        num_polylines=276,  # 160
+        num_points=20,
+        num_polylines=100,  # 160
         num_classes=1,
         grid_size=(16, 16),
-        # model
-        loss_bbox_giou=1.0,  # 1.0
-        eos_coef=0.1,  # .3, .5
+        d_model=256,
+        nhead=8,
+        num_encoder_layers=4,
+        num_decoder_layers=4,
+        dim_feedforward=1024,
+        dropout=0.01,
         aux_loss=True,
-        query_embed_mode="detr",  # "detr" or "legacy"
+        query_embed_mode="detr",
         # diffusion
         diff_hidden_dim=256,
         diff_nhead=8,
@@ -1416,14 +1526,6 @@ def main():
         condition_source="encoder",  # "encoder" or "dino"
         use_query_context=True,
         use_coarse_polylines=True,
-        # trining
-        n_epochs=500,  # 500
-        batch_size=256,  # 5x256=1280
-        num_workers=15,  # 17
-        max_lr=3e-4,  # 1e-3
-        weight_decay=1e-2,  # default 1e-2
-        dropout=0.1,
-        use_tqdm=True,
     )
     cfg = OmegaConf.create(cfg)
 
@@ -1435,11 +1537,11 @@ def main():
         in_dim=1024,
         num_classes=cfg.num_classes,
         num_queries=cfg.num_polylines,
-        d_model=256,
-        nhead=8,
-        num_encoder_layers=4,
-        num_decoder_layers=4,
-        dim_feedforward=1024,
+        d_model=cfg.d_model,
+        nhead=cfg.nhead,
+        num_encoder_layers=cfg.num_encoder_layers,
+        num_decoder_layers=cfg.num_decoder_layers,
+        dim_feedforward=cfg.dim_feedforward,
         dropout=cfg.dropout,
         grid_size=cfg.grid_size,
         num_points=cfg.num_points,
@@ -1469,8 +1571,8 @@ def main():
             num_layers=cfg.diff_num_layers,
             dim_feedforward=cfg.diff_dim_feedforward,
             dropout=cfg.diff_dropout,
-            cond_dim=256 if cfg.condition_source == "encoder" else 1024,
-            query_dim=256,
+            cond_dim=cfg.d_model if cfg.condition_source == "encoder" else 1024,
+            query_dim=cfg.d_model,
             use_cond_tokens=True,
             use_query_context=cfg.use_query_context,
             use_coarse_polylines=cfg.use_coarse_polylines,
@@ -1516,6 +1618,16 @@ def main():
             plt.plot(poly[:, 0], poly[:, 1], "*")
         plt.show(block=False)
 
+    def visualize_boxes(im, boxes_xyxy):
+        plt.figure()
+        plt.imshow(im)
+        ax = plt.gca()
+        for box in boxes_xyxy:
+            x0, y0, x1, y1 = box
+            rect = plt.Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, linewidth=1)
+            ax.add_patch(rect)
+        plt.show(block=False)
+
     def visualize_per_image(i, score_thresh=0.0, topk=11):
         inp = dataset.files[i]
         sample = np.load(inp)
@@ -1547,12 +1659,14 @@ def main():
         im = cv2.imread(str(inp.parent.parent / f"images/{inp.stem}.png"))
         im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
 
-        gt_polylines = sample["polylines"]
-        pred_polylines = preds[0]["polylines_px"].numpy()
+        gt_polylines = sample["polylines"]  # (N,K,2)
+        pred_polylines = preds[0]["polylines_px"].numpy()  # (M,K,2)
+        pred_boxes = preds[0]["boxes_px_xyxy"].numpy()  # (M,4)
 
         print(inp.stem)
         visualize_polylines(im, pred_polylines)
         visualize_polylines(im, gt_polylines)
+        visualize_boxes(im, pred_boxes)
         return preds
 
     # # Only DetrPolylineFromEmbeddings test
