@@ -2,7 +2,7 @@
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
 #SBATCH --time=00:00:05
-#SBATCH -o /home/%u/exps/hedge/train_detect_ultralytics_1_%j.out
+#SBATCH -o /home/%u/exps/hedge/train_detect_ultralytics/1_%j.out
 
 cd "$HOME/dev/hedge-seg"
 echo $(date)
