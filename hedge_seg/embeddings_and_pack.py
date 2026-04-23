@@ -223,3 +223,22 @@ def pack_embeddings_polylines_npz(
         written += 1
 
     print(f"Written: {written}, Skipped: {skipped}, Output: {output_dir}")
+
+
+"""
+import torch
+from transformers import Sam3Model, Sam3Processor
+from PIL import Image
+device = "cuda"
+model = Sam3Model.from_pretrained("facebook/sam3").to(device)
+processor = Sam3Processor.from_pretrained("facebook/sam3")
+image = Image.open("/home/fatemeh/Downloads/hedge/results/pdok_dataset/images/pos_000009.png").convert("RGB")
+inputs = processor(images=image, text="hedge line", return_tensors="pt").to(device)
+with torch.no_grad():
+    outputs = model(**inputs)
+    
+>>> {n:p.shape for n, p in inputs.items()}
+{'pixel_values': torch.Size([1, 3, 1008, 1008]), 'original_sizes': torch.Size([1, 2]), 'input_ids': torch.Size([1, 32]), 'attention_mask': torch.Size([1, 32])}
+>>> {n:k.shape for n, k in outputs.items()}
+{'pred_masks': torch.Size([1, 200, 288, 288]), 'pred_boxes': torch.Size([1, 200, 4]), 'pred_logits': torch.Size([1, 200]), 'presence_logits': torch.Size([1, 1]), 'semantic_seg': torch.Size([1, 1, 288, 288]), 'decoder_reference_boxes': torch.Size([6, 1, 200, 4])}
+"""

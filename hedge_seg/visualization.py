@@ -6,6 +6,47 @@ import numpy as np
 from matplotlib.patches import Rectangle
 
 
+def yolo_cxcywh_to_xyxy(cx, cy, w, h, img_w, img_h):
+    return (
+        (cx - w / 2.0) * img_w,
+        (cy - h / 2.0) * img_h,
+        (cx + w / 2.0) * img_w,
+        (cy + h / 2.0) * img_h,
+    )
+
+
+def draw_yolo_bounding_box_on_image(main_path, num, folder="val"):
+    image_path = main_path / f"images/{folder}/pos_{num:06d}.png"
+    label_path = main_path / f"labels/{folder}/pos_{num:06d}.txt"
+
+    img_bgr = cv2.imread(str(image_path))
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+    labels = np.loadtxt(label_path)
+
+    fig, ax = plt.subplots()
+    ax.imshow(img_rgb)
+    for row in labels:
+        class_id, cx, cy, w, h = row
+        img_h, img_w = img_rgb.shape[:2]
+        xmin, ymin, xmax, ymax = yolo_cxcywh_to_xyxy(cx, cy, w, h, img_w, img_h)
+
+        # Rectangle expects bottom-left corner in data coords (x, y) with y increasing downward in images
+        rect = Rectangle(
+            (xmin, ymin),
+            xmax - xmin,
+            ymax - ymin,
+            fill=False,
+            linewidth=2,
+            edgecolor="red",
+        )
+        ax.add_patch(rect)
+
+    ax.axis("off")
+    plt.show(block=False)
+    return ax
+
+
 def draw_rectangle_on_image(image_path, xmin, ymin, xmax, ymax):
     img_bgr = cv2.imread(image_path)
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -55,6 +96,17 @@ def visualize_sample(
 from pathlib import Path
 main_path = Path(f"/home/fatemeh/Downloads/hedge/results")
 visualize_sample(main_path, num=1, folder="pdok_dataset") # test_256_dino256
+for i in range(359,1000):
+    folder= "pdok_dataset"
+    visualize_sample(main_path, num=i, folder=folder)
+    plt.savefig(main_path/f"{folder}/tmp/pos_{i:06d}.png")
+    plt.close()
+print("Done")
+
+# visualize yolo bounding boxes
+from pathlib import Path
+main_path = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset_yolo")
+draw_yolo_bounding_box_on_image(main_path, 3)
 print("Done")
 
 a = np.array([[106, 99], [104, 104], [102, 106], [119, 108], [128, 109]])
