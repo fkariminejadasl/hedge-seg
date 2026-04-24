@@ -18,6 +18,12 @@ from rasterio.windows import Window
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 
+from hedge_seg.config import (
+    AHN4_HEIGHT_TIF,
+    HEDGES_POLYLINES_SHP,
+    TEST_DATASET_WITH_OSM_DIR,
+)
+
 # ----------------------------
 # Utils
 # ----------------------------
@@ -527,9 +533,9 @@ def save_DINOv3_embeddings(image_dir, embed_dir):
         save_DINOv3_embeddings_per_image(image_path, embed_dir)
 
 
-shp_path = "/home/fatemeh/Downloads/hedg/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
-tif_path = "/home/fatemeh/Downloads/hedg/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
-out_dir = Path("/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm")
+shp_path = HEDGES_POLYLINES_SHP
+tif_path = AHN4_HEIGHT_TIF
+out_dir = TEST_DATASET_WITH_OSM_DIR
 image_dir = out_dir / "images"
 embed_dir = out_dir / "embeddings"
 embed_dir.mkdir(parents=True, exist_ok=True)
@@ -559,7 +565,7 @@ save_DINOv3_embeddings(image_dir, embed_dir)
 from pathlib import Path
 import json
 
-folder = Path("/home/fatemeh/Downloads/hedg/results/test_dataset/labels")
+folder = TEST_DATASET_DIR / "labels"
 n_lines_all = []
 n_lines_dic = dict()
 for json_path in folder.glob("*.json"):
@@ -584,7 +590,7 @@ idxs = np.where(np.asarray(a)==True)[0].tolist()
 # 51399  388967 # pos_000000
 # 143904.612, 529319.225 # max
 # 27587.828  369991.498 # min
-folder = Path("/home/fatemeh/Downloads/hedg/results/test_dataset/labels")
+folder = TEST_DATASET_DIR / "labels"
 n_lines_by_file = {}
 for p in folder.glob("pos_*.json"):
     with p.open("r", encoding="utf-8") as f:

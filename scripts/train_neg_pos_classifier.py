@@ -9,6 +9,8 @@ from torch.utils import tensorboard
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+from hedge_seg.config import TEST_DATASET_DIR, TRAINING_RESULTS_DIR
+
 
 class NegPosDataset(Dataset):
     def __init__(
@@ -148,8 +150,8 @@ cfg = dict(
     batch_size=32,
     no_epochs=50,
     exp="neg_pos_classifier_test",
-    save_dir=Path("/home/fatemeh/Downloads/hedg/results/training"),
-    data_dir=Path("/home/fatemeh/Downloads/hedg/results/test_dataset"),
+    save_dir=TRAINING_RESULTS_DIR,
+    data_dir=TEST_DATASET_DIR,
 )
 cfg = OmegaConf.create(cfg)
 
