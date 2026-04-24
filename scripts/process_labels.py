@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from hedge_seg.config import SAMPLE_POS_LABEL_PATH, TEST_DATASET_WITH_OSM_DIR
 from hedge_seg.polyline_utils import bbox_from_polyline, resample_polyline_equidistant
 
 
@@ -27,21 +28,17 @@ def process_label_file(path: Path, out_dir: Path, n_points):
         json.dump(out_data, f, ensure_ascii=False)
 
 
-labels_dir = Path("/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/labels")
-out_dir = Path(
-    "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/labels_processed"
-)
+labels_dir = TEST_DATASET_WITH_OSM_DIR / "labels"
+out_dir = TEST_DATASET_WITH_OSM_DIR / "labels_processed"
 out_dir.mkdir(parents=True, exist_ok=True)
 np_points = 20
 
-label_file = Path(
-    "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/labels/pos_000000.json"
-)
+label_file = SAMPLE_POS_LABEL_PATH
 process_label_file(label_file, out_dir, np_points)
 
 
 json_files = sorted(labels_dir.glob("pos_*.json"))
 for p in json_files:
-    process_label_file(p)
+    process_label_file(p, out_dir, np_points)
 
 print(f"Done. Wrote {len(json_files)} files to: {out_dir.resolve()}")

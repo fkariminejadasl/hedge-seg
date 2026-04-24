@@ -10,6 +10,8 @@ from rasterio.plot import show
 from rasterio.windows import from_bounds
 from shapely.geometry import box
 
+from hedge_seg.config import AHN4_HEIGHT_TIF, BUFFER_VIEW_PATH, HEDGES_POLYLINES_SHP
+
 
 def load_geotiff(path: str | Path) -> np.ndarray:
     """
@@ -100,7 +102,7 @@ def save_fullres_geotiff_as_png_tiled(
 
 
 # Example usage of reading a shapefile
-path = "/home/fatemeh/Downloads/hedg/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
+path = HEDGES_POLYLINES_SHP
 gdf = gpd.read_file(path)
 
 print(gdf.head())
@@ -128,11 +130,11 @@ bbox_gdf = gpd.GeoDataFrame(geometry=[qgeom], crs=gdf.crs)
 candidates = gdf.loc[idx]
 hits = candidates[candidates.intersects(qgeom)].copy()
 clipped = gpd.clip(hits, bbox_gdf)
-# image = load_geotiff("/home/fatemeh/Downloads/UK_Knepp_10m_veg_TILE_000_BAND_perc_95_normalized_height.tif")
+# image = load_geotiff(Path.home() / "Downloads/UK_Knepp_10m_veg_TILE_000_BAND_perc_95_normalized_height.tif")
 # (30900, 26600)
-# save_fullres_geotiff_as_png_tiled("/home/fatemeh/Downloads/ahn4_10m_perc_95_normalized_height.tif", "/home/fatemeh/Downloads/ahn4_fullres.png")
-# image = load_geotiff("/home/fatemeh/Downloads/ahn4_10m_perc_95_normalized_height.tif") # (30900, 26600) 1/10
-# save_float_geotiff_as_png(image, "/home/fatemeh/Downloads/ahn4.jpg")
+# save_fullres_geotiff_as_png_tiled(AHN4_HEIGHT_TIF, Path.home() / "Downloads/ahn4_fullres.png")
+# image = load_geotiff(AHN4_HEIGHT_TIF) # (30900, 26600) 1/10
+# save_float_geotiff_as_png(image, Path.home() / "Downloads/ahn4.jpg")
 
 
 def raster_values_in_buffer(
@@ -316,9 +318,9 @@ def save_linestring_buffer_raster_png(
 
 
 # Example usage
-shp_path = "/home/fatemeh/Downloads/hedg/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
-tif_path = "/home/fatemeh/Downloads/hedg/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
-save_path = "/home/fatemeh/Downloads/hedg/results/buffer_view.png"
+shp_path = HEDGES_POLYLINES_SHP
+tif_path = AHN4_HEIGHT_TIF
+save_path = BUFFER_VIEW_PATH
 
 save_linestring_buffer_raster_png(
     shp_path=shp_path,

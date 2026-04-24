@@ -1,8 +1,5 @@
-from pathlib import Path
-
 import cv2
 import matplotlib.pyplot as plt
-import numpy as np
 from matplotlib.patches import Rectangle
 
 
@@ -26,9 +23,7 @@ def draw_rectangle_on_image(image_path, xmin, ymin, xmax, ymax):
 """
 a = np.array([[106, 99], [104, 104], [102, 106], [119, 108], [128, 109]])
 xmin, ymin, xmax, ymax = 102, 99, 128, 109
-image_path = Path(
-    "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/images/pos_000000.png"
-)
+image_path = SAMPLE_POS_IMAGE_PATH
 ax = draw_rectangle_on_image(image_path, xmin, ymin, xmax, ymax)
 ax.plot(a[:, 0], a[:, 1], "*r")
 plt.show(block=False)

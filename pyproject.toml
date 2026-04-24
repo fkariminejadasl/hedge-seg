@@ -74,6 +74,12 @@ app = [
     #"uvicorn",
 ]
 
+# development tools
+# pip install .[dev]
+dev = [
+    "ruff",
+]
+
 # ==============
 # If you prefer explicit packages (non-src layout), expose them here.
 # Exposing `scripts/` under the `hedge_seg` namespace enables:
@@ -99,6 +105,15 @@ markers = [
 ]
 
 
-# add linters
-# pip install black isort pyflakes
-# for i in hedge_seg exps scripts;do echo $i; black $i -l 88; isort $i --profile black; pyflakes $i;done
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "I",
+]
