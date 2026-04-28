@@ -1491,21 +1491,22 @@ def load_checkpoint_flexible(
 
 def main():
     cfg = dict(
-        # model_name="model",  # model_with_diffusion, model
-        # checkpoint=Path("/home/fatemeh/Downloads/hedge/snellius/detr_polyline_7.pt"),
         model_name="model",  # model_with_diffusion, model
         checkpoint=Path(
-            "/home/fatemeh/Downloads/hedge/results/training/detr_polyline_11_stage1.pt"
+            "/home/fatemeh/Downloads/hedge/snellius/detr_polyline_rel/1_500_stage1.pt"
         ),
-        # checkpoint=None,  # "/home/fatemeh/Downloads/hedge/results/training/best_detr_polyline_9.pt", #"/home/fatemeh/Downloads/hedge/snellius/best_detr_polyline_1.pt"
+        # model_name="model",  # model_with_diffusion, model
+        # checkpoint=Path(
+        #     "/home/fatemeh/Downloads/hedge/results/training/detr_polyline_11_stage1.pt"
+        # ),
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/test_256_dino256/embs_polylines"  # test_256_dino256
+            "/home/fatemeh/Downloads/hedge/results/test_256_None/embs_polylines"  # test_256_dino256
         ),
         # save_path=Path("/home/fkarimineja/exps/hedge"),
         # embed_dir=Path("/home/fkarimineja/data/hedge/test_256/embs_polylines"),
-        num_points=20,
-        num_polylines=100,  # 160
+        num_points=10,
+        num_polylines=276,  # 160
         num_classes=1,
         grid_size=(16, 16),
         d_model=256,

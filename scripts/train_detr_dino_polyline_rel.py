@@ -2567,7 +2567,7 @@ def main():
             }
             if eval_losses["loss_total"] < best_val:
                 best_val = eval_losses["loss_total"]
-                torch.save(ckpt, cfg.save_path / f"best_{cfg.exp}_stage{cfg.stage}.pt")
+                torch.save(ckpt, cfg.save_path / f"{cfg.exp}_best_stage{cfg.stage}.pt")
                 print(f"Saved best: {best_val:.4f} at epoch {epoch}")
             if epoch % cfg.save_every == 0:
                 torch.save(

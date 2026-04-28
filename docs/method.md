@@ -41,9 +41,16 @@ These refernce are the DETR-like model, which from BEV images they get the vecto
 ### Computer Graphics
 - [NeuralFur](https://arxiv.org/pdf/2601.12481). modeling strand with MLP of root point (MLP(x))
 
+### Remote Sensing
+- [Hedgerow mapping with high resolution satellite imagery](https://www.sciencedirect.com/science/article/pii/S0034425725002743)
+- [Hedgerow review](https://ieeexplore.ieee.org/document/10731836)
 
 ### Others
 - [DiffusionEdge](https://arxiv.org/pdf/2401.02032) Diffusion Probabilistic Model for Crisp Edge Detection. Condition on the image to get image images using diffusion model.
+- UNIGEOCLIP: Unified Geospatial Contrastive Learning
+- MMEarth-Bench: Global Environmental Tasks for Multimodal Geospatial Models
+- Entropy-Gradient Grounding: Training-Free Evidence Retrieval in Vision-Language Models. Just an idea for fine-grained information.
+
 
 <!-- ================================= -->
 ## Data Sources
