@@ -1,17 +1,19 @@
 import random
+import time
+from datetime import datetime
+from io import BytesIO
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Optional
 
-import cv2
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import requests
+from PIL import Image
 from rasterio.transform import from_bounds
 from shapely.geometry import box
 
-# Reuse the parts of your existing code that are already good.
 from hedge_seg.training_data import (
     clip_px_point,
     dedupe_consecutive_points,
@@ -24,6 +26,32 @@ from hedge_seg.training_data import (
 )
 
 PDOK_WMS = "https://service.pdok.nl/hwh/luchtfotorgb/wms/v1_0"
+
+_WORKER_GDF = None
+_WORKER_SINDEX = None
+
+
+def prepare_hedge_gdf(shp_path, crs):
+    gdf = gpd.read_file(shp_path)
+
+    if gdf.crs is None:
+        raise ValueError("Shapefile CRS is missing.")
+
+    if str(gdf.crs) != crs:
+        gdf = gdf.to_crs(crs)
+
+    gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notna()].copy()
+    gdf = gdf[gdf.geometry.geom_type.isin(["LineString", "MultiLineString"])].copy()
+    gdf = gdf.reset_index(drop=True)
+
+    return gdf
+
+
+def init_worker(gdf):
+    global _WORKER_GDF, _WORKER_SINDEX
+
+    _WORKER_GDF = gdf
+    _WORKER_SINDEX = gdf.sindex
 
 
 def read_bbox_csv(csv_path: Optional[Path]):
@@ -99,14 +127,7 @@ def sample_positive_centers(
     return centers
 
 
-def fetch_pdok_chip(
-    layer_name: str,
-    bbox,
-    out_size_px: int,
-    image_format: str = "image/jpeg",
-    timeout: int = 120,
-):
-    minx, miny, maxx, maxy = bbox
+def fetch_pdok_chip(layer_name, bbox, out_size_px, image_format, timeout):
     params = {
         "service": "WMS",
         "version": "1.3.0",
@@ -114,20 +135,30 @@ def fetch_pdok_chip(
         "layers": layer_name,
         "styles": "",
         "crs": "EPSG:28992",
-        "bbox": f"{minx},{miny},{maxx},{maxy}",
-        "width": str(out_size_px),
-        "height": str(out_size_px),
+        "bbox": ",".join(map(str, bbox)),
+        "width": out_size_px,
+        "height": out_size_px,
         "format": image_format,
         "transparent": "false",
     }
 
-    r = requests.get(PDOK_WMS, params=params, timeout=timeout)
-    r.raise_for_status()
+    last_error = None
 
-    img = cv2.imdecode(np.frombuffer(r.content, dtype=np.uint8), cv2.IMREAD_COLOR)
-    if img is None:
-        raise RuntimeError("PDOK did not return a decodable image.")
-    return img
+    for attempt in range(3):
+        try:
+            r = requests.get(PDOK_WMS, params=params, timeout=timeout)
+            r.raise_for_status()
+
+            img = Image.open(BytesIO(r.content)).convert("RGB")
+            return np.array(img)
+
+        except requests.exceptions.RequestException as e:
+            last_error = e
+
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+
+    raise last_error
 
 
 def make_polylines_for_chip(lines_gdf, bbox_geom, out_size_px, min_len_px=10.0):
@@ -154,26 +185,25 @@ def make_polylines_for_chip(lines_gdf, bbox_geom, out_size_px, min_len_px=10.0):
 
 
 def build_one_sample(job):
+    global _WORKER_GDF, _WORKER_SINDEX
+
+    if _WORKER_GDF is None or _WORKER_SINDEX is None:
+        raise RuntimeError(
+            "Worker shapefile data is not initialized. "
+            "Call init_worker(gdf) before build_one_sample()."
+        )
+
     sample_id, center_x, center_y, cfg = job
 
     chip_size_m = cfg.chip_size_m
     out_size_px = cfg.out_size_px
     half = chip_size_m / 2.0
+
     bbox = (center_x - half, center_y - half, center_x + half, center_y + half)
     bbox_geom = box(*bbox)
 
-    gdf = gpd.read_file(cfg.shp_path)
-    if gdf.crs is None:
-        raise ValueError("Shapefile CRS is missing.")
-    if str(gdf.crs) != cfg.crs:
-        gdf = gdf.to_crs(cfg.crs)
+    hit = lines_in_bbox(_WORKER_GDF, _WORKER_SINDEX, bbox_geom)
 
-    gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notna()].copy()
-    gdf = gdf[gdf.geometry.geom_type.isin(["LineString", "MultiLineString"])].copy()
-    gdf = gdf.reset_index(drop=True)
-
-    sindex = gdf.sindex
-    hit = lines_in_bbox(gdf, sindex, bbox_geom)
     if hit.empty:
         return None
 
@@ -183,16 +213,21 @@ def build_one_sample(job):
         out_size_px=out_size_px,
         min_len_px=cfg.min_len_px,
     )
+
     if not polylines:
         return None
 
-    img = fetch_pdok_chip(
-        layer_name=cfg.layer_name,
-        bbox=bbox,
-        out_size_px=out_size_px,
-        image_format=cfg.image_format,
-        timeout=cfg.timeout,
-    )
+    try:
+        img = fetch_pdok_chip(
+            layer_name=cfg.layer_name,
+            bbox=bbox,
+            out_size_px=out_size_px,
+            image_format=cfg.image_format,
+            timeout=cfg.timeout,
+        )
+    except requests.exceptions.RequestException as e:
+        print(f"Skipping {sample_id}: PDOK request failed: {e}")
+        return None
 
     label_obj = {
         "id": sample_id,
@@ -214,26 +249,25 @@ def build_one_sample(job):
 def build_dataset(cfg):
     out_dir = Path(cfg.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
     paths = ensure_dirs(out_dir)
 
-    gdf = gpd.read_file(cfg.shp_path)
-    if gdf.crs is None:
-        raise ValueError("Shapefile CRS is missing.")
-    if str(gdf.crs) != cfg.crs:
-        gdf = gdf.to_crs(cfg.crs)
-
-    gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notna()].copy()
-    gdf = gdf[gdf.geometry.geom_type.isin(["LineString", "MultiLineString"])].copy()
-    gdf = gdf.reset_index(drop=True)
+    gdf = prepare_hedge_gdf(cfg.shp_path, cfg.crs)
 
     area_geom = read_bbox_csv(Path(cfg.bbox_csv)) if cfg.bbox_csv else None
 
+    # Sample more candidates than needed, because some may be rejected later due to various reasons (e.g. PDOK request failure, no lines in bbox, etc.)
+    target_n = cfg.n_pos
+    candidate_n = int(cfg.n_pos * 1.2)
     centers = sample_positive_centers(
         gdf=gdf,
-        n_pos=cfg.n_pos,
+        n_pos=candidate_n,
         chip_size_m=cfg.chip_size_m,
         rng_seed=cfg.seed,
         area_geom=area_geom,
+    )
+    print(
+        f"{datetime.now().replace(microsecond=0)}: Sampled {len(centers)} positive centers"
     )
 
     jobs = []
@@ -241,27 +275,55 @@ def build_dataset(cfg):
         sample_id = f"pos_{i:06d}"
         jobs.append((sample_id, cx, cy, cfg))
 
-    if cfg.num_workers == 1:
-        results = [build_one_sample(job) for job in jobs]
-    else:
-        with Pool(cfg.num_workers) as pool:
-            results = pool.starmap(
-                _build_one_sample_starmap,
-                [(job,) for job in jobs],
-            )
-
     saved = 0
-    for result in results:
-        if result is None:
-            continue
-        sample_id, img, label_obj = result
-        save_chip(paths, sample_id, img, label_obj, mask=None)
-        saved += 1
-        if saved % 250 == 0:
-            print(f"saved {saved}/{len(jobs)}")
+
+    if cfg.num_workers == 1:
+        init_worker(gdf)
+
+        iterator = map(build_one_sample, jobs)
+
+        for result in iterator:
+            if result is None:
+                continue
+
+            sample_id, img, label_obj = result
+            save_chip(paths, sample_id, img, label_obj, mask=None)
+
+            saved += 1
+            if saved % 250 == 0:
+                print(
+                    f"{datetime.now().replace(microsecond=0)}: saved {saved}/{target_n}"
+                )
+            if saved >= target_n:
+                break
+
+    else:
+        with Pool(
+            processes=cfg.num_workers,
+            initializer=init_worker,
+            initargs=(gdf,),
+        ) as pool:
+            for result in pool.imap_unordered(
+                build_one_sample,
+                jobs,
+                chunksize=1,
+            ):
+                if result is None:
+                    continue
+
+                sample_id, img, label_obj = result
+                save_chip(paths, sample_id, img, label_obj, mask=None)
+
+                saved += 1
+                if saved % 250 == 0:
+                    print(
+                        f"{datetime.now().replace(microsecond=0)}: saved {saved}/{target_n}"
+                    )
+                if saved >= target_n:
+                    break
 
     print(f"Done. Saved {saved} positive samples in {out_dir}")
 
 
-def _build_one_sample_starmap(job):
-    return build_one_sample(job)
+# def _build_one_sample_starmap(job):
+#     return build_one_sample(job)

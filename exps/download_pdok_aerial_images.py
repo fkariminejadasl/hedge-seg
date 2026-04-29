@@ -47,5 +47,7 @@ def example_download_pdok_aerial_image():
     with open("pdok_aerial.png", "wb") as f:
         f.write(r.content)
 
+    # img = cv2.imdecode(np.frombuffer(r.content, dtype=np.uint8), cv2.IMREAD_COLOR)
+
     print("Saved to pdok_aerial.png")
     print("Requested URL:", r.url)
