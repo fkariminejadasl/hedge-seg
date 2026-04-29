@@ -244,6 +244,20 @@ def build_one_sample(job):
     return sample_id, img, label_obj
 
 
+def handle_sample_result(result, paths, saved: int, target_n: int) -> tuple[int, bool]:
+    if result is None:
+        return saved, False
+
+    sample_id, img, label_obj = result
+    save_chip(paths, sample_id, img, label_obj, mask=None)
+
+    saved += 1
+    if saved % 250 == 0:
+        print(f"{datetime.now().replace(microsecond=0)}: saved {saved}/{target_n}")
+
+    return saved, saved >= target_n
+
+
 def build_dataset(cfg):
     out_dir = Path(cfg.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -281,18 +295,8 @@ def build_dataset(cfg):
         iterator = map(build_one_sample, jobs)
 
         for result in iterator:
-            if result is None:
-                continue
-
-            sample_id, img, label_obj = result
-            save_chip(paths, sample_id, img, label_obj, mask=None)
-
-            saved += 1
-            if saved % 250 == 0:
-                print(
-                    f"{datetime.now().replace(microsecond=0)}: saved {saved}/{target_n}"
-                )
-            if saved >= target_n:
+            saved, done = handle_sample_result(result, paths, saved, target_n)
+            if done:
                 break
 
     else:
@@ -306,18 +310,8 @@ def build_dataset(cfg):
                 jobs,
                 chunksize=1,
             ):
-                if result is None:
-                    continue
-
-                sample_id, img, label_obj = result
-                save_chip(paths, sample_id, img, label_obj, mask=None)
-
-                saved += 1
-                if saved % 250 == 0:
-                    print(
-                        f"{datetime.now().replace(microsecond=0)}: saved {saved}/{target_n}"
-                    )
-                if saved >= target_n:
+                saved, done = handle_sample_result(result, paths, saved, target_n)
+                if done:
                     break
 
     print(f"Done. Saved {saved} positive samples in {out_dir}")
