@@ -318,6 +318,7 @@ def lines_in_bbox(
     """
     cand_idx = list(sindex.intersection(bbox_geom.bounds))
     if not cand_idx:
+        # Return an empty GeoDataFrame with the same columns/CRS as gdf.
         return gdf.iloc[0:0]
     cand = gdf.iloc[cand_idx]
     hit = cand[cand.intersects(bbox_geom)]

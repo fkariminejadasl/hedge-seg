@@ -158,7 +158,7 @@ def fetch_pdok_chip(layer_name, bbox, out_size_px, image_format, timeout):
             if attempt < 2:
                 time.sleep(2 * (attempt + 1))
 
-    raise last_error
+    raise RuntimeError("PDOK request failed after 3 attempts") from last_error
 
 
 def make_polylines_for_chip(lines_gdf, bbox_geom, out_size_px, min_len_px=10.0):
@@ -321,7 +321,5 @@ def build_dataset(cfg):
                     break
 
     print(f"Done. Saved {saved} positive samples in {out_dir}")
-
-
-# def _build_one_sample_starmap(job):
-#     return build_one_sample(job)
+    if saved < target_n:
+        raise RuntimeError(f"Only saved {saved}/{target_n} positive samples.")
