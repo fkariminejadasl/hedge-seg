@@ -29,6 +29,7 @@ PDOK_WMS = "https://service.pdok.nl/hwh/luchtfotorgb/wms/v1_0"
 
 _WORKER_GDF = None
 _WORKER_SINDEX = None
+_WORKER_SESSION = None
 
 
 def prepare_hedge_gdf(shp_path, crs):
@@ -48,10 +49,11 @@ def prepare_hedge_gdf(shp_path, crs):
 
 
 def init_worker(gdf):
-    global _WORKER_GDF, _WORKER_SINDEX
+    global _WORKER_GDF, _WORKER_SINDEX, _WORKER_SESSION
 
     _WORKER_GDF = gdf
     _WORKER_SINDEX = gdf.sindex
+    _WORKER_SESSION = requests.Session()
 
 
 def read_bbox_csv(csv_path: Optional[Path]):
@@ -146,7 +148,7 @@ def fetch_pdok_chip(layer_name, bbox, out_size_px, image_format, timeout):
 
     for attempt in range(3):
         try:
-            r = requests.get(PDOK_WMS, params=params, timeout=timeout)
+            r = _WORKER_SESSION.get(PDOK_WMS, params=params, timeout=timeout)
             r.raise_for_status()
 
             img = Image.open(BytesIO(r.content)).convert("RGB")
