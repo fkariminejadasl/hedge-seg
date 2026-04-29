@@ -185,8 +185,6 @@ def make_polylines_for_chip(lines_gdf, bbox_geom, out_size_px, min_len_px=10.0):
 
 
 def build_one_sample(job):
-    global _WORKER_GDF, _WORKER_SINDEX
-
     if _WORKER_GDF is None or _WORKER_SINDEX is None:
         raise RuntimeError(
             "Worker shapefile data is not initialized. "
