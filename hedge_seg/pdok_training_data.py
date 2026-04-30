@@ -12,7 +12,8 @@ import pandas as pd
 import requests
 from PIL import Image
 from rasterio.transform import from_bounds
-from shapely.geometry import box
+from shapely import wkt
+from shapely.geometry import Polygon, box
 
 from hedge_seg.training_data import (
     clip_px_point,
@@ -58,23 +59,55 @@ def init_worker(gdf):
 
 def read_bbox_csv(csv_path: Optional[Path]):
     """
-    CSV format:
-    xmin,ymin,xmax,ymax
-    180000,390000,210000,420000
+    Supports either CSV format:
+
+    1. Bounding box columns:
+        xmin,ymin,xmax,ymax
+        180000,390000,210000,420000
+
+    2. WKT polygon:
+        WKT
+        "POLYGON ((158852.935091395 460356.516530051,...))"
+
     All coordinates must be in EPSG:28992.
     """
     if csv_path is None:
         return None
 
     df = pd.read_csv(csv_path)
-    required = {"xmin", "ymin", "xmax", "ymax"}
-    if not required.issubset(df.columns):
-        raise ValueError(f"CSV must contain columns: {sorted(required)}")
     if len(df) != 1:
         raise ValueError("BBox CSV must contain exactly one row.")
 
+    # Normalize column names so MINX/MINY/MAXX/MAXY also work
+    df.columns = [col.strip().lower() for col in df.columns]
+
     row = df.iloc[0]
-    return box(float(row.xmin), float(row.ymin), float(row.xmax), float(row.ymax))
+
+    bbox_columns = {"xmin", "ymin", "xmax", "ymax"}
+
+    if bbox_columns.issubset(df.columns):
+        return box(
+            float(row["xmin"]),
+            float(row["ymin"]),
+            float(row["xmax"]),
+            float(row["ymax"]),
+        )
+
+    if "wkt" in df.columns:
+        geom = wkt.loads(row["wkt"])
+
+        if geom.is_empty:
+            raise ValueError("WKT geometry is empty.")
+
+        if not isinstance(geom, Polygon):
+            raise ValueError(f"WKT geometry must be a Polygon, got {geom.geom_type}.")
+
+        return geom
+
+    raise ValueError(
+        "CSV must contain either columns "
+        "['xmin', 'ymin', 'xmax', 'ymax'] or a 'WKT' column."
+    )
 
 
 def sample_point_on_linestring(line, rng: random.Random):
