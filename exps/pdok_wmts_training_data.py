@@ -1,6 +1,58 @@
-from __future__ import annotations
+"""
+This script builds a training dataset for hedge segmentation from PDOK WMTS orthophotos and a shapefile of hedge lines.
+fetch_wmts_info() parses the WMTS capabilities to find the tile URL template and the available tile matrices.
+It contains: matrices, template
+template:
+'https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_ortho25/{TileMatrixSet}/{TileMatrix}/{TileCol}/{TileRow}.jpeg'
 
-import json
+#### Matrices example:
+TileMatrix(identifier='14', resolution=0.21, top_left_x=-285401.92, top_left_y=903401.92, tile_width=256, tile_height=256, matrix_width=16384, matrix_height=16384)
+16384 x 16384 = 268,435,456 tiles at zoom level 14, each tile is 256 x 256 pixels, and each pixel represents 0.21 m/px. one tile covers:
+256 x 0.21 = 53.76 meters
+
+For the Netherlands itself, a rough RD bounding box is about:
+xmin ≈ 0
+ymin ≈ 300000
+xmax ≈ 280000
+ymax ≈ 630000
+
+So the bbox size is roughly:
+width  ≈ 280 km
+height ≈ 330 km
+
+At 53.76 m per tile, that is approximately:
+columns ≈ 280000 / 53.76 ≈ 5209
+rows    ≈ 330000 / 53.76 ≈ 6138
+
+So the Netherlands bounding rectangle would need roughly:
+5209 x 6138 ≈ 31,970,000 tiles
+
+That is around 32 million tiles for the whole NL bounding box at TileMatrix=14
+
+### Example using coordinate:
+x = 194297
+y = 408398
+
+At TileMatrix = 14:
+resolution = 0.21
+tile_size = 256
+tile_span = 256 * 0.21  # 53.76 m
+top_left_x = -285401.92
+top_left_y = 903401.92
+
+tile_col = floor((194297 - (-285401.92)) / 53.76)
+tile_row = floor((903401.92 - 408398) / 53.76)
+
+Approximately:
+
+TileCol ≈ 8922
+TileRow ≈ 9207
+
+So the tile URL would look like:
+
+https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_ortho25/EPSG:28992/14/8922/9207.jpeg
+"""
+
 import math
 import random
 import xml.etree.ElementTree as ET
@@ -142,7 +194,8 @@ def fetch_wmts_info(layer_name: str, tile_matrix_set: str) -> WmtsInfo:
         matrix_height = matrix_el.find("wmts:MatrixHeight", NS)
 
         top_left_x, top_left_y = [float(v) for v in top_left.text.split()]
-        resolution = float(scale.text) * 0.00028
+        OGC_PIXEL_SIZE_M = 0.00028  # 0.28 mm, defined by OGC WMTS scale denominator
+        resolution = float(scale.text) * OGC_PIXEL_SIZE_M
 
         matrices.append(
             TileMatrix(
@@ -594,6 +647,7 @@ def main():
     )
     cfg = OmegaConf.create(cfg)
     wmts_info = fetch_wmts_info(cfg.layer_name, cfg.tile_matrix_set)
+    print(f"Fetched WMTS info: {wmts_info}")
     # build_dataset(cfg)
 
 
