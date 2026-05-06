@@ -17,3 +17,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# yolo predict model=/home/fatemeh/Downloads/hedge/snellius/detect_ultralytics/3/best.pt conf=.25 imgsz=1000 save_dir=/home/fatemeh/Downloads/hedge/snellius/detect_ultralytics/3 save=True  source=/home/fatemeh/Downloads/hedge/results/pdok_dataset_yolo3/images/val/pos_000004.png

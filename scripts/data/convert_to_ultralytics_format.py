@@ -1,7 +1,10 @@
 import json
+import os
 import random
 import shutil
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
@@ -21,8 +24,10 @@ class YoloExportConfig:
     val_fraction: float = 0.2
     seed: int = 123
     bbox_expand_px: int = 1  # enlarge bbox by 1 pixel on each side
-    copy_images: bool = True  # False -> hardlink/copy fallback can be added
+    copy_images: bool = True  # False -> skip image copy/link
     allowed_image_suffixes: Tuple[str, ...] = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
+    image_size: Optional[Tuple[int, int]] = None  # set to (width, height) if known
+    max_workers: Optional[int] = None
 
 
 # =========================
@@ -42,16 +47,6 @@ def ensure_yolo_dirs(output_root: Path) -> dict[str, Path]:
     return paths
 
 
-def find_image_for_label(
-    images_dir: Path, stem: str, allowed_suffixes: Sequence[str]
-) -> Optional[Path]:
-    for suffix in allowed_suffixes:
-        candidate = images_dir / f"{stem}{suffix}"
-        if candidate.exists():
-            return candidate
-    return None
-
-
 def iter_paired_samples(
     dataset_root: Path, allowed_suffixes: Sequence[str]
 ) -> List[Tuple[Path, Path]]:
@@ -63,12 +58,18 @@ def iter_paired_samples(
     if not labels_dir.exists():
         raise FileNotFoundError(f"Missing labels directory: {labels_dir}")
 
+    allowed = {s.lower() for s in allowed_suffixes}
+    image_by_stem = {
+        image_path.stem: image_path
+        for image_path in images_dir.iterdir()
+        if image_path.is_file() and image_path.suffix.lower() in allowed
+    }
+
     pairs: List[Tuple[Path, Path]] = []
-    for label_path in sorted(labels_dir.glob("*.json")):
-        image_path = find_image_for_label(images_dir, label_path.stem, allowed_suffixes)
-        if image_path is None:
-            continue
-        pairs.append((image_path, label_path))
+    for label_path in labels_dir.glob("*.json"):
+        image_path = image_by_stem.get(label_path.stem)
+        if image_path is not None:
+            pairs.append((image_path, label_path))
 
     if not pairs:
         raise RuntimeError("No matching image/label pairs were found.")
@@ -228,7 +229,12 @@ def split_train_val(
 
 
 def copy_image(src: Path, dst: Path) -> None:
-    shutil.copy2(src, dst)
+    if dst.exists():
+        return
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
 
 
 def write_text_file(path: Path, lines: Iterable[str]) -> None:
@@ -257,37 +263,58 @@ def write_dataset_yaml(output_root: Path, class_name: str) -> Path:
 # =========================
 
 
+def export_one_sample(
+    sample: Tuple[Path, Path],
+    image_out_dir: Path,
+    label_out_dir: Path,
+    cfg: YoloExportConfig,
+    image_size: Tuple[int, int],
+) -> None:
+    image_path, label_path = sample
+    img_w, img_h = image_size
+    label_data = load_json(label_path)
+
+    yolo_rows = label_json_to_yolo_lines(
+        label_data=label_data,
+        img_w=img_w,
+        img_h=img_h,
+        class_id=cfg.class_id,
+        expand_px=cfg.bbox_expand_px,
+    )
+
+    out_image_path = image_out_dir / image_path.name
+    out_label_path = label_out_dir / f"{image_path.stem}.txt"
+
+    if cfg.copy_images:
+        copy_image(image_path, out_image_path)
+
+    # Write label file even if empty, which is usually fine for YOLO.
+    write_text_file(out_label_path, yolo_rows)
+
+
 def export_split(
     pairs: Sequence[Tuple[Path, Path]],
     image_out_dir: Path,
     label_out_dir: Path,
     cfg: YoloExportConfig,
+    image_size: Tuple[int, int],
 ) -> None:
-    for image_path, label_path in pairs:
-        img_w, img_h = read_image_size(image_path)
-        label_data = load_json(label_path)
-
-        yolo_rows = label_json_to_yolo_lines(
-            label_data=label_data,
-            img_w=img_w,
-            img_h=img_h,
-            class_id=cfg.class_id,
-            expand_px=cfg.bbox_expand_px,
-        )
-
-        out_image_path = image_out_dir / image_path.name
-        out_label_path = label_out_dir / f"{image_path.stem}.txt"
-
-        if cfg.copy_images:
-            copy_image(image_path, out_image_path)
-
-        # Write label file even if empty, which is usually fine for YOLO.
-        write_text_file(out_label_path, yolo_rows)
+    worker = partial(
+        export_one_sample,
+        image_out_dir=image_out_dir,
+        label_out_dir=label_out_dir,
+        cfg=cfg,
+        image_size=image_size,
+    )
+    max_workers = cfg.max_workers or max(1, (os.cpu_count() or 2) - 1)
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        list(executor.map(worker, pairs, chunksize=100))
 
 
 def export_pdok_json_dataset_to_yolo(cfg: YoloExportConfig) -> None:
     paths = ensure_yolo_dirs(cfg.output_root)
     pairs = iter_paired_samples(cfg.dataset_root, cfg.allowed_image_suffixes)
+    image_size = cfg.image_size or read_image_size(pairs[0][0])
     train_pairs, val_pairs = split_train_val(pairs, cfg.val_fraction, cfg.seed)
 
     export_split(
@@ -295,12 +322,14 @@ def export_pdok_json_dataset_to_yolo(cfg: YoloExportConfig) -> None:
         image_out_dir=paths["images_train"],
         label_out_dir=paths["labels_train"],
         cfg=cfg,
+        image_size=image_size,
     )
     export_split(
         pairs=val_pairs,
         image_out_dir=paths["images_val"],
         label_out_dir=paths["labels_val"],
         cfg=cfg,
+        image_size=image_size,
     )
 
     yaml_path = write_dataset_yaml(cfg.output_root, cfg.class_name)
@@ -308,6 +337,7 @@ def export_pdok_json_dataset_to_yolo(cfg: YoloExportConfig) -> None:
     print(f"Total pairs: {len(pairs)}")
     print(f"Train: {len(train_pairs)}")
     print(f"Val: {len(val_pairs)}")
+    print(f"Image size: {image_size[0]}x{image_size[1]}")
     print(f"YOLO dataset written to: {cfg.output_root.resolve()}")
     print(f"Dataset YAML: {yaml_path.resolve()}")
 
@@ -325,5 +355,6 @@ if __name__ == "__main__":
         val_fraction=0.2,
         seed=123,
         bbox_expand_px=1,
+        image_size=None,
     )
     export_pdok_json_dataset_to_yolo(cfg)
