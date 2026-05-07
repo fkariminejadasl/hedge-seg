@@ -22,7 +22,7 @@ def draw_yolo_bounding_box_on_image(main_path, num, folder="val"):
     img_bgr = cv2.imread(str(image_path))
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-    labels = np.loadtxt(label_path)
+    labels = np.loadtxt(label_path, ndmin=2)
 
     fig, ax = plt.subplots()
     ax.imshow(img_rgb)
@@ -41,6 +41,55 @@ def draw_yolo_bounding_box_on_image(main_path, num, folder="val"):
             edgecolor="red",
         )
         ax.add_patch(rect)
+
+    ax.axis("off")
+    plt.show(block=False)
+    return ax
+
+
+def read_yolo_seg_labels(label_path):
+    labels = []
+
+    with open(label_path, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if not parts:
+                continue
+
+            class_id = int(parts[0])
+            coords = np.array([float(x) for x in parts[1:]], dtype=float)
+
+            if len(coords) % 2 != 0:
+                print(f"Skipping malformed row with odd number of coords: {label_path}")
+                continue
+
+            coords = coords.reshape(-1, 2)
+            labels.append((class_id, coords))
+
+    return labels
+
+
+def draw_yolo_segmentation_on_image(main_path, num, folder="val"):
+    image_path = main_path / f"images/{folder}/pos_{num:06d}.png"
+    label_path = main_path / f"labels/{folder}/pos_{num:06d}.txt"
+
+    img_bgr = cv2.imread(str(image_path))
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+    labels = read_yolo_seg_labels(label_path)
+
+    fig, ax = plt.subplots()
+    ax.imshow(img_rgb)
+
+    img_h, img_w = img_rgb.shape[:2]
+
+    for class_id, coords in labels:
+        xs = coords[:, 0] * img_w
+        ys = coords[:, 1] * img_h
+
+        ax.fill(xs, ys, alpha=0.25, color="red")
+        ax.plot(np.r_[xs, xs[0]], np.r_[ys, ys[0]], linewidth=2, color="red")
+        ax.plot(xs, ys, "*", color="red", markersize=4)
 
     ax.axis("off")
     plt.show(block=False)
@@ -103,10 +152,12 @@ for i in range(359,1000):
     plt.close()
 print("Done")
 
-# visualize yolo bounding boxes
+# visualize yolo bounding boxes and segmentations
 from pathlib import Path
-main_path = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset_yolo")
-draw_yolo_bounding_box_on_image(main_path, 3)
+main_path = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset_yolo_bbox2")
+draw_yolo_bounding_box_on_image(main_path, 9, folder="train")
+main_path = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset_yolo_seg2")
+draw_yolo_segmentation_on_image(main_path, 9, folder="train")
 print("Done")
 
 a = np.array([[106, 99], [104, 104], [102, 106], [119, 108], [128, 109]])

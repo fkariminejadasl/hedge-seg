@@ -11,12 +11,17 @@ There are 691006 polylines and 4121 closed shape, which some are not originally 
 
 There are three related data-generation workflows:
 
-- `hedge_seg/training_data.py`: generates chips and labels from a local hedge shapefile plus a local GeoTIFF raster, currently used for LiDAR-derived training data.
-- `hedge_seg/pdok_training_data.py`: generates chips and labels by requesting aerial imagery directly from PDOK WMS and combining it with the hedge shapefile.
+- `hedge_seg/training_data.py`: generates images and labels from a local hedge shapefile plus a local GeoTIFF raster, currently used for LiDAR-derived training data.
+- `hedge_seg/pdok_training_data.py`: generates images and labels by requesting aerial imagery directly from PDOK WMS and combining it with the hedge shapefile.
 - `exps/pdok_wmts_training_data.py`: experimental WMTS workflow. It fetches PDOK WMTS tiles, caches them, builds a local GeoTIFF for a bbox, and can then generate training samples from that local cache.
+
+## Ultralytics Export Utilities
+
+- `hedge_seg/ultralytics_export.py`: shared utility functions for exporting generated JSON/polyline datasets to Ultralytics/YOLO dataset layouts. It contains reusable path creation, image/label pairing, train/val splitting, image copying, dataset YAML writing, JSON loading, image-size reading, and common coordinate helpers.
 
 ## Scripts
 
 - `scripts/data/build_lidar_training_dataset.py`: end-to-end local-raster pipeline. It creates images and labels with `hedge_seg.training_data`, postprocesses labels with `hedge_seg.label_postprocess`, computes DINOv3 embeddings, and packs embeddings with labels using `hedge_seg.embeddings_and_pack`.
-- `scripts/data/build_pdok_wms_dataset.py`: example entry point for the PDOK WMS data-generation workflow in `hedge_seg.pdok_training_data`.
-- `scripts/data/convert_to_ultralytics_format.py`: converts the generated JSON/polyline dataset into a YOLO/Ultralytics dataset layout.
+- `scripts/data/build_pdok_wms_dataset.py`: entry point for the PDOK WMS data-generation workflow in `hedge_seg.pdok_training_data`.
+- `scripts/data/convert_pdok_polylines_to_yolo_bbox.py`: converts the generated JSON/polyline dataset into an Ultralytics detection dataset. Each polyline is converted to one normalized YOLO bounding box row.
+- `scripts/data/convert_pdok_polylines_to_yolo_seg.py`: converts the generated JSON/polyline dataset into an Ultralytics segmentation dataset. Each polyline is buffered into a thin polygon mask and written as a normalized YOLO segmentation row.
