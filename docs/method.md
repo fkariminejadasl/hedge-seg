@@ -59,12 +59,17 @@ These refernce are the DETR-like model, which from BEV images they get the vecto
 - [Beeldmateriaal aerial images](https://www.beeldmateriaal.nl/bekijk-luchtfotos)
 - [Map2ImLas](https://doi.org/10.1016/j.ophoto.2025.100112): Large-scale 2D-3D airborne dataset with map-based annotations.
 
-PDOK aerial images
+PDOK aerial images (only Netherlands)
 - [download data](https://www.beeldmateriaal.nl/dataroom)
 - [viewer](https://app.pdok.nl/viewer)
 - QGIS: WMTS https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0?request=GetCapabilities&service=wmts
 <!-- # 194297  408398 -->
 
+Satellietdataportaal, NLSA (only Netherlands): 
+- PlanetScope (4.8m), RapidEye(6m), Pleiades NEO (30cm, 50cm), SuperView-1(50cm), TripleSat(80cm), Hyperscout-2, Sentinel-2(10m), Spot6-7(1.5m), Formosat(2m), RadarSat-2(20m)
+
+- Copernicus Data Space Ecosystem or ESA Earth Online:
+Sentinel / Copernicus / ESA data
 
 <!-- ================================= -->
 ## Issues and some possible solutions
