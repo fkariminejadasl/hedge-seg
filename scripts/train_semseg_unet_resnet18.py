@@ -1,0 +1,597 @@
+"""
+Train semantic segmentation for hedgerows using RGB aerial images.
+
+Dataset layout expected:
+
+    pdok_dataset_semseg/
+        images/
+            train/
+            val/
+        masks/
+            train/
+            val/
+        centerlines/
+            train/
+            val/
+
+Masks and centerlines should be PNG files with 0 background and 255 foreground.
+"""
+
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torchvision
+from omegaconf import OmegaConf
+from PIL import Image
+from torch.utils import tensorboard
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
+
+
+class HedgeSemSegDataset(Dataset):
+    def __init__(
+        self,
+        root_dir: Path,
+        split: str,
+        image_size: tuple[int, int] = (1000, 1000),
+        normalize: bool = True,
+    ):
+        self.root_dir = Path(root_dir)
+        self.split = split
+        self.image_size = image_size
+        self.normalize = normalize
+
+        self.image_dir = self.root_dir / "images" / split
+        self.mask_dir = self.root_dir / "masks" / split
+        self.centerline_dir = self.root_dir / "centerlines" / split
+
+        if not self.image_dir.exists():
+            raise FileNotFoundError(f"Missing image directory: {self.image_dir}")
+        if not self.mask_dir.exists():
+            raise FileNotFoundError(f"Missing mask directory: {self.mask_dir}")
+        if not self.centerline_dir.exists():
+            raise FileNotFoundError(
+                f"Missing centerline directory: {self.centerline_dir}"
+            )
+
+        self.image_files = []
+        for suffix in ["*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff"]:
+            self.image_files.extend(sorted(self.image_dir.glob(suffix)))
+
+        if len(self.image_files) == 0:
+            raise RuntimeError(f"No images found in {self.image_dir}")
+
+        self.mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
+    def __len__(self):
+        return len(self.image_files)
+
+    def _load_image(self, path: Path) -> torch.Tensor:
+        image = Image.open(path).convert("RGB")
+        if image.size != self.image_size:
+            image = image.resize(self.image_size, resample=Image.BILINEAR)
+
+        arr = np.asarray(image, dtype=np.float32) / 255.0
+        x = torch.from_numpy(arr).permute(2, 0, 1).contiguous()
+
+        if self.normalize:
+            x = (x - self.mean) / self.std
+
+        return x
+
+    def _load_mask(self, path: Path) -> torch.Tensor:
+        mask = Image.open(path).convert("L")
+        if mask.size != self.image_size:
+            mask = mask.resize(self.image_size, resample=Image.NEAREST)
+
+        arr = np.asarray(mask, dtype=np.float32)
+        arr = (arr > 127).astype(np.float32)
+        y = torch.from_numpy(arr).unsqueeze(0).contiguous()
+        return y
+
+    def __getitem__(self, ind):
+        image_path = self.image_files[ind]
+        stem = image_path.stem
+
+        mask_path = self.mask_dir / f"{stem}.png"
+        centerline_path = self.centerline_dir / f"{stem}.png"
+
+        if not mask_path.exists():
+            raise FileNotFoundError(f"Missing mask for {image_path.name}: {mask_path}")
+        if not centerline_path.exists():
+            raise FileNotFoundError(
+                f"Missing centerline for {image_path.name}: {centerline_path}"
+            )
+
+        image = self._load_image(image_path)
+        mask = self._load_mask(mask_path)
+        centerline = self._load_mask(centerline_path)
+
+        target = {
+            "mask": mask,
+            "centerline": centerline,
+            "stem": stem,
+        }
+
+        return image, target
+
+
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        return self.block(x)
+
+
+class UpBlock(nn.Module):
+    def __init__(self, in_channels: int, skip_channels: int, out_channels: int):
+        super().__init__()
+
+        self.conv = ConvBlock(in_channels + skip_channels, out_channels)
+
+    def forward(self, x, skip):
+        x = F.interpolate(x, size=skip.shape[-2:], mode="bilinear", align_corners=False)
+        x = torch.cat([x, skip], dim=1)
+        x = self.conv(x)
+        return x
+
+
+class ResNet18UNet(nn.Module):
+    def __init__(
+        self,
+        out_channels: int = 2,
+        pretrained: bool = False,
+    ):
+        super().__init__()
+
+        if pretrained:
+            weights = torchvision.models.ResNet18_Weights.DEFAULT
+        else:
+            weights = None
+
+        resnet = torchvision.models.resnet18(weights=weights)
+
+        self.stem = nn.Sequential(
+            resnet.conv1,
+            resnet.bn1,
+            resnet.relu,
+        )
+        self.maxpool = resnet.maxpool
+
+        self.enc1 = resnet.layer1  # 64 channels, stride 4 after maxpool
+        self.enc2 = resnet.layer2  # 128 channels, stride 8
+        self.enc3 = resnet.layer3  # 256 channels, stride 16
+        self.enc4 = resnet.layer4  # 512 channels, stride 32
+
+        self.up3 = UpBlock(in_channels=512, skip_channels=256, out_channels=256)
+        self.up2 = UpBlock(in_channels=256, skip_channels=128, out_channels=128)
+        self.up1 = UpBlock(in_channels=128, skip_channels=64, out_channels=64)
+        self.up0 = UpBlock(in_channels=64, skip_channels=64, out_channels=64)
+
+        self.head = nn.Conv2d(64, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        input_size = x.shape[-2:]
+
+        s0 = self.stem(x)  # stride 2, 64
+        x = self.maxpool(s0)  # stride 4
+
+        s1 = self.enc1(x)  # stride 4, 64
+        s2 = self.enc2(s1)  # stride 8, 128
+        s3 = self.enc3(s2)  # stride 16, 256
+        x = self.enc4(s3)  # stride 32, 512
+
+        x = self.up3(x, s3)
+        x = self.up2(x, s2)
+        x = self.up1(x, s1)
+        x = self.up0(x, s0)
+
+        x = F.interpolate(x, size=input_size, mode="bilinear", align_corners=False)
+        logits = self.head(x)
+
+        return {
+            "mask_logits": logits[:, 0:1],
+            "centerline_logits": logits[:, 1:2],
+        }
+
+
+def dice_loss_with_logits(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    probs = torch.sigmoid(logits)
+    probs = probs.flatten(1)
+    targets = targets.flatten(1)
+
+    intersection = (probs * targets).sum(dim=1)
+    denominator = probs.sum(dim=1) + targets.sum(dim=1)
+
+    dice = (2.0 * intersection + eps) / (denominator + eps)
+    return 1.0 - dice.mean()
+
+
+def segmentation_loss(
+    outputs: dict,
+    targets: dict,
+    centerline_weight: float = 0.5,
+) -> tuple[torch.Tensor, dict]:
+    mask = targets["mask"]
+    centerline = targets["centerline"]
+
+    mask_logits = outputs["mask_logits"]
+    centerline_logits = outputs["centerline_logits"]
+
+    mask_bce = F.binary_cross_entropy_with_logits(mask_logits, mask)
+    mask_dice = dice_loss_with_logits(mask_logits, mask)
+
+    centerline_bce = F.binary_cross_entropy_with_logits(centerline_logits, centerline)
+    centerline_dice = dice_loss_with_logits(centerline_logits, centerline)
+
+    loss = (
+        mask_bce
+        + mask_dice
+        + centerline_weight * centerline_bce
+        + centerline_weight * centerline_dice
+    )
+
+    loss_dict = {
+        "loss": loss.detach(),
+        "mask_bce": mask_bce.detach(),
+        "mask_dice": mask_dice.detach(),
+        "centerline_bce": centerline_bce.detach(),
+        "centerline_dice": centerline_dice.detach(),
+    }
+
+    return loss, loss_dict
+
+
+@torch.no_grad()
+def binary_metrics_from_logits(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    threshold: float = 0.5,
+    eps: float = 1e-6,
+) -> dict:
+    probs = torch.sigmoid(logits)
+    preds = probs > threshold
+    targets_bool = targets > 0.5
+
+    tp = (preds & targets_bool).sum().float()
+    fp = (preds & (~targets_bool)).sum().float()
+    fn = ((~preds) & targets_bool).sum().float()
+
+    precision = tp / (tp + fp + eps)
+    recall = tp / (tp + fn + eps)
+    f1 = 2.0 * precision * recall / (precision + recall + eps)
+    iou = tp / (tp + fp + fn + eps)
+
+    return {
+        "precision": precision.item(),
+        "recall": recall.item(),
+        "f1": f1.item(),
+        "iou": iou.item(),
+    }
+
+
+def move_targets_to_device(targets: dict, device: torch.device) -> dict:
+    return {
+        "mask": targets["mask"].to(device),
+        "centerline": targets["centerline"].to(device),
+        "stem": targets["stem"],
+    }
+
+
+def train_one_epoch(
+    loader,
+    model,
+    optimizer,
+    device,
+    scaler: Optional[torch.amp.GradScaler],
+    use_amp: bool,
+    centerline_weight: float,
+    print_batches: bool = False,
+):
+    model.train()
+
+    totals = {
+        "loss": 0.0,
+        "mask_bce": 0.0,
+        "mask_dice": 0.0,
+        "centerline_bce": 0.0,
+        "centerline_dice": 0.0,
+        "mask_precision": 0.0,
+        "mask_recall": 0.0,
+        "mask_f1": 0.0,
+        "mask_iou": 0.0,
+    }
+    total_examples = 0
+
+    for images, targets in loader:
+        images = images.to(device)
+        targets = move_targets_to_device(targets, device)
+
+        optimizer.zero_grad(set_to_none=True)
+
+        with torch.amp.autocast(enabled=use_amp, device_type=device.type):
+            outputs = model(images)
+            loss, loss_dict = segmentation_loss(
+                outputs=outputs,
+                targets=targets,
+                centerline_weight=centerline_weight,
+            )
+
+        if scaler is not None and use_amp:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
+
+        batch_size = images.size(0)
+        total_examples += batch_size
+
+        metrics = binary_metrics_from_logits(outputs["mask_logits"], targets["mask"])
+
+        for k in ["loss", "mask_bce", "mask_dice", "centerline_bce", "centerline_dice"]:
+            totals[k] += float(loss_dict[k].item()) * batch_size
+
+        totals["mask_precision"] += metrics["precision"] * batch_size
+        totals["mask_recall"] += metrics["recall"] * batch_size
+        totals["mask_f1"] += metrics["f1"] * batch_size
+        totals["mask_iou"] += metrics["iou"] * batch_size
+
+        if print_batches:
+            print(
+                f"Train loss={loss.item():.4f}, "
+                f"f1={metrics['f1']:.4f}, "
+                f"iou={metrics['iou']:.4f}, "
+                f"precision={metrics['precision']:.4f}, "
+                f"recall={metrics['recall']:.4f}"
+            )
+
+    return {k: v / max(1, total_examples) for k, v in totals.items()}
+
+
+@torch.no_grad()
+def eval_model(
+    loader,
+    model,
+    device,
+    centerline_weight: float,
+    print_batches: bool = False,
+):
+    model.eval()
+
+    totals = {
+        "loss": 0.0,
+        "mask_bce": 0.0,
+        "mask_dice": 0.0,
+        "centerline_bce": 0.0,
+        "centerline_dice": 0.0,
+        "mask_precision": 0.0,
+        "mask_recall": 0.0,
+        "mask_f1": 0.0,
+        "mask_iou": 0.0,
+    }
+    total_examples = 0
+
+    for images, targets in loader:
+        images = images.to(device)
+        targets = move_targets_to_device(targets, device)
+
+        outputs = model(images)
+        loss, loss_dict = segmentation_loss(
+            outputs=outputs,
+            targets=targets,
+            centerline_weight=centerline_weight,
+        )
+
+        batch_size = images.size(0)
+        total_examples += batch_size
+
+        metrics = binary_metrics_from_logits(outputs["mask_logits"], targets["mask"])
+
+        for k in ["loss", "mask_bce", "mask_dice", "centerline_bce", "centerline_dice"]:
+            totals[k] += float(loss_dict[k].item()) * batch_size
+
+        totals["mask_precision"] += metrics["precision"] * batch_size
+        totals["mask_recall"] += metrics["recall"] * batch_size
+        totals["mask_f1"] += metrics["f1"] * batch_size
+        totals["mask_iou"] += metrics["iou"] * batch_size
+
+        if print_batches:
+            print(
+                f"Eval loss={loss.item():.4f}, "
+                f"f1={metrics['f1']:.4f}, "
+                f"iou={metrics['iou']:.4f}, "
+                f"precision={metrics['precision']:.4f}, "
+                f"recall={metrics['recall']:.4f}"
+            )
+
+    return {k: v / max(1, total_examples) for k, v in totals.items()}
+
+
+def write_metrics(writer, epoch: int, metrics: dict, stage: str):
+    for k, v in metrics.items():
+        writer.add_scalars(k, {stage: v}, epoch)
+
+
+def save_checkpoint(path: Path, model, optimizer, epoch: int, cfg, best_metric: float):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "epoch": epoch,
+            "cfg": OmegaConf.to_container(cfg, resolve=True),
+            "best_metric": best_metric,
+        },
+        path,
+    )
+
+
+def main():
+    torch.manual_seed(0)
+
+    cfg = dict(
+        exp="overfit1",
+        save_dir=Path("/home/fatemeh/Downloads/hedge/results/training/semseg_unet"),
+        data_dir=Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2"),
+        image_size=(1000, 1000),
+        batch_size=4,
+        num_workers=4,
+        no_epochs=200,
+        lr=1e-4,
+        weight_decay=1e-4,
+        centerline_weight=0.5,
+        pretrained_encoder=False,
+        use_amp=True,
+        print_batches=False,
+    )
+
+    cfg = OmegaConf.create(cfg)
+
+    cfg.save_dir = cfg.save_dir / f"{cfg.exp}"
+    cfg.save_dir.mkdir(parents=True, exist_ok=True)
+    cfg.tensorboard_file = cfg.save_dir / "tensorboard"
+    cfg.tensorboard_file.mkdir(parents=True, exist_ok=True)
+
+    train_dataset = HedgeSemSegDataset(
+        root_dir=cfg.data_dir,
+        split="train",
+        image_size=tuple(cfg.image_size),
+        normalize=True,
+    )
+    eval_dataset = HedgeSemSegDataset(
+        root_dir=cfg.data_dir,
+        split="val",
+        image_size=tuple(cfg.image_size),
+        normalize=True,
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=cfg.batch_size,
+        shuffle=True,
+        num_workers=cfg.num_workers,
+        drop_last=False,
+        pin_memory=True,
+    )
+    eval_loader = DataLoader(
+        eval_dataset,
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        num_workers=cfg.num_workers,
+        drop_last=False,
+        pin_memory=True,
+    )
+
+    model = ResNet18UNet(
+        out_channels=2,
+        pretrained=cfg.pretrained_encoder,
+    )
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=cfg.lr,
+        weight_decay=cfg.weight_decay,
+    )
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    use_amp = bool(cfg.use_amp and device.type == "cuda")
+    scaler = torch.amp.GradScaler(enabled=use_amp)
+
+    best_f1 = 0.0
+
+    with tensorboard.SummaryWriter(cfg.tensorboard_file) as writer:
+        for epoch in tqdm(range(1, cfg.no_epochs + 1)):
+            start_time = datetime.now().replace(microsecond=0)
+
+            train_metrics = train_one_epoch(
+                loader=train_loader,
+                model=model,
+                optimizer=optimizer,
+                device=device,
+                scaler=scaler,
+                use_amp=use_amp,
+                centerline_weight=cfg.centerline_weight,
+                print_batches=cfg.print_batches,
+            )
+
+            end_time_train = datetime.now().replace(microsecond=0)
+
+            eval_metrics = eval_model(
+                loader=eval_loader,
+                model=model,
+                device=device,
+                centerline_weight=cfg.centerline_weight,
+                print_batches=cfg.print_batches,
+            )
+
+            end_time_eval = datetime.now().replace(microsecond=0)
+
+            print(f"Epoch {epoch:03d} time taken: {end_time_eval - start_time}")
+            print(
+                f"{end_time_train}, epoch {epoch:03d}/{cfg.no_epochs} "
+                f"train_loss={train_metrics['loss']:.4f}, "
+                f"train_f1={train_metrics['mask_f1']:.4f}, "
+                f"train_iou={train_metrics['mask_iou']:.4f}"
+            )
+            print(
+                f"{end_time_eval}, epoch {epoch:03d}/{cfg.no_epochs} "
+                f"eval_loss={eval_metrics['loss']:.4f}, "
+                f"eval_f1={eval_metrics['mask_f1']:.4f}, "
+                f"eval_iou={eval_metrics['mask_iou']:.4f}, "
+                f"eval_precision={eval_metrics['mask_precision']:.4f}, "
+                f"eval_recall={eval_metrics['mask_recall']:.4f}"
+            )
+
+            write_metrics(writer, epoch, train_metrics, "train")
+            write_metrics(writer, epoch, eval_metrics, "eval")
+
+            save_checkpoint(
+                path=cfg.save_dir / f"last_{cfg.exp}.pt",
+                model=model,
+                optimizer=optimizer,
+                epoch=epoch,
+                cfg=cfg,
+                best_metric=best_f1,
+            )
+
+            if eval_metrics["mask_f1"] > best_f1:
+                best_f1 = eval_metrics["mask_f1"]
+                save_checkpoint(
+                    path=cfg.save_dir / f"best_{cfg.exp}.pt",
+                    model=model,
+                    optimizer=optimizer,
+                    epoch=epoch,
+                    cfg=cfg,
+                    best_metric=best_f1,
+                )
+                print(f"Saved best model with eval_f1={best_f1:.4f}")
+
+    print(f"Best eval_f1: {best_f1:.4f}")
+
+
+if __name__ == "__main__":
+    main()
