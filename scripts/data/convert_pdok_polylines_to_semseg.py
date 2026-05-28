@@ -188,7 +188,7 @@ def export_pdok_json_dataset_to_semseg(cfg: SemSegExportConfig) -> None:
         else:
             if out_image_path.exists():
                 out_image_path.unlink()
-            out_image_path.symlink_to(image_path)
+            out_image_path.hardlink_to(image_path)
 
         mask.save(out_mask_path)
         centerline.save(out_centerline_path)
@@ -226,7 +226,7 @@ def main() -> None:
         mask_width_m=15.0,
         # This is the centerline supervision target.
         centerline_width_m=1.0,
-        copy_images=True,
+        copy_images=False,
     )
 
     export_pdok_json_dataset_to_semseg(cfg)
