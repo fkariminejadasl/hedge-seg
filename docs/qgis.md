@@ -9,7 +9,9 @@ Follow the official installation in [QGIS](https://qgis.org/resources/installati
 - Shape file: just drage and drop
 - GeoTIFF file: just drage and drop
 - PDOK aerial images: WMTS https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0?request=GetCapabilities&service=wmts
+- PDOK AHN: WMTS https://service.pdok.nl/rws/actueel-hoogtebestand-nederland/wms/v1_0
 - PDOK TOP10NL: WMTS https://service.pdok.nl/brt/top10nl/wmts/v1_0?request=GetCapabilities&service=wmts
+- Satellite NL: WMTS https://wmts.satellietdataportaal.nl/wmts/SuperView-NEO-2026-4-RGB/service?SERVICE=WMTS&REQUEST=GetCapabilities . Get URL from `exps/download_dutch_satellite_data.py` and then add `?SERVICE=WMTS&REQUEST=GetCapabilities`.
 - OpenStreetMap: XYZ Tiles https://tile.openstreetmap.org/{z}/{x}/{y}.png
 - ESRI World Imagery (Satellite): XYZ Tiles https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
 - ESRI World Topo: XYZ Tiles https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}
