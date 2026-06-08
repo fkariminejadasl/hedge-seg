@@ -65,7 +65,7 @@ PDOK aerial images (only Netherlands)
 - QGIS: WMTS https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0?request=GetCapabilities&service=wmts
 <!-- # 194297  408398 -->
 
-Satellietdataportaal, NLSA (only Netherlands): 
+[Satellietdataportaal](https://www.satellietdataportaal.nl), NLSA (only Netherlands): 
 - PlanetScope (4.8m), RapidEye(6m), Pleiades NEO (30cm, 50cm), SuperView-1(50cm), TripleSat(80cm), Hyperscout-2, Sentinel-2(10m), Spot6-7(1.5m), Formosat(2m), RadarSat-2(20m)
 
 - Copernicus Data Space Ecosystem or ESA Earth Online:
