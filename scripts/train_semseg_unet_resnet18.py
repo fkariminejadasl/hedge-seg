@@ -498,14 +498,18 @@ def infer_model(loader, model, device, cfg):
 
         stems = targets["stem"]
 
+        mask_dir = out_dir / "masks"
+        mask_dir.mkdir(parents=True, exist_ok=True)
+        centerline_dir = out_dir / "centerlines"
+        centerline_dir.mkdir(parents=True, exist_ok=True)
         for i, stem in enumerate(stems):
             mask = (mask_probs[i, 0].numpy() > threshold).astype(np.uint8) * 255
             centerline = (centerline_probs[i, 0].numpy() > threshold).astype(
                 np.uint8
             ) * 255
 
-            Image.fromarray(mask).save(out_dir / f"{stem}_mask.png")
-            Image.fromarray(centerline).save(out_dir / f"{stem}_centerline.png")
+            Image.fromarray(mask).save(mask_dir / f"{stem}_mask.png")
+            Image.fromarray(centerline).save(centerline_dir / f"{stem}_centerline.png")
 
 
 def write_metrics(writer, epoch: int, metrics: dict, stage: str):
@@ -545,6 +549,7 @@ def main():
         use_amp=True,
         print_batches=False,
         mode="infer",  # "train" or "infer"
+        # inference settings
         infer_image_dir=Path(
             "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/images/train"
         ),
