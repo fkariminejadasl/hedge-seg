@@ -124,6 +124,55 @@ class HedgeSemSegDataset(Dataset):
         return image, target
 
 
+class HedgeSemSegInferenceDataset(Dataset):
+    def __init__(
+        self,
+        image_dir: Path,
+        image_size: tuple[int, int] = (1000, 1000),
+        normalize: bool = True,
+    ):
+        self.image_dir = Path(image_dir)
+        self.image_size = image_size
+        self.normalize = normalize
+
+        if not self.image_dir.exists():
+            raise FileNotFoundError(
+                f"Missing inference image directory: {self.image_dir}"
+            )
+
+        self.image_files = []
+        for suffix in ["*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff"]:
+            self.image_files.extend(sorted(self.image_dir.glob(suffix)))
+
+        if len(self.image_files) == 0:
+            raise RuntimeError(f"No images found in {self.image_dir}")
+
+        self.mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
+    def __len__(self):
+        return len(self.image_files)
+
+    def __getitem__(self, ind):
+        image_path = self.image_files[ind]
+        image = Image.open(image_path).convert("RGB")
+
+        if image.size != self.image_size:
+            image = image.resize(self.image_size, resample=Image.BILINEAR)
+
+        arr = np.asarray(image, dtype=np.float32) / 255.0
+        x = torch.from_numpy(arr).permute(2, 0, 1).contiguous()
+
+        if self.normalize:
+            x = (x - self.mean) / self.std
+
+        target = {
+            "stem": image_path.stem,
+        }
+
+        return x, target
+
+
 class ConvBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
@@ -431,6 +480,34 @@ def eval_model(
     return {k: v / max(1, total_examples) for k, v in totals.items()}
 
 
+@torch.no_grad()
+def infer_model(loader, model, device, cfg):
+    model.eval()
+
+    out_dir = Path(cfg.infer_out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    threshold = float(cfg.infer_threshold)
+
+    for images, targets in tqdm(loader):
+        images = images.to(device)
+        outputs = model(images)
+
+        mask_probs = torch.sigmoid(outputs["mask_logits"]).cpu()
+        centerline_probs = torch.sigmoid(outputs["centerline_logits"]).cpu()
+
+        stems = targets["stem"]
+
+        for i, stem in enumerate(stems):
+            mask = (mask_probs[i, 0].numpy() > threshold).astype(np.uint8) * 255
+            centerline = (centerline_probs[i, 0].numpy() > threshold).astype(
+                np.uint8
+            ) * 255
+
+            Image.fromarray(mask).save(out_dir / f"{stem}_mask.png")
+            Image.fromarray(centerline).save(out_dir / f"{stem}_centerline.png")
+
+
 def write_metrics(writer, epoch: int, metrics: dict, stage: str):
     for k, v in metrics.items():
         writer.add_scalars(k, {stage: v}, epoch)
@@ -467,6 +544,17 @@ def main():
         pretrained_encoder=False,
         use_amp=True,
         print_batches=False,
+        mode="infer",  # "train" or "infer"
+        infer_image_dir=Path(
+            "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/images/train"
+        ),
+        checkpoint_path=Path(
+            "/home/fatemeh/Downloads/hedge/snellius/semseg_unet/4/best_4.pt"
+        ),
+        infer_out_dir=Path(
+            "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/inference"
+        ),
+        infer_threshold=0.5,
     )
 
     cfg = OmegaConf.create(cfg)
@@ -475,6 +563,51 @@ def main():
     cfg.save_dir.mkdir(parents=True, exist_ok=True)
     cfg.tensorboard_file = cfg.save_dir / "tensorboard"
     cfg.tensorboard_file.mkdir(parents=True, exist_ok=True)
+
+    if cfg.checkpoint_path is None:
+        cfg.checkpoint_path = cfg.save_dir / f"best_{cfg.exp}.pt"
+
+    if cfg.infer_out_dir is None:
+        cfg.infer_out_dir = cfg.save_dir / "inference"
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = ResNet18UNet(
+        out_channels=2,
+        pretrained=cfg.pretrained_encoder,
+    )
+
+    model.to(device)
+
+    if cfg.mode == "infer":
+        infer_dataset = HedgeSemSegInferenceDataset(
+            image_dir=cfg.infer_image_dir,
+            image_size=tuple(cfg.image_size),
+            normalize=True,
+        )
+
+        infer_loader = DataLoader(
+            infer_dataset,
+            batch_size=cfg.batch_size,
+            shuffle=False,
+            num_workers=cfg.num_workers,
+            drop_last=False,
+            pin_memory=True,
+        )
+
+        checkpoint = torch.load(
+            cfg.checkpoint_path, map_location=device, weights_only=False
+        )
+        model.load_state_dict(checkpoint["model"])
+        model.to(device)
+
+        infer_model(
+            loader=infer_loader,
+            model=model,
+            device=device,
+            cfg=cfg,
+        )
+        return
 
     train_dataset = HedgeSemSegDataset(
         root_dir=cfg.data_dir,
@@ -506,19 +639,11 @@ def main():
         pin_memory=True,
     )
 
-    model = ResNet18UNet(
-        out_channels=2,
-        pretrained=cfg.pretrained_encoder,
-    )
-
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=cfg.lr,
         weight_decay=cfg.weight_decay,
     )
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
 
     use_amp = bool(cfg.use_amp and device.type == "cuda")
     scaler = torch.amp.GradScaler(enabled=use_amp)
