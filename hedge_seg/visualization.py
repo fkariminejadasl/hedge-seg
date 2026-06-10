@@ -1,4 +1,6 @@
 import json
+import random
+from pathlib import Path
 
 import cv2
 import matplotlib.pyplot as plt
@@ -165,6 +167,49 @@ def show_image_with_mask(image, mask, alpha=0.25):
     plt.show(block=False)
 
 
+def show_mask_grid(
+    image_dir,
+    mask_dir,
+    ids=None,
+    n=16,
+    image_pattern="pos_{:06d}.png",
+    mask_pattern="pos_{:06d}.png",
+    alpha=0.25,
+    color=(1, 0, 0),
+):
+    image_dir = Path(image_dir)
+    mask_dir = Path(mask_dir)
+
+    if ids is None:
+        files = sorted(image_dir.glob("*.png"))
+        ids = [int(p.stem.split("_")[-1]) for p in random.sample(files, n)]
+    else:
+        ids = ids[:n]
+
+    fig, axes = plt.subplots(4, 4, figsize=(12, 12))
+
+    for ax, i in zip(axes.ravel(), ids):
+        image_path = image_dir / image_pattern.format(i)
+        mask_path = mask_dir / mask_pattern.format(i)
+
+        image = cv2.imread(str(image_path))
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        mask_bool = mask > 0
+
+        overlay = np.zeros((*mask.shape, 4))
+        overlay[mask_bool] = (*color, alpha)
+
+        ax.imshow(image)
+        ax.imshow(overlay)
+        ax.set_title(f"pos_{i:06d}", fontsize=9)
+        ax.axis("off")
+
+    plt.tight_layout()
+    plt.show(block=False)
+
+
 """
 from pathlib import Path
 main_path = Path(f"/home/fatemeh/Downloads/hedge/results")
@@ -199,4 +244,17 @@ mask = cv2.imread("/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1i
 show_image_with_mask(image, mask)
 mask = cv2.imread("/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/masks/train/pos_000000.png", cv2.IMREAD_GRAYSCALE)
 show_image_with_mask(image, mask)
+
+# visualize a grid of masks
+image_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/images/val"
+mask_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/masks/val"
+show_mask_grid(
+    image_dir=image_dir,
+    mask_dir=mask_dir,
+    ids=[6712, 2591, 18168, 18742, 1050, 10454, 28379, 17717, 9641, 28365, 5019, 26894, 8816, 13029, 4124, 24082],
+)
+show_mask_grid(
+    image_dir=image_dir,
+    mask_dir=mask_dir,
+)
 """
