@@ -508,8 +508,8 @@ def infer_model(loader, model, device, cfg):
                 np.uint8
             ) * 255
 
-            Image.fromarray(mask).save(mask_dir / f"{stem}_mask.png")
-            Image.fromarray(centerline).save(centerline_dir / f"{stem}_centerline.png")
+            Image.fromarray(mask).save(mask_dir / f"{stem}.png")
+            Image.fromarray(centerline).save(centerline_dir / f"{stem}.png")
 
 
 def write_metrics(writer, epoch: int, metrics: dict, stage: str):

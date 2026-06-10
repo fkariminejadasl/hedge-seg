@@ -70,8 +70,13 @@ def read_yolo_seg_labels(label_path):
 
 
 def draw_yolo_segmentation_on_image(main_path, num, folder="val"):
-    image_path = main_path / f"images/{folder}/pos_{num:06d}.png"
-    label_path = main_path / f"labels/{folder}/pos_{num:06d}.txt"
+    stem = f"pos_{num:06d}"
+    image_path = main_path / "images" / folder / f"{stem}.png"
+    label_path = main_path / "labels" / folder / f"{stem}.txt"
+    if not image_path.exists():
+        image_path = main_path / f"{stem}.png"
+    if not label_path.exists():
+        label_path = main_path / f"{stem}.txt"
 
     img_bgr = cv2.imread(str(image_path))
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -141,6 +146,25 @@ def visualize_sample(
     draw_polylines_on_image(image_path, json_path)
 
 
+def show_image_with_mask(image, mask, alpha=0.25):
+    """
+    Plot a red transparent mask over an image.
+
+    image: HxW or HxWx3 array
+    mask:  HxW array, boolean or numeric
+    """
+    mask_bool = mask > 0
+
+    overlay = np.zeros((*mask.shape, 4))  # RGBA
+    overlay[mask_bool] = [1, 0, 0, alpha]  # red with transparency
+
+    plt.figure()
+    plt.imshow(image)
+    plt.imshow(overlay)
+    plt.axis("off")
+    plt.show(block=False)
+
+
 """
 from pathlib import Path
 main_path = Path(f"/home/fatemeh/Downloads/hedge/results")
@@ -168,4 +192,11 @@ image_path = Path(
 ax = draw_rectangle_on_image(image_path, xmin, ymin, xmax, ymax)
 ax.plot(a[:, 0], a[:, 1], "*r")
 plt.show(block=False)
+
+# visualize semantic segmentation masks
+image = cv2.imread("/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/images/train/pos_000000.png")
+mask = cv2.imread("/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/inference/masks/pos_000000.png", cv2.IMREAD_GRAYSCALE)
+show_image_with_mask(image, mask)
+mask = cv2.imread("/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/masks/train/pos_000000.png", cv2.IMREAD_GRAYSCALE)
+show_image_with_mask(image, mask)
 """
