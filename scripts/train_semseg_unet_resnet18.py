@@ -539,8 +539,8 @@ def main():
         save_dir=Path("/home/fatemeh/Downloads/hedge/results/training/semseg_unet"),
         data_dir=Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2"),
         image_size=(1000, 1000),
-        batch_size=4,
-        num_workers=4,
+        batch_size=16,
+        num_workers=18,
         no_epochs=200,
         lr=1e-4,
         weight_decay=1e-4,
@@ -551,13 +551,13 @@ def main():
         mode="infer",  # "train" or "infer"
         # inference settings
         infer_image_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/images/train"
+            "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/images/val"
         ),
         checkpoint_path=Path(
             "/home/fatemeh/Downloads/hedge/snellius/semseg_unet/4/best_4.pt"
         ),
         infer_out_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/inference"
+            "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/inference"
         ),
         infer_threshold=0.5,
     )

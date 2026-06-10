@@ -1,5 +1,4 @@
 import json
-import random
 from pathlib import Path
 
 import cv2
@@ -176,17 +175,21 @@ def show_mask_grid(
     mask_pattern="pos_{:06d}.png",
     alpha=0.25,
     color=(1, 0, 0),
+    seed=42,
+    title="GT",
 ):
     image_dir = Path(image_dir)
     mask_dir = Path(mask_dir)
 
     if ids is None:
         files = sorted(image_dir.glob("*.png"))
-        ids = [int(p.stem.split("_")[-1]) for p in random.sample(files, n)]
+        rng = np.random.default_rng(seed)
+        files = rng.choice(files, size=n, replace=False)
+        ids = [int(p.stem.split("_")[-1]) for p in files]
     else:
         ids = ids[:n]
 
-    fig, axes = plt.subplots(4, 4, figsize=(12, 12))
+    fig, axes = plt.subplots(4, 4, figsize=(10.8, 10.8))
 
     for ax, i in zip(axes.ravel(), ids):
         image_path = image_dir / image_pattern.format(i)
@@ -203,10 +206,13 @@ def show_mask_grid(
 
         ax.imshow(image)
         ax.imshow(overlay)
-        ax.set_title(f"pos_{i:06d}", fontsize=9)
+        ax.set_title(f"pos_{i:06d}", fontsize=8, pad=0)
         ax.axis("off")
 
-    plt.tight_layout()
+    fig.suptitle(title, fontsize=9)
+    fig.subplots_adjust(
+        left=0.01, right=0.99, bottom=0.01, top=0.96, wspace=0.01, hspace=0.05
+    )
     plt.show(block=False)
 
 
@@ -246,15 +252,22 @@ mask = cv2.imread("/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1i
 show_image_with_mask(image, mask)
 
 # visualize a grid of masks
-image_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/images/val"
-mask_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/masks/val"
-show_mask_grid(
-    image_dir=image_dir,
-    mask_dir=mask_dir,
-    ids=[6712, 2591, 18168, 18742, 1050, 10454, 28379, 17717, 9641, 28365, 5019, 26894, 8816, 13029, 4124, 24082],
-)
-show_mask_grid(
-    image_dir=image_dir,
-    mask_dir=mask_dir,
-)
+# ids=[6712, 2591, 18168, 18742, 1050, 10454, 28379, 17717, 9641, 28365, 5019, 26894, 8816, 13029, 4124, 24082],
+for seed in [42, 123, 456]:
+    image_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/images/val"
+    mask_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/masks/val"
+    show_mask_grid(
+        image_dir=image_dir,
+        mask_dir=mask_dir,
+        seed=seed,
+    )
+
+    image_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/images/val"
+    mask_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/inference/masks"
+    show_mask_grid(
+        image_dir=image_dir,
+        mask_dir=mask_dir,
+        seed=seed,
+        title="Inference",
+    )
 """
