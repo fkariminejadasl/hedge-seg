@@ -71,6 +71,8 @@ PDOK aerial images (only Netherlands)
 - Copernicus Data Space Ecosystem or ESA Earth Online:
 Sentinel / Copernicus / ESA data
 
+For the Netherlands, two main sources of high-resolution remote sensing data are used. Satellite imagery is obtained from the Satellietdataportaal of the Netherlands Space Agency, which provides SuperView data at approximately 30 cm resolution. Each tile covers about 14 × 14 km and is around 6.5 GB, with new imagery generally available about once per month for the same location, although cloud cover can affect usability. Aerial imagery is available through the PDOK platform and originates from Beeldmateriaal Nederland, a Dutch public-sector initiative implemented by Het Waterschapshuis and Kadaster. These aerial images are higher quality and are available at 8 cm and 25 cm resolution, typically updated annually.
+
 <!-- ================================= -->
 ## Issues and some possible solutions
 
