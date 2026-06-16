@@ -1,5 +1,4 @@
 import copy
-import math
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -1177,7 +1176,7 @@ def detr_polyline_collate_fn(batch):
 
 
 def tb_add_losses(writer, epoch: int, losses: dict, stage: str):
-    wanted = {"loss_total", "loss_diff"}
+    wanted = {"loss_total"}
     d = {f"{stage}_{k}": float(v) for k, v in losses.items() if k in wanted}
     writer.add_scalars("losses", d, epoch)
 
@@ -1344,801 +1343,6 @@ def detr_polyline_inference(
 
 
 # =========================================================
-# Diffusion Model Components
-# =========================================================
-
-# =========================================================
-# Helpers
-# =========================================================
-
-
-def coords_01_to_m11(x: torch.Tensor) -> torch.Tensor:
-    return x * 2.0 - 1.0
-
-
-def coords_m11_to_01(x: torch.Tensor) -> torch.Tensor:
-    return ((x + 1.0) * 0.5).clamp(0.0, 1.0)
-
-
-def extract(a: torch.Tensor, t: torch.Tensor, x_shape: Tuple[int, ...]) -> torch.Tensor:
-    b = t.shape[0]
-    out = a.gather(0, t)
-    return out.view(b, *([1] * (len(x_shape) - 1)))
-
-
-# =========================================================
-# Timestep embedding
-# =========================================================
-
-
-class SinusoidalTimeEmbedding(nn.Module):
-    def __init__(self, dim: int):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, t: torch.Tensor) -> torch.Tensor:
-        half = self.dim // 2
-        device = t.device
-        emb = math.log(10000.0) / max(half - 1, 1)
-        emb = torch.exp(torch.arange(half, device=device, dtype=torch.float32) * -emb)
-        emb = t.float()[:, None] * emb[None, :]
-        emb = torch.cat([emb.sin(), emb.cos()], dim=-1)
-        if self.dim % 2 == 1:
-            emb = F.pad(emb, (0, 1))
-        return emb
-
-
-# =========================================================
-# Transformer blocks for diffusion decoder
-# =========================================================
-
-
-class AdaLNModulation(nn.Module):
-    def __init__(self, hidden_dim: int, cond_dim: int):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(cond_dim, hidden_dim * 2),
-        )
-
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        scale, shift = self.net(cond).chunk(2, dim=-1)
-        return x * (1.0 + scale[:, None, :]) + shift[:, None, :]
-
-
-class DiffusionDecoderLayer(nn.Module):
-    def __init__(
-        self,
-        hidden_dim: int,
-        nhead: int,
-        dim_feedforward: int = 1024,
-        dropout: float = 0.1,
-        use_cross_attn: bool = True,
-    ):
-        super().__init__()
-        self.use_cross_attn = use_cross_attn
-
-        self.norm1 = nn.LayerNorm(hidden_dim)
-        self.self_attn = nn.MultiheadAttention(
-            hidden_dim, nhead, dropout=dropout, batch_first=True
-        )
-        self.drop1 = nn.Dropout(dropout)
-
-        if use_cross_attn:
-            self.norm2 = nn.LayerNorm(hidden_dim)
-            self.cross_attn = nn.MultiheadAttention(
-                hidden_dim, nhead, dropout=dropout, batch_first=True
-            )
-            self.drop2 = nn.Dropout(dropout)
-        else:
-            self.norm2 = None
-            self.cross_attn = None
-            self.drop2 = None
-
-        self.norm3 = nn.LayerNorm(hidden_dim)
-        self.ff = nn.Sequential(
-            nn.Linear(hidden_dim, dim_feedforward),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(dim_feedforward, hidden_dim),
-        )
-        self.drop3 = nn.Dropout(dropout)
-
-        self.ada1 = AdaLNModulation(hidden_dim, hidden_dim)
-        self.ada2 = AdaLNModulation(hidden_dim, hidden_dim) if use_cross_attn else None
-        self.ada3 = AdaLNModulation(hidden_dim, hidden_dim)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        time_cond: torch.Tensor,
-        memory: Optional[torch.Tensor] = None,
-        memory_key_padding_mask: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        h = self.ada1(self.norm1(x), time_cond)
-        h = self.self_attn(h, h, h, need_weights=False)[0]
-        x = x + self.drop1(h)
-
-        if self.use_cross_attn and memory is not None:
-            h = self.ada2(self.norm2(x), time_cond)
-            h = self.cross_attn(
-                query=h,
-                key=memory,
-                value=memory,
-                key_padding_mask=memory_key_padding_mask,
-                need_weights=False,
-            )[0]
-            x = x + self.drop2(h)
-
-        h = self.ada3(self.norm3(x), time_cond)
-        h = self.ff(h)
-        x = x + self.drop3(h)
-        return x
-
-
-# =========================================================
-# Polyline diffusion decoder
-# =========================================================
-
-
-class PolylineDiffusionDecoder(nn.Module):
-    """
-    Slot-wise coordinate denoiser.
-
-    Inputs:
-      x_t:            (B, Q, K, 2) coordinates in [-1, 1]
-      t:              (B,)
-      cond_tokens:    optional (B, L, C_cond) from raw DINO tokens or encoder memory
-      query_context:  optional (B, Q, C_query) from decoder queries
-      coarse_polys:   optional (B, Q, K, 2) coarse prediction in [-1, 1]
-
-    Output:
-      pred_noise:     (B, Q, K, 2)
-    """
-
-    def __init__(
-        self,
-        num_queries: int,
-        num_points: int,
-        hidden_dim: int = 256,
-        nhead: int = 8,
-        num_layers: int = 4,
-        dim_feedforward: int = 1024,
-        dropout: float = 0.1,
-        cond_dim: int = 256,
-        query_dim: int = 256,
-        use_cond_tokens: bool = True,
-        use_query_context: bool = True,
-        use_coarse_polylines: bool = True,
-    ):
-        super().__init__()
-        self.num_queries = num_queries
-        self.num_points = num_points
-        self.hidden_dim = hidden_dim
-        self.use_cond_tokens = use_cond_tokens
-        self.use_query_context = use_query_context
-        self.use_coarse_polylines = use_coarse_polylines
-
-        in_dim = num_points * 2
-        if use_coarse_polylines:
-            in_dim += num_points * 2
-
-        self.input_proj = nn.Linear(in_dim, hidden_dim)
-        self.slot_embed = nn.Embedding(num_queries, hidden_dim)
-        self.time_embed = nn.Sequential(
-            SinusoidalTimeEmbedding(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.SiLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-        )
-
-        self.cond_proj = nn.Linear(cond_dim, hidden_dim) if use_cond_tokens else None
-        self.query_proj = (
-            nn.Linear(query_dim, hidden_dim) if use_query_context else None
-        )
-
-        self.layers = nn.ModuleList(
-            [
-                DiffusionDecoderLayer(
-                    hidden_dim=hidden_dim,
-                    nhead=nhead,
-                    dim_feedforward=dim_feedforward,
-                    dropout=dropout,
-                    use_cross_attn=use_cond_tokens,
-                )
-                for _ in range(num_layers)
-            ]
-        )
-        self.final_norm = nn.LayerNorm(hidden_dim)
-        self.out_proj = nn.Linear(hidden_dim, num_points * 2)
-
-    def forward(
-        self,
-        x_t: torch.Tensor,
-        t: torch.Tensor,
-        cond_tokens: Optional[torch.Tensor] = None,
-        query_context: Optional[torch.Tensor] = None,
-        coarse_polys: Optional[torch.Tensor] = None,
-        cond_mask: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        B, Q, K, _ = x_t.shape
-        assert Q == self.num_queries
-        assert K == self.num_points
-
-        x_flat = x_t.reshape(B, Q, K * 2)
-        pieces = [x_flat]
-
-        if self.use_coarse_polylines:
-            if coarse_polys is None:
-                coarse_polys = torch.zeros_like(x_t)
-            pieces.append(coarse_polys.reshape(B, Q, K * 2))
-
-        x = self.input_proj(torch.cat(pieces, dim=-1))
-
-        slot_ids = torch.arange(Q, device=x.device)
-        x = x + self.slot_embed(slot_ids)[None, :, :]
-
-        if self.use_query_context:
-            if query_context is None:
-                query_context = torch.zeros(
-                    B, Q, self.hidden_dim, device=x.device, dtype=x.dtype
-                )
-            else:
-                query_context = self.query_proj(query_context)
-            x = x + query_context
-
-        time_cond = self.time_embed(t)
-
-        memory = None
-        if self.use_cond_tokens and cond_tokens is not None:
-            memory = self.cond_proj(cond_tokens)
-
-        for layer in self.layers:
-            x = layer(
-                x, time_cond=time_cond, memory=memory, memory_key_padding_mask=cond_mask
-            )
-
-        x = self.final_norm(x)
-        out = self.out_proj(x).view(B, Q, K, 2)
-        return out
-
-
-# =========================================================
-# Diffusion scheduler and loss
-# =========================================================
-
-
-class GaussianPolylineDiffusion(nn.Module):
-    def __init__(
-        self,
-        model: PolylineDiffusionDecoder,
-        timesteps: int = 1000,
-        beta_start: float = 1e-4,
-        beta_end: float = 2e-2,
-        objective: str = "eps",
-    ):
-        super().__init__()
-        assert objective in {"eps"}
-        self.model = model
-        self.timesteps = timesteps
-        self.objective = objective
-
-        betas = torch.linspace(beta_start, beta_end, timesteps, dtype=torch.float32)
-        alphas = 1.0 - betas
-        alphas_cumprod = torch.cumprod(alphas, dim=0)
-        alphas_cumprod_prev = torch.cat([torch.ones(1), alphas_cumprod[:-1]], dim=0)
-
-        self.register_buffer("betas", betas)
-        self.register_buffer("alphas", alphas)
-        self.register_buffer("alphas_cumprod", alphas_cumprod)
-        self.register_buffer("alphas_cumprod_prev", alphas_cumprod_prev)
-        self.register_buffer("sqrt_alphas_cumprod", torch.sqrt(alphas_cumprod))
-        self.register_buffer(
-            "sqrt_one_minus_alphas_cumprod", torch.sqrt(1.0 - alphas_cumprod)
-        )
-        self.register_buffer("sqrt_recip_alphas", torch.sqrt(1.0 / alphas))
-
-        posterior_variance = (
-            betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
-        )
-        self.register_buffer("posterior_variance", posterior_variance.clamp(min=1e-20))
-
-    def q_sample(
-        self,
-        x_start: torch.Tensor,
-        t: torch.Tensor,
-        noise: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        if noise is None:
-            noise = torch.randn_like(x_start)
-        return (
-            extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
-            + extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
-        )
-
-    def p_losses(
-        self,
-        x_start: torch.Tensor,
-        t: torch.Tensor,
-        cond_tokens: Optional[torch.Tensor] = None,
-        query_context: Optional[torch.Tensor] = None,
-        coarse_polys: Optional[torch.Tensor] = None,
-        valid_mask: Optional[torch.Tensor] = None,
-        cond_mask: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-        noise = torch.randn_like(x_start)
-        x_t = self.q_sample(x_start=x_start, t=t, noise=noise)
-        pred = self.model(
-            x_t=x_t,
-            t=t,
-            cond_tokens=cond_tokens,
-            query_context=query_context,
-            coarse_polys=coarse_polys,
-            cond_mask=cond_mask,
-        )
-
-        per_elem = (pred - noise) ** 2
-        if valid_mask is not None:
-            valid_mask = valid_mask[:, :, None, None].float()
-            per_elem = per_elem * valid_mask
-            denom = (valid_mask.sum() * x_start.shape[2] * x_start.shape[3]).clamp(
-                min=1.0
-            )
-            loss = per_elem.sum() / denom
-        else:
-            loss = per_elem.mean()
-
-        return loss, {"loss_diff": loss.detach()}
-
-    @torch.no_grad()
-    def p_sample(
-        self,
-        x: torch.Tensor,
-        t: torch.Tensor,
-        t_index: int,
-        cond_tokens: Optional[torch.Tensor] = None,
-        query_context: Optional[torch.Tensor] = None,
-        coarse_polys: Optional[torch.Tensor] = None,
-        cond_mask: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        pred_noise = self.model(
-            x_t=x,
-            t=t,
-            cond_tokens=cond_tokens,
-            query_context=query_context,
-            coarse_polys=coarse_polys,
-            cond_mask=cond_mask,
-        )
-
-        betas_t = extract(self.betas, t, x.shape)
-        sqrt_one_minus_alphas_cumprod_t = extract(
-            self.sqrt_one_minus_alphas_cumprod, t, x.shape
-        )
-        sqrt_recip_alphas_t = extract(self.sqrt_recip_alphas, t, x.shape)
-
-        model_mean = sqrt_recip_alphas_t * (
-            x - betas_t * pred_noise / sqrt_one_minus_alphas_cumprod_t
-        )
-
-        if t_index == 0:
-            return model_mean
-
-        posterior_variance_t = extract(self.posterior_variance, t, x.shape)
-        noise = torch.randn_like(x)
-        return model_mean + posterior_variance_t.sqrt() * noise
-
-    @torch.no_grad()
-    def sample(
-        self,
-        shape: Tuple[int, int, int, int],
-        cond_tokens: Optional[torch.Tensor] = None,
-        query_context: Optional[torch.Tensor] = None,
-        coarse_polys: Optional[torch.Tensor] = None,
-        cond_mask: Optional[torch.Tensor] = None,
-        clamp: bool = True,
-    ) -> torch.Tensor:
-        device = next(self.parameters()).device
-        x = torch.randn(shape, device=device)
-        for i in reversed(range(self.timesteps)):
-            t = torch.full((shape[0],), i, device=device, dtype=torch.long)
-            x = self.p_sample(
-                x=x,
-                t=t,
-                t_index=i,
-                cond_tokens=cond_tokens,
-                query_context=query_context,
-                coarse_polys=coarse_polys,
-                cond_mask=cond_mask,
-            )
-        return x.clamp(-1.0, 1.0) if clamp else x
-
-
-# =========================================================
-# Integration wrapper for an existing DETR-like polyline model
-# =========================================================
-
-
-class DetrWithDiffusion(nn.Module):
-    """
-    Wraps an existing DETR-like polyline model and adds a diffusion branch.
-
-    Expected base model API:
-      outputs = base_model(feats, return_features=True)
-
-    outputs should include at least:
-      pred_logits:        (B,Q,C+1)
-      pred_polylines:     (B,Q,K,2) in [0,1]
-
-    and, if return_features=True:
-      memory:             (B,L,D) optional
-      hs_last:            (B,Q,D) optional
-      dino_tokens:        (B,L,C) optional, or reuse feats directly
-
-    If your current model does not yet return memory / hs_last, add them there.
-    """
-
-    def __init__(
-        self,
-        base_model: nn.Module,
-        diffusion: GaussianPolylineDiffusion,
-        num_queries: int,
-        num_points: int,
-        condition_source: str = "encoder",
-        use_query_context: bool = True,
-        use_coarse_polylines: bool = True,
-    ):
-        super().__init__()
-        assert condition_source in {"encoder", "dino"}
-        self.base_model = base_model
-        self.diffusion = diffusion
-        self.num_queries = num_queries
-        self.num_points = num_points
-        self.condition_source = condition_source
-        self.use_query_context = use_query_context
-        self.use_coarse_polylines = use_coarse_polylines
-
-    def _pick_cond_tokens(
-        self, feats: torch.Tensor, outputs: Dict[str, torch.Tensor]
-    ) -> Optional[torch.Tensor]:
-        if self.condition_source == "encoder":
-            return outputs.get("memory", None)
-        if self.condition_source == "dino":
-            return outputs.get("dino_tokens", feats)
-        return None
-
-    def _pick_query_context(
-        self, outputs: Dict[str, torch.Tensor]
-    ) -> Optional[torch.Tensor]:
-        if not self.use_query_context:
-            return None
-        return outputs.get("hs_last", None)
-
-    def forward(
-        self, feats: torch.Tensor, return_features: bool = True
-    ) -> Dict[str, torch.Tensor]:
-        outputs = self.base_model(feats, return_features=return_features)
-        if "dino_tokens" not in outputs:
-            outputs["dino_tokens"] = feats
-        return outputs
-
-
-# =========================================================
-# Matching bridge from DETR outputs to diffusion training targets
-# =========================================================
-
-
-def build_slot_aligned_diffusion_targets(
-    outputs: Dict[str, torch.Tensor],
-    targets: List[Dict[str, torch.Tensor]],
-    indices: List[Tuple[torch.Tensor, torch.Tensor]],
-    detach_coarse: bool = True,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Returns:
-      x0_gt_m11:    (B,Q,K,2) ground truth coords in [-1,1]
-      coarse_m11:   (B,Q,K,2) current model coords in [-1,1]
-      valid_mask:   (B,Q) True for matched slots
-    """
-    pred = outputs["pred_polylines"]
-    B, Q, K, _ = pred.shape
-    device = pred.device
-
-    x0_gt = torch.zeros_like(pred)
-    valid = torch.zeros(B, Q, dtype=torch.bool, device=device)
-
-    for b, (src_idx, tgt_idx) in enumerate(indices):
-        if len(src_idx) == 0:
-            continue
-        tgt_poly = targets[b]["polylines"].to(device)
-        x0_gt[b, src_idx] = tgt_poly[tgt_idx]
-        valid[b, src_idx] = True
-
-    coarse = pred.detach() if detach_coarse else pred
-    return coords_01_to_m11(x0_gt), coords_01_to_m11(coarse), valid
-
-
-# =========================================================
-# Loss utilities for stage 2 and stage 3
-# =========================================================
-
-
-@torch.no_grad()
-def set_requires_grad(module: nn.Module, requires_grad: bool):
-    for p in module.parameters():
-        p.requires_grad = requires_grad
-
-
-def compute_diffusion_loss_from_matches(
-    model_with_diffusion: DetrWithDiffusion,
-    feats: torch.Tensor,
-    targets: List[Dict[str, torch.Tensor]],
-    matcher: nn.Module,
-) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-    outputs = model_with_diffusion(feats, return_features=True)
-    indices = matcher(outputs, targets)
-
-    x0_gt_m11, coarse_m11, valid_mask = build_slot_aligned_diffusion_targets(
-        outputs, targets, indices
-    )
-
-    B = feats.shape[0]
-    device = feats.device
-    t = torch.randint(
-        0, model_with_diffusion.diffusion.timesteps, (B,), device=device
-    ).long()
-
-    cond_tokens = model_with_diffusion._pick_cond_tokens(feats, outputs)
-    query_context = model_with_diffusion._pick_query_context(outputs)
-    coarse_polys = coarse_m11 if model_with_diffusion.use_coarse_polylines else None
-
-    diff_loss, diff_log = model_with_diffusion.diffusion.p_losses(
-        x_start=x0_gt_m11,
-        t=t,
-        cond_tokens=cond_tokens,
-        query_context=query_context,
-        coarse_polys=coarse_polys,
-        valid_mask=valid_mask,
-        cond_mask=None,
-    )
-
-    extra = {
-        "indices": indices,
-        "outputs": outputs,
-        "valid_mask": valid_mask,
-        "x0_gt_m11": x0_gt_m11,
-        "coarse_m11": coarse_m11,
-    }
-    return {"loss_diff": diff_loss}, extra
-
-
-# =========================================================
-# Stage-specific training helpers
-# =========================================================
-
-
-def train_stage2_diffusion_only(
-    train_loader,
-    model_with_diffusion: DetrWithDiffusion,
-    matcher: nn.Module,
-    optimizer,
-    device: torch.device,
-):
-    model_with_diffusion.train()
-    losses_sum = {"loss_diff": 0.0}
-    n_batches = 0
-
-    for feats, targets in train_loader:
-        feats = feats.to(device)
-        targets = move_targets_to_device(targets, device)
-
-        optimizer.zero_grad(set_to_none=True)
-
-        loss_dict, _ = compute_diffusion_loss_from_matches(
-            model_with_diffusion=model_with_diffusion,
-            feats=feats,
-            targets=targets,
-            matcher=matcher,
-        )
-        loss = loss_dict["loss_diff"]
-        loss.backward()
-        optimizer.step()
-
-        losses_sum["loss_diff"] += float(loss.item())
-        n_batches += 1
-
-    return {k: v / max(n_batches, 1) for k, v in losses_sum.items()}
-
-
-@torch.no_grad()
-def eval_stage2_diffusion_only(
-    eval_loader,
-    model_with_diffusion: DetrWithDiffusion,
-    matcher: nn.Module,
-    device: torch.device,
-):
-    model_with_diffusion.eval()
-    losses_sum = {"loss_diff": 0.0}
-    n_batches = 0
-
-    for feats, targets in eval_loader:
-        feats = feats.to(device)
-        targets = move_targets_to_device(targets, device)
-
-        loss_dict, _ = compute_diffusion_loss_from_matches(
-            model_with_diffusion=model_with_diffusion,
-            feats=feats,
-            targets=targets,
-            matcher=matcher,
-        )
-
-        losses_sum["loss_diff"] += float(loss_dict["loss_diff"].item())
-        n_batches += 1
-
-    return {k: v / max(n_batches, 1) for k, v in losses_sum.items()}
-
-
-def train_stage3_joint(
-    train_loader,
-    model_with_diffusion: DetrWithDiffusion,
-    criterion: nn.Module,
-    matcher: nn.Module,
-    optimizer,
-    device: torch.device,
-    lambda_diff: float = 0.1,
-):
-    model_with_diffusion.train()
-    losses_sum = {
-        "loss_ce": 0.0,
-        "loss_poly": 0.0,
-        "loss_bbox": 0.0,
-        "loss_bbox_giou": 0.0,
-        "loss_smooth": 0.0,
-        "loss_card": 0.0,
-        "loss_len": 0.0,
-        "loss_dir": 0.0,
-        "loss_total_detr": 0.0,
-        "loss_diff": 0.0,
-        "loss_total": 0.0,
-    }
-    n_batches = 0
-
-    for feats, targets in train_loader:
-        feats = feats.to(device)
-        targets = move_targets_to_device(targets, device)
-
-        optimizer.zero_grad(set_to_none=True)
-
-        outputs = model_with_diffusion(feats, return_features=True)
-        detr_losses = criterion(outputs, targets)
-        indices = matcher(outputs, targets)
-        x0_gt_m11, coarse_m11, valid_mask = build_slot_aligned_diffusion_targets(
-            outputs, targets, indices, detach_coarse=True
-        )
-
-        B = feats.shape[0]
-        t = torch.randint(
-            0, model_with_diffusion.diffusion.timesteps, (B,), device=device
-        ).long()
-
-        cond_tokens = model_with_diffusion._pick_cond_tokens(feats, outputs)
-        query_context = model_with_diffusion._pick_query_context(outputs)
-        coarse_polys = coarse_m11 if model_with_diffusion.use_coarse_polylines else None
-
-        diff_loss, _ = model_with_diffusion.diffusion.p_losses(
-            x_start=x0_gt_m11,
-            t=t,
-            cond_tokens=cond_tokens,
-            query_context=query_context,
-            coarse_polys=coarse_polys,
-            valid_mask=valid_mask,
-        )
-
-        loss = detr_losses["loss_total"] + lambda_diff * diff_loss
-        loss.backward()
-        optimizer.step()
-
-        losses_sum["loss_ce"] += float(detr_losses["loss_ce"].item())
-        losses_sum["loss_poly"] += float(detr_losses["loss_poly"].item())
-        losses_sum["loss_bbox_giou"] += float(detr_losses["loss_bbox_giou"].item())
-        losses_sum["loss_smooth"] += float(detr_losses["loss_smooth"].item())
-        losses_sum["loss_bbox"] += float(detr_losses["loss_bbox"].item())
-        losses_sum["loss_card"] += float(detr_losses["loss_card"].item())
-        losses_sum["loss_len"] += float(detr_losses["loss_len"].item())
-        losses_sum["loss_dir"] += float(detr_losses["loss_dir"].item())
-        losses_sum["loss_total_detr"] += float(detr_losses["loss_total"].item())
-        losses_sum["loss_diff"] += float(diff_loss.item())
-        losses_sum["loss_total"] += float(loss.item())
-        n_batches += 1
-
-    return {k: v / max(n_batches, 1) for k, v in losses_sum.items()}
-
-
-@torch.no_grad()
-def eval_stage3_joint(
-    eval_loader,
-    model_with_diffusion: DetrWithDiffusion,
-    criterion: nn.Module,
-    matcher: nn.Module,
-    device: torch.device,
-    lambda_diff: float = 0.1,
-):
-    model_with_diffusion.eval()
-    losses_sum = {
-        "loss_ce": 0.0,
-        "loss_poly": 0.0,
-        "loss_bbox": 0.0,
-        "loss_bbox_giou": 0.0,
-        "loss_smooth": 0.0,
-        "loss_card": 0.0,
-        "loss_len": 0.0,
-        "loss_dir": 0.0,
-        "loss_total_detr": 0.0,
-        "loss_diff": 0.0,
-        "loss_total": 0.0,
-    }
-    n_batches = 0
-
-    for feats, targets in eval_loader:
-        feats = feats.to(device)
-        targets = move_targets_to_device(targets, device)
-
-        outputs = model_with_diffusion(feats, return_features=True)
-        detr_losses = criterion(outputs, targets)
-        indices = matcher(outputs, targets)
-        x0_gt_m11, coarse_m11, valid_mask = build_slot_aligned_diffusion_targets(
-            outputs, targets, indices
-        )
-
-        B = feats.shape[0]
-        t = torch.randint(
-            0, model_with_diffusion.diffusion.timesteps, (B,), device=device
-        ).long()
-
-        cond_tokens = model_with_diffusion._pick_cond_tokens(feats, outputs)
-        query_context = model_with_diffusion._pick_query_context(outputs)
-        coarse_polys = coarse_m11 if model_with_diffusion.use_coarse_polylines else None
-
-        diff_loss, _ = model_with_diffusion.diffusion.p_losses(
-            x_start=x0_gt_m11,
-            t=t,
-            cond_tokens=cond_tokens,
-            query_context=query_context,
-            coarse_polys=coarse_polys,
-            valid_mask=valid_mask,
-        )
-
-        loss = detr_losses["loss_total"] + lambda_diff * diff_loss
-
-        losses_sum["loss_ce"] += float(detr_losses["loss_ce"].item())
-        losses_sum["loss_poly"] += float(detr_losses["loss_poly"].item())
-        losses_sum["loss_bbox_giou"] += float(detr_losses["loss_bbox_giou"].item())
-        losses_sum["loss_smooth"] += float(detr_losses["loss_smooth"].item())
-        losses_sum["loss_bbox"] += float(detr_losses["loss_bbox"].item())
-        losses_sum["loss_card"] += float(detr_losses["loss_card"].item())
-        losses_sum["loss_len"] += float(detr_losses["loss_len"].item())
-        losses_sum["loss_dir"] += float(detr_losses["loss_dir"].item())
-        losses_sum["loss_total_detr"] += float(detr_losses["loss_total"].item())
-        losses_sum["loss_diff"] += float(diff_loss.item())
-        losses_sum["loss_total"] += float(loss.item())
-        n_batches += 1
-
-    return {k: v / max(n_batches, 1) for k, v in losses_sum.items()}
-
-
-def move_targets_to_device(targets, device):
-    out = []
-    for t in targets:
-        out.append(
-            {
-                k: (
-                    torch.as_tensor(v, device=device)
-                    if not torch.is_tensor(v)
-                    else v.to(device)
-                )
-                for k, v in t.items()
-            }
-        )
-    return out
 
 
 def load_checkpoint_flexible(
@@ -2146,7 +1350,7 @@ def load_checkpoint_flexible(
 ):
     ckpt = torch.load(ckpt_path, map_location="cpu")
     if key_candidates is None:
-        key_candidates = ["model_with_diffusion", "model", "state_dict"]
+        key_candidates = ["model", "state_dict"]
 
     state = None
     for k in key_candidates:
@@ -2171,7 +1375,6 @@ def load_checkpoint_flexible(
 
 def main():
     cfg = dict(
-        stage=1,  # 1: train DETR polyline, 2: train diffusion, 3: train jointly
         exp="detr_polyline_11",
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
@@ -2205,17 +1408,6 @@ def main():
         loss_len=1.0,
         loss_dir=0.5,
         aux_weight=0.5,
-        # diffusion
-        diff_hidden_dim=256,
-        diff_nhead=8,
-        diff_num_layers=4,
-        diff_dim_feedforward=1024,
-        diff_dropout=0.1,
-        diff_timesteps=100,
-        condition_source="encoder",  # "encoder" or "dino"
-        use_query_context=True,
-        use_coarse_polylines=True,
-        lambda_diff=0.1,
         # optimizer / training
         n_epochs=300,  # 500, 3000
         batch_size=256,  # 4x256=1024 (dino256), 5x256=1280 (dino224)
@@ -2226,9 +1418,7 @@ def main():
         save_every=3000,
         seed=42,
         # checkpoints
-        stage1_ckpt=None,
-        stage2_ckpt=None,
-        resume_ckpt=None,  # optional full resume for current stage
+        resume_ckpt=None,
     )
     cfg = OmegaConf.create(cfg)
 
@@ -2284,7 +1474,7 @@ def main():
 
     criterion.to(device)
 
-    base_model = DetrPolylineFromEmbeddings(
+    model = DetrPolylineFromEmbeddings(
         in_dim=1024,
         num_classes=cfg.num_classes,
         num_queries=cfg.num_polylines,
@@ -2298,290 +1488,67 @@ def main():
         num_points=cfg.num_points,
         aux_loss=cfg.aux_loss,
         query_embed_mode=cfg.query_embed_mode,
-    )
-
-    diffusion_decoder = PolylineDiffusionDecoder(
-        num_queries=cfg.num_polylines,
-        num_points=cfg.num_points,
-        hidden_dim=cfg.diff_hidden_dim,
-        nhead=cfg.diff_nhead,
-        num_layers=cfg.diff_num_layers,
-        dim_feedforward=cfg.diff_dim_feedforward,
-        dropout=cfg.diff_dropout,
-        cond_dim=cfg.d_model if cfg.condition_source == "encoder" else 1024,
-        query_dim=cfg.d_model,
-        use_cond_tokens=True,
-        use_query_context=cfg.use_query_context,
-        use_coarse_polylines=cfg.use_coarse_polylines,
-    )
-
-    diffusion = GaussianPolylineDiffusion(
-        model=diffusion_decoder,
-        timesteps=cfg.diff_timesteps,
-        beta_start=1e-4,
-        beta_end=2e-2,
-        objective="eps",
-    )
-
-    model_with_diffusion = DetrWithDiffusion(
-        base_model=base_model,
-        diffusion=diffusion,
-        num_queries=cfg.num_polylines,
-        num_points=cfg.num_points,
-        condition_source=cfg.condition_source,
-        use_query_context=cfg.use_query_context,
-        use_coarse_polylines=cfg.use_coarse_polylines,
     ).to(device)
 
-    tb_dir = cfg.save_path / f"tensorboard/{cfg.exp}_stage{cfg.stage}"
+    if cfg.resume_ckpt is not None:
+        load_checkpoint_flexible(model, cfg.resume_ckpt, key_candidates=["model"])
+
+    tb_dir = cfg.save_path / f"tensorboard/{cfg.exp}"
     tb_dir.mkdir(parents=True, exist_ok=True)
     writer = tensorboard.SummaryWriter(tb_dir)
     best_val = float("inf")
 
-    if cfg.stage == 1:
-        model = model_with_diffusion.base_model
-        model.to(device)
-        optimizer = torch.optim.AdamW(
-            model.parameters(), lr=cfg.max_lr, weight_decay=cfg.weight_decay
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=cfg.max_lr, weight_decay=cfg.weight_decay
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=cfg.n_epochs, eta_min=1e-6
+    )
+
+    for epoch in tqdm(range(1, cfg.n_epochs + 1), disable=cfg.use_tqdm):
+        s_time = datetime.now().replace(microsecond=0)
+        print(f"Epoch {epoch:03d}/{cfg.n_epochs} starting at {s_time}")
+
+        train_losses = train_one_epoch(
+            train_loader, model, criterion, optimizer, device
         )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=cfg.n_epochs, eta_min=1e-6
+        eval_losses = eval_one_epoch(eval_loader, model, criterion, device)
+
+        e_time = datetime.now().replace(microsecond=0)
+        print(
+            f"Epoch {epoch:03d}/{cfg.n_epochs} "
+            f"train_total={train_losses['loss_total']:.4f} "
+            f"(ce={train_losses['loss_ce']:.4f}, poly={train_losses['loss_poly']:.4f}, "
+            f"bbox_giou={train_losses['loss_bbox_giou']:.4f}, smooth={train_losses['loss_smooth']:.4f}) "
+            f"eval_total={eval_losses['loss_total']:.4f} "
+            f"(ce={eval_losses['loss_ce']:.4f}, poly={eval_losses['loss_poly']:.4f}, "
+            f"bbox_giou={eval_losses['loss_bbox_giou']:.4f}, smooth={eval_losses['loss_smooth']:.4f})"
         )
-
-        for epoch in tqdm(range(1, cfg.n_epochs + 1), disable=cfg.use_tqdm):
-            s_time = datetime.now().replace(microsecond=0)
-            print(f"Epoch {epoch:03d}/{cfg.n_epochs} starting at {s_time}")
-
-            train_losses = train_one_epoch(
-                train_loader, model, criterion, optimizer, device
-            )
-            eval_losses = eval_one_epoch(eval_loader, model, criterion, device)
-
-            e_time = datetime.now().replace(microsecond=0)
-            print(
-                f"Epoch {epoch:03d}/{cfg.n_epochs} "
-                f"train_total={train_losses['loss_total']:.4f} "
-                f"(ce={train_losses['loss_ce']:.4f}, poly={train_losses['loss_poly']:.4f}, "
-                f"bbox_giou={train_losses['loss_bbox_giou']:.4f}, smooth={train_losses['loss_smooth']:.4f}) "
-                f"eval_total={eval_losses['loss_total']:.4f} "
-                f"(ce={eval_losses['loss_ce']:.4f}, poly={eval_losses['loss_poly']:.4f}, "
-                f"bbox_giou={eval_losses['loss_bbox_giou']:.4f}, smooth={eval_losses['loss_smooth']:.4f})"
-            )
-            print(
-                f"Epoch {epoch:03d}/{cfg.n_epochs} finished at {e_time} (duration {e_time - s_time})"
-            )
-
-            tb_add_losses(writer, epoch, train_losses, "train")
-            tb_add_losses(writer, epoch, eval_losses, "eval")
-
-            ckpt = {
-                "epoch": epoch,
-                "model": model.state_dict(),
-                # "optimizer": optimizer.state_dict(),
-                # "train_losses": train_losses,
-                # "eval_losses": eval_losses,
-                # "cfg": OmegaConf.to_container(cfg, resolve=True),
-            }
-            if eval_losses["loss_total"] < best_val:
-                best_val = eval_losses["loss_total"]
-                torch.save(ckpt, cfg.save_path / f"best_{cfg.exp}_stage{cfg.stage}.pt")
-                print(f"Saved best: {best_val:.4f} at epoch {epoch}")
-            if epoch % cfg.save_every == 0:
-                torch.save(
-                    ckpt,
-                    cfg.save_path / f"{cfg.exp}_{epoch}_stage{cfg.stage}.pt",
-                )
-            # scheduler.step()
-        torch.save(
-            ckpt,
-            cfg.save_path / f"{cfg.exp}_stage{cfg.stage}.pt",
-        )
-        print(f"Saved final model: {best_val:.4f} at epoch {epoch}")
-
-    elif cfg.stage == 2:
-        if cfg.stage1_ckpt is None:
-            raise ValueError(
-                "For stage=2, cfg.stage1_ckpt must point to a trained stage-1 checkpoint."
-            )
-
-        load_checkpoint_flexible(
-            model_with_diffusion.base_model,
-            cfg.stage1_ckpt,
-            key_candidates=["model"],
-            strict=True,
+        print(
+            f"Epoch {epoch:03d}/{cfg.n_epochs} finished at {e_time} (duration {e_time - s_time})"
         )
 
-        if cfg.resume_ckpt is not None:
-            load_checkpoint_flexible(
-                model_with_diffusion,
-                cfg.resume_ckpt,
-                key_candidates=["model_with_diffusion", "model"],
-                strict=False,
-            )
+        tb_add_losses(writer, epoch, train_losses, "train")
+        tb_add_losses(writer, epoch, eval_losses, "eval")
 
-        set_requires_grad(model_with_diffusion.base_model, False)
-        set_requires_grad(model_with_diffusion.diffusion, True)
+        ckpt = {
+            "epoch": epoch,
+            "model": model.state_dict(),
+            # "optimizer": optimizer.state_dict(),
+            # "train_losses": train_losses,
+            # "eval_losses": eval_losses,
+            # "cfg": OmegaConf.to_container(cfg, resolve=True),
+        }
+        if eval_losses["loss_total"] < best_val:
+            best_val = eval_losses["loss_total"]
+            torch.save(ckpt, cfg.save_path / f"best_{cfg.exp}.pt")
+            print(f"Saved best: {best_val:.4f} at epoch {epoch}")
+        if epoch % cfg.save_every == 0:
+            torch.save(ckpt, cfg.save_path / f"{cfg.exp}_{epoch}.pt")
+        # scheduler.step()
 
-        optimizer = torch.optim.AdamW(
-            model_with_diffusion.diffusion.parameters(),
-            lr=cfg.max_lr,
-            weight_decay=cfg.weight_decay,
-        )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=cfg.n_epochs, eta_min=1e-6
-        )
-
-        for epoch in tqdm(range(1, cfg.n_epochs + 1), disable=cfg.use_tqdm):
-            s_time = datetime.now().replace(microsecond=0)
-            print(f"Epoch {epoch:03d}/{cfg.n_epochs} starting at {s_time}")
-
-            train_losses = train_stage2_diffusion_only(
-                train_loader=train_loader,
-                model_with_diffusion=model_with_diffusion,
-                matcher=matcher,
-                optimizer=optimizer,
-                device=device,
-            )
-            eval_losses = eval_stage2_diffusion_only(
-                eval_loader=eval_loader,
-                model_with_diffusion=model_with_diffusion,
-                matcher=matcher,
-                device=device,
-            )
-
-            e_time = datetime.now().replace(microsecond=0)
-            print(
-                f"Epoch {epoch:03d}/{cfg.n_epochs} "
-                f"train_diff={train_losses['loss_diff']:.4f} "
-                f"eval_diff={eval_losses['loss_diff']:.4f}"
-            )
-            print(
-                f"Epoch {epoch:03d}/{cfg.n_epochs} finished at {e_time} (duration {e_time - s_time})"
-            )
-
-            tb_add_losses(writer, epoch, train_losses, "train")
-            tb_add_losses(writer, epoch, eval_losses, "eval")
-
-            ckpt = {
-                "model_with_diffusion": model_with_diffusion.state_dict(),
-                "epoch": epoch,
-            }
-            if eval_losses["loss_diff"] < best_val:
-                best_val = eval_losses["loss_diff"]
-                torch.save(ckpt, cfg.save_path / f"best_{cfg.exp}_stage{cfg.stage}.pt")
-                print(f"Saved best: {best_val:.4f} at epoch {epoch}")
-            if epoch % cfg.save_every == 0:
-                torch.save(
-                    ckpt,
-                    cfg.save_path / f"{cfg.exp}_{epoch}_stage{cfg.stage}.pt",
-                )
-
-            scheduler.step()
-
-        torch.save(
-            ckpt,
-            cfg.save_path / f"{cfg.exp}_stage{cfg.stage}.pt",
-        )
-        print(f"Saved final model: {best_val:.4f} at epoch {epoch}")
-
-    elif cfg.stage == 3:
-        if cfg.stage2_ckpt is not None:
-            load_checkpoint_flexible(
-                model_with_diffusion,
-                cfg.stage2_ckpt,
-                key_candidates=["model_with_diffusion", "model"],
-                strict=False,
-            )
-        elif cfg.stage1_ckpt is not None:
-            load_checkpoint_flexible(
-                model_with_diffusion.base_model,
-                cfg.stage1_ckpt,
-                key_candidates=["model"],
-                strict=True,
-            )
-        else:
-            raise ValueError(
-                "For stage=3, provide cfg.stage2_ckpt or at least cfg.stage1_ckpt."
-            )
-
-        if cfg.resume_ckpt is not None:
-            load_checkpoint_flexible(
-                model_with_diffusion,
-                cfg.resume_ckpt,
-                key_candidates=["model_with_diffusion", "model"],
-                strict=False,
-            )
-
-        set_requires_grad(model_with_diffusion.base_model, True)
-        set_requires_grad(model_with_diffusion.diffusion, True)
-
-        optimizer = torch.optim.AdamW(
-            model_with_diffusion.parameters(),
-            lr=cfg.max_lr,
-            weight_decay=cfg.weight_decay,
-        )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=cfg.n_epochs, eta_min=1e-6
-        )
-
-        for epoch in tqdm(range(1, cfg.n_epochs + 1), disable=cfg.use_tqdm):
-            s_time = datetime.now().replace(microsecond=0)
-            print(f"Epoch {epoch:03d}/{cfg.n_epochs} starting at {s_time}")
-
-            train_losses = train_stage3_joint(
-                train_loader=train_loader,
-                model_with_diffusion=model_with_diffusion,
-                criterion=criterion,
-                matcher=matcher,
-                optimizer=optimizer,
-                device=device,
-                lambda_diff=cfg.lambda_diff,
-            )
-            eval_losses = eval_stage3_joint(
-                eval_loader=eval_loader,
-                model_with_diffusion=model_with_diffusion,
-                criterion=criterion,
-                matcher=matcher,
-                device=device,
-                lambda_diff=cfg.lambda_diff,
-            )
-
-            e_time = datetime.now().replace(microsecond=0)
-            print(
-                f"Epoch {epoch:03d}/{cfg.n_epochs} "
-                f"train_total={train_losses['loss_total']:.4f} "
-                f"(detr={train_losses['loss_total_detr']:.4f}, diff={train_losses['loss_diff']:.4f}) "
-                f"eval_total={eval_losses['loss_total']:.4f} "
-                f"(detr={eval_losses['loss_total_detr']:.4f}, diff={eval_losses['loss_diff']:.4f})"
-            )
-            print(
-                f"Epoch {epoch:03d}/{cfg.n_epochs} finished at {e_time} (duration {e_time - s_time})"
-            )
-
-            tb_add_losses(writer, epoch, train_losses, "train")
-            tb_add_losses(writer, epoch, eval_losses, "eval")
-
-            ckpt = {
-                "model_with_diffusion": model_with_diffusion.state_dict(),
-                "epoch": epoch,
-            }
-            if eval_losses["loss_total"] < best_val:
-                best_val = eval_losses["loss_total"]
-                torch.save(ckpt, cfg.save_path / f"{cfg.exp}_best_stage{cfg.stage}.pt")
-                print(f"Saved best: {best_val:.4f} at epoch {epoch}")
-            if epoch % cfg.save_every == 0:
-                torch.save(
-                    ckpt,
-                    cfg.save_path / f"{cfg.exp}_{epoch}_stage{cfg.stage}.pt",
-                )
-
-            scheduler.step()
-
-        torch.save(
-            ckpt,
-            cfg.save_path / f"{cfg.exp}_stage{cfg.stage}.pt",
-        )
-        print(f"Saved final model: {best_val:.4f} at epoch {epoch}")
+    torch.save(ckpt, cfg.save_path / f"{cfg.exp}.pt")
+    print(f"Saved final model: {best_val:.4f} at epoch {epoch}")
 
 
 """
