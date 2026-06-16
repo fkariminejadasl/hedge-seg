@@ -1125,7 +1125,7 @@ class DetrPolylineEmbDataset(Dataset):
     """
 
     def __init__(self, embed_dir: Path, num_points: int = 20, normalize: bool = True):
-        self.files = list(embed_dir.glob("*.npz"))
+        self.files = sorted(embed_dir.glob("*.npz"))
         self.num_points = num_points
         self.normalize = normalize
 
@@ -1373,55 +1373,7 @@ def load_checkpoint_flexible(
 # -------------------------
 
 
-def main():
-    cfg = dict(
-        exp="detr_polyline_11",
-        save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
-        embed_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/test_256_dino256/embs_polylines"
-        ),
-        # save_path=Path("/home/fkarimineja/exps/hedge"),
-        # embed_dir=Path("/home/fkarimineja/data/hedge/test_256_None/embs_polylines"),
-        num_points=20,
-        num_polylines=100,  # 276
-        num_classes=1,
-        grid_size=(16, 16),
-        # base model
-        d_model=256,
-        nhead=8,
-        num_encoder_layers=4,
-        num_decoder_layers=4,
-        dim_feedforward=1024,
-        dropout=0.01,  # default 0.1
-        aux_loss=True,
-        query_embed_mode="detr",  # "detr" or "legacy"
-        eos_coef=0.05,
-        # criterion and matcher
-        class_cost=1.0,
-        poly_cost=5.0,
-        bbox_cost=2.0,
-        loss_poly=5.0,
-        loss_bbox=2.0,
-        loss_bbox_giou=2.0,
-        loss_smooth=0.05,
-        loss_card=0.5,
-        loss_len=1.0,
-        loss_dir=0.5,
-        aux_weight=0.5,
-        # optimizer / training
-        n_epochs=300,  # 500, 3000
-        batch_size=256,  # 4x256=1024 (dino256), 5x256=1280 (dino224)
-        num_workers=23,  # 17
-        max_lr=1e-4,  # 3e-5, 1e-4, # 3e-4,
-        weight_decay=1e-2,
-        use_tqdm=True,
-        save_every=3000,
-        seed=42,
-        # checkpoints
-        resume_ckpt=None,
-    )
-    cfg = OmegaConf.create(cfg)
-
+def main(cfg):
     set_seed(cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -1432,7 +1384,9 @@ def main():
     )
     n_train = int(0.8 * len(dataset))
     n_val = len(dataset) - n_train
-    train_ds, val_ds = torch.utils.data.random_split(dataset, [n_train, n_val])
+    train_ds, val_ds = torch.utils.data.random_split(
+        dataset, [n_train, n_val], generator=torch.Generator().manual_seed(cfg.seed)
+    )
     print(f"Dataset: total={len(dataset)}, train={len(train_ds)}, val={len(val_ds)}")
 
     train_loader = DataLoader(
@@ -1505,7 +1459,7 @@ def main():
         optimizer, T_max=cfg.n_epochs, eta_min=1e-6
     )
 
-    for epoch in tqdm(range(1, cfg.n_epochs + 1), disable=cfg.use_tqdm):
+    for epoch in tqdm(range(1, cfg.n_epochs + 1), disable=cfg.disable_tqdm):
         s_time = datetime.now().replace(microsecond=0)
         print(f"Epoch {epoch:03d}/{cfg.n_epochs} starting at {s_time}")
 
@@ -1593,4 +1547,50 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cfg = dict(
+        exp="detr_polyline_12",
+        save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
+        embed_dir=Path(
+            "/home/fatemeh/Downloads/hedge/results/test_256_dino256/embs_polylines"
+        ),
+        # save_path=Path("/home/fkarimineja/exps/hedge"),
+        # embed_dir=Path("/home/fkarimineja/data/hedge/test_256_None/embs_polylines"),
+        num_points=20,
+        num_polylines=100,  # 276
+        num_classes=1,
+        grid_size=(16, 16),
+        # base model
+        d_model=256,
+        nhead=8,
+        num_encoder_layers=4,
+        num_decoder_layers=4,
+        dim_feedforward=1024,
+        dropout=0.01,  # default 0.1
+        aux_loss=True,
+        query_embed_mode="detr",  # "detr" or "legacy"
+        eos_coef=0.05,
+        # criterion and matcher
+        class_cost=1.0,
+        poly_cost=5.0,
+        bbox_cost=2.0,
+        loss_poly=5.0,
+        loss_bbox=2.0,
+        loss_bbox_giou=2.0,
+        loss_smooth=0.05,
+        loss_card=0.5,
+        loss_len=1.0,
+        loss_dir=0.5,
+        aux_weight=0.5,
+        # optimizer / training
+        n_epochs=1,  # 300, 500, 3000
+        batch_size=256,  # 4x256=1024 (dino256), 5x256=1280 (dino224)
+        num_workers=23,  # 17
+        max_lr=1e-4,  # 3e-5, 1e-4, # 3e-4,
+        weight_decay=1e-2,
+        disable_tqdm=True,
+        save_every=3000,
+        seed=42,
+        # checkpoints
+        resume_ckpt=None,
+    )
+    main(OmegaConf.create(cfg))
