@@ -1,3 +1,10 @@
+"""
+Similar code as train_detr_dino_polyline_rel.py with these changes:
+- Use MapTR-style query layout (instance embedding + point embedding) instead of DINO-style query layout (polyline queries)
+- TODO: Use ResNet backbone instead of DINOv3 backbone
+- Remove diffusion stage
+"""
+
 import copy
 from dataclasses import dataclass
 from datetime import datetime
@@ -87,6 +94,11 @@ def box_cxcywh_to_xyxy(boxes: torch.Tensor) -> torch.Tensor:
     x1 = cx + 0.5 * w
     y1 = cy + 0.5 * h
     return torch.stack([x0, y0, x1, y1], dim=-1)
+
+
+def inverse_sigmoid(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
+    x = x.clamp(min=eps, max=1.0 - eps)
+    return torch.log(x / (1.0 - x))
 
 
 # -------------------------
@@ -218,12 +230,16 @@ class DETRTransformer(nn.Module):
         self,
         src: torch.Tensor,  # (B, L, D)
         query_embed: torch.Tensor,  # (Q, D)
+        query_content: Optional[torch.Tensor] = None,  # (Q, D)
         pos_embed: Optional[torch.Tensor] = None,  # (B, L, D)
         mask: Optional[torch.Tensor] = None,  # (B, L)
     ):
         B, _, _ = src.shape
         query_embed = query_embed.unsqueeze(0).expand(B, -1, -1)  # (B,Q,D)
-        tgt = torch.zeros_like(query_embed)
+        if query_content is None:
+            tgt = torch.zeros_like(query_embed)
+        else:
+            tgt = query_content.unsqueeze(0).expand(B, -1, -1)  # (B,Q,D)
 
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
         hs = self.decoder(
@@ -591,6 +607,7 @@ class LegacyTransformerWrapper(nn.Module):
         self,
         src: torch.Tensor,  # (B,L,D)
         query_embed: torch.Tensor,  # (Q,D)
+        query_content: Optional[torch.Tensor] = None,  # (Q,D)
         pos_embed: Optional[torch.Tensor] = None,  # (B,L,D)
         mask: Optional[torch.Tensor] = None,  # (B,L)
     ):
@@ -602,7 +619,10 @@ class LegacyTransformerWrapper(nn.Module):
         memory = self.encoder(src, src_key_padding_mask=mask)
 
         query = query_embed.unsqueeze(0).expand(B, -1, -1)  # (B,Q,D)
-        output = torch.zeros_like(query) + query
+        if query_content is None:
+            output = torch.zeros_like(query) + query
+        else:
+            output = query_content.unsqueeze(0).expand(B, -1, -1) + query
 
         if self.return_intermediate_dec:
             intermediate = []
@@ -644,6 +664,12 @@ class DetrPolylineFromEmbeddings(nn.Module):
       pred_boxes: (B, Q, 4) in [0,1], cxcywh
       pred_polylines: (B, Q, K, 2) in [0,1]
       aux_outputs: list[dict], optional
+
+    MapTR-style query layout:
+      instance_embedding: (Q, 2D)
+      pts_embedding: (K, 2D)
+      object_query_embed: (Q*K, 2D), split into query_pos/query_content
+      decoder hs: (num_layers, B, Q*K, D) -> (num_layers, B, Q, K, D)
     """
 
     def __init__(
@@ -675,7 +701,8 @@ class DetrPolylineFromEmbeddings(nn.Module):
 
         self.input_proj = nn.Linear(in_dim, d_model)
         self.pos_embed = PositionEmbeddingSine2D(num_pos_feats=d_model // 2)
-        self.query_embed = nn.Embedding(num_queries, d_model)
+        self.instance_embedding = nn.Embedding(num_queries, d_model * 2)
+        self.pts_embedding = nn.Embedding(num_points, d_model * 2)
 
         if query_embed_mode == "detr":
             self.transformer = DETRTransformer(
@@ -700,27 +727,33 @@ class DetrPolylineFromEmbeddings(nn.Module):
             )
 
         self.class_embed = nn.Linear(d_model, num_classes + 1)
+        self.reference_points = nn.Linear(d_model, 2)
+        self.point_embed = MLP(d_model, d_model, 2, num_layers=3)
 
-        # New heads
-        self.bbox_embed = MLP(d_model, d_model, 4, num_layers=3)  # cx, cy, w, h
-        self.offset_embed = MLP(d_model, d_model, 2 * num_points, num_layers=3)
+    def _build_hierarchical_queries(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        pts_embeds = self.pts_embedding.weight.unsqueeze(0)  # (1,K,2D)
+        instance_embeds = self.instance_embedding.weight.unsqueeze(1)  # (Q,1,2D)
+        object_query_embed = (pts_embeds + instance_embeds).flatten(0, 1)  # (Q*K,2D)
+        query_pos, query_content = object_query_embed.chunk(2, dim=-1)  # (Q*K,D)
+        return query_pos, query_content
 
     def _decode_polylines(
         self,
-        hs: torch.Tensor,  # (..., Q, D)
-        pred_boxes: torch.Tensor,  # (..., Q, 4) in cxcywh
+        hs: torch.Tensor,  # (num_layers,B,Q*K,D)
+        query_pos: torch.Tensor,  # (Q*K,D)
     ) -> torch.Tensor:
-        cxcy = pred_boxes[..., :2]
-        wh = pred_boxes[..., 2:].clamp(min=1e-3)
+        reference_points = self.reference_points(query_pos).sigmoid()  # (Q*K,2)
+        point_logits = self.point_embed(hs)  # (num_layers,B,Q*K,2)
+        point_logits = point_logits + inverse_sigmoid(reference_points)[None, None]
+        points = point_logits.sigmoid()
 
-        offsets = self.offset_embed(hs)
-        offsets = offsets.view(*hs.shape[:-1], self.num_points, 2)
-
-        # local offsets relative to the predicted box
-        offsets = 0.5 * torch.tanh(offsets)
-
-        poly = cxcy.unsqueeze(-2) + offsets * wh.unsqueeze(-2)
-        return poly.clamp(0.0, 1.0)
+        return points.view(
+            hs.shape[0],
+            hs.shape[1],
+            self.num_queries,
+            self.num_points,
+            2,
+        )
 
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_boxes, outputs_poly):
@@ -746,18 +779,29 @@ class DetrPolylineFromEmbeddings(nn.Module):
         dino_tokens = x
         src = self.input_proj(x)
         pos = self.pos_embed(B=B, H=self.grid_h, W=self.grid_w, device=x.device)
+        query_pos, query_content = self._build_hierarchical_queries()
 
         mask = None
         hs, memory = self.transformer(
             src=src,
-            query_embed=self.query_embed.weight,
+            query_embed=query_pos,
+            query_content=query_content,
             pos_embed=pos,
             mask=mask,
-        )  # hs: (num_layers,B,Q,D)
+        )  # hs: (num_layers,B,Q*K,D)
 
-        outputs_class = self.class_embed(hs)  # (num_layers,B,Q,C+1)
-        outputs_boxes = self.bbox_embed(hs).sigmoid()  # (num_layers,B,Q,4)
-        outputs_poly = self._decode_polylines(hs, outputs_boxes)
+        hs_poly = hs.view(
+            hs.shape[0],
+            B,
+            self.num_queries,
+            self.num_points,
+            hs.shape[-1],
+        )  # (num_layers,B,Q,K,D)
+        outputs_class = self.class_embed(hs_poly.mean(dim=3))  # (num_layers,B,Q,C+1)
+        outputs_poly = self._decode_polylines(hs, query_pos)  # (num_layers,B,Q,K,2)
+        outputs_boxes = box_xyxy_to_cxcywh(
+            polyline_to_bbox_xyxy(outputs_poly)
+        )  # (num_layers,B,Q,4)
 
         out = {
             "pred_logits": outputs_class[-1],
@@ -767,7 +811,7 @@ class DetrPolylineFromEmbeddings(nn.Module):
 
         if return_features:
             out["memory"] = memory
-            out["hs_last"] = hs[-1]
+            out["hs_last"] = hs_poly[-1].mean(dim=2)
             out["dino_tokens"] = dino_tokens
 
         if self.aux_loss:
@@ -1556,7 +1600,7 @@ if __name__ == "__main__":
         # save_path=Path("/home/fkarimineja/exps/hedge"),
         # embed_dir=Path("/home/fkarimineja/data/hedge/test_256_None/embs_polylines"),
         num_points=20,
-        num_polylines=100,  # 276
+        num_polylines=100,  # decoder point queries = num_polylines * num_points
         num_classes=1,
         grid_size=(16, 16),
         # base model

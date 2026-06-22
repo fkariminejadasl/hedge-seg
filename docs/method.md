@@ -54,6 +54,7 @@ These refernce are the DETR-like model, which from BEV images they get the vecto
 
 <!-- ================================= -->
 ## Data Sources
+#### Netherlands
 - [Data](https://essd.copernicus.org/articles/17/3641/2025) from AHN4 (GeoTIFF).
 - TOPO10NL: Ground truth data for hedge, tree, road, and building. Data is provided by PDOK platform. There is also Germany: ATKIS, Great Britain: Mastermap, Denmark: TOP10DK in Chapter 6 https://kadaster.github.io/imbrt .
 - [Beeldmateriaal aerial images](https://www.beeldmateriaal.nl/bekijk-luchtfotos)
@@ -72,6 +73,9 @@ PDOK aerial images (only Netherlands)
 Sentinel / Copernicus / ESA data
 
 For the Netherlands, two main sources of high-resolution remote sensing data are used. Satellite imagery is obtained from the Satellietdataportaal of the Netherlands Space Agency, which provides SuperView data at approximately 30 cm resolution. Each tile covers about 14 × 14 km and is around 6.5 GB, with new imagery generally available about once per month for the same location, although cloud cover can affect usability. Aerial imagery is available through the PDOK platform and originates from Beeldmateriaal Nederland, a Dutch public-sector initiative implemented by Het Waterschapshuis and Kadaster. These aerial images are higher quality and are available at 8 cm and 25 cm resolution, typically updated annually.
+
+#### Others
+- [Google Research](https://research.google/blog/from-pixels-to-planning-earth-ai-for-nature-restoration/)
 
 <!-- ================================= -->
 ## Issues and some possible solutions
