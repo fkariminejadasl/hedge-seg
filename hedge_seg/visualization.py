@@ -166,6 +166,115 @@ def show_image_with_mask(image, mask, alpha=0.25):
     plt.show(block=False)
 
 
+def _read_polylines(polyline_path):
+    polyline_path = Path(polyline_path)
+
+    if polyline_path.suffix == ".json":
+        data = json.load(open(polyline_path))
+        if "polylines_px_resampled" in data:
+            return np.asarray(data["polylines_px_resampled"], dtype=float)
+        return np.asarray(data["polylines_px"], dtype=float)
+
+    data = np.load(polyline_path)
+    if "polylines" in data:
+        return data["polylines"]
+    return data["polylines_px"]
+
+
+def _sample_id_from_path(path):
+    digits = "".join(ch for ch in Path(path).stem if ch.isdigit())
+    if not digits:
+        raise ValueError(f"Could not parse sample id from {path}")
+    return int(digits[-6:])
+
+
+def _polyline_files(polyline_dir, polyline_pattern):
+    if polyline_pattern is not None:
+        suffix = Path(polyline_pattern.format(0)).suffix
+        files = sorted(polyline_dir.glob(f"*{suffix}"))
+        if files:
+            return files
+
+    return sorted([*polyline_dir.glob("*.npz"), *polyline_dir.glob("*.json")])
+
+
+def _polyline_path_for_id(polyline_dir, sample_id, polyline_pattern):
+    candidates = []
+    if polyline_pattern is not None:
+        candidates.append(polyline_dir / polyline_pattern.format(sample_id))
+    candidates.extend(
+        [
+            polyline_dir / f"pos_{sample_id:06d}.npz",
+            polyline_dir / f"pos_{sample_id:06d}.json",
+        ]
+    )
+
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
+
+
+def show_polyline_grid(
+    image_dir,
+    polyline_dir,
+    ids=None,
+    n=16,
+    image_pattern="pos_{:06d}.png",
+    polyline_pattern=None,
+    linewidth=1.5,
+    seed=42,
+    title="GT",
+):
+    image_dir = Path(image_dir)
+    polyline_dir = Path(polyline_dir)
+
+    if ids is None:
+        files = _polyline_files(polyline_dir, polyline_pattern)
+        if len(files) == 0:
+            raise RuntimeError(f"No polylines found in {polyline_dir}")
+        rng = np.random.default_rng(seed)
+        files = rng.choice(files, size=min(n, len(files)), replace=False)
+        ids = [_sample_id_from_path(p) for p in files]
+    else:
+        ids = ids[:n]
+
+    fig, axes = plt.subplots(4, 4, figsize=(10.8, 10.8))
+    axes = axes.ravel()
+
+    for ax in axes:
+        ax.axis("off")
+
+    for ax, i in zip(axes, ids):
+        image_path = image_dir / image_pattern.format(i)
+        polyline_path = _polyline_path_for_id(polyline_dir, i, polyline_pattern)
+
+        image = cv2.imread(str(image_path))
+        if image is None:
+            ax.set_title(f"missing pos_{i:06d}", fontsize=8, pad=0)
+            continue
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        ax.imshow(image)
+        if polyline_path.exists():
+            polylines = _read_polylines(polyline_path)
+            for polyline in polylines:
+                polyline = np.asarray(polyline)
+                ax.plot(
+                    polyline[:, 0],
+                    polyline[:, 1],
+                    linewidth=linewidth,
+                )
+
+        ax.set_title(f"pos_{i:06d}", fontsize=8, pad=0)
+
+    fig.suptitle(title, fontsize=9)
+    fig.subplots_adjust(
+        left=0.01, right=0.99, bottom=0.01, top=0.96, wspace=0.01, hspace=0.05
+    )
+    plt.show(block=False)
+
+
 def show_mask_grid(
     image_dir,
     mask_dir,
@@ -270,4 +379,16 @@ for seed in [42, 123, 456]:
         seed=seed,
         title="Inference",
     )
+
+# visualize a grid of polylines
+show_polyline_grid(
+    image_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/images",
+    polyline_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/inference/polylines",
+    title="Inference",
+)
+show_polyline_grid(
+    image_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/images",
+    polyline_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/labels_processed",
+    title="GT",
+)
 """

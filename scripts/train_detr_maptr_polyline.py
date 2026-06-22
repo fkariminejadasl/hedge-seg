@@ -1204,7 +1204,12 @@ class DetrPolylineEmbDataset(Dataset):
                 polylines[..., 1] = polylines[..., 1] / float(H - 1)
                 polylines = polylines.clamp(0, 1)
 
-        target = {"labels": labels, "polylines": polylines, "image_size": image_size}
+        target = {
+            "labels": labels,
+            "polylines": polylines,
+            "image_size": image_size,
+            "stem": self.files[idx].stem,
+        }
         return feat, target
 
 
@@ -1386,6 +1391,48 @@ def detr_polyline_inference(
     return results
 
 
+@torch.no_grad()
+def infer_model(loader, model, device, cfg):
+    model.eval()
+
+    out_dir = (
+        Path(cfg.infer_out_dir)
+        if cfg.infer_out_dir is not None
+        else cfg.save_path / f"{cfg.exp}_inference"
+    )
+    pred_dir = out_dir / "polylines"
+    pred_dir.mkdir(parents=True, exist_ok=True)
+
+    for feats, targets in tqdm(loader, disable=cfg.disable_tqdm):
+        image_sizes = []
+        for t in targets:
+            size = t["image_size"]
+            if torch.is_tensor(size):
+                size = size.tolist()
+            elif hasattr(size, "tolist"):
+                size = size.tolist()
+            image_sizes.append(size)
+
+        preds = detr_polyline_inference(
+            model=model,
+            feats=feats,
+            image_sizes=image_sizes,
+            score_thresh=cfg.infer_score_thresh,
+            topk=cfg.infer_topk,
+            device=device,
+        )
+
+        for pred, target, image_size in zip(preds, targets, image_sizes):
+            np.savez_compressed(
+                pred_dir / f"{target['stem']}.npz",
+                polylines=pred["polylines_px"].numpy(),
+                polylines_norm=pred["polylines_norm"].numpy(),
+                scores=pred["scores"].numpy(),
+                labels=pred["labels"].numpy(),
+                image_size=np.asarray(image_size, dtype=np.int32),
+            )
+
+
 # =========================================================
 
 
@@ -1412,6 +1459,22 @@ def load_checkpoint_flexible(
     return ckpt
 
 
+def save_train_val_split_files(dataset, train_ds, val_ds, split_dir: Path):
+    split_dir.mkdir(parents=True, exist_ok=True)
+
+    split_paths = {
+        "train": [dataset.files[i] for i in train_ds.indices],
+        "val": [dataset.files[i] for i in val_ds.indices],
+    }
+
+    for split, files in split_paths.items():
+        with open(split_dir / f"{split}.txt", "w") as f:
+            for path in files:
+                f.write(str(path) + "\n")
+
+    print(f"Saved train/val split to {split_dir}")
+
+
 # -------------------------
 # Main
 # -------------------------
@@ -1432,6 +1495,14 @@ def main(cfg):
         dataset, [n_train, n_val], generator=torch.Generator().manual_seed(cfg.seed)
     )
     print(f"Dataset: total={len(dataset)}, train={len(train_ds)}, val={len(val_ds)}")
+
+    if cfg.save_splits:
+        split_dir = (
+            Path(cfg.split_dir)
+            if cfg.split_dir is not None
+            else cfg.save_path / "splits"
+        )
+        save_train_val_split_files(dataset, train_ds, val_ds, split_dir)
 
     train_loader = DataLoader(
         train_ds,
@@ -1487,6 +1558,37 @@ def main(cfg):
         aux_loss=cfg.aux_loss,
         query_embed_mode=cfg.query_embed_mode,
     ).to(device)
+
+    if cfg.mode == "infer":
+        if cfg.infer_ckpt is None:
+            raise ValueError("For mode='infer', cfg.infer_ckpt must be set.")
+        load_checkpoint_flexible(model, cfg.infer_ckpt, key_candidates=["model"])
+
+        if cfg.infer_embed_dir is not None:
+            infer_ds = DetrPolylineEmbDataset(
+                embed_dir=cfg.infer_embed_dir, num_points=cfg.num_points, normalize=True
+            )
+        elif cfg.infer_split == "train":
+            infer_ds = train_ds
+        elif cfg.infer_split == "val":
+            infer_ds = val_ds
+        elif cfg.infer_split == "all":
+            infer_ds = dataset
+        else:
+            raise ValueError("cfg.infer_split must be 'train', 'val', or 'all'.")
+
+        infer_loader = DataLoader(
+            infer_ds,
+            batch_size=cfg.batch_size,
+            shuffle=False,
+            num_workers=cfg.num_workers,
+            collate_fn=detr_polyline_collate_fn,
+        )
+        infer_model(infer_loader, model, device, cfg)
+        return
+
+    if cfg.mode != "train":
+        raise ValueError("cfg.mode must be 'train' or 'infer'.")
 
     if cfg.resume_ckpt is not None:
         load_checkpoint_flexible(model, cfg.resume_ckpt, key_candidates=["model"])
@@ -1549,49 +1651,9 @@ def main(cfg):
     print(f"Saved final model: {best_val:.4f} at epoch {epoch}")
 
 
-"""
-    model.load_state_dict(
-        torch.load("/home/fatemeh/Downloads/hedge/snellius/best_detr_polyline_1.pt", map_location=device)["model"]
-    )
-    # Example inference on eval set
-    feats, targets = next(iter(eval_loader))
-    image_sizes = [t["image_size"].tolist() for t in targets]
-    preds = detr_polyline_inference(
-        model=model,
-        feats=feats,
-        image_sizes=image_sizes,
-        score_thresh=0.9,
-        topk=20,
-        device=device,
-    )
-
-    # preds[0]["polylines_px"] is (M,K,2) in pixel coords
-    print(preds[0]["scores"].shape, preds[0]["polylines_px"].shape)
-    import cv2
-    import matplotlib.pyplot as plt
-    def visualize_polylines(im, polylines):
-        plt.figure()
-        plt.imshow(im)
-        for poly in polylines:
-            plt.plot(poly[:, 0], poly[:, 1], "*")
-        plt.show(block=False)
-    i = 0
-    inp = dataset.files[val_ds.indices[i]]
-    im = cv2.imread(str(inp.parent.parent/f"images/{inp.stem}.png"))
-    polylines = np.load(inp.parent.parent/f"embs_polylines/{inp.stem}.npz")["polylines"]
-    pred_polylines = preds[i]["polylines_px"] # [M,K,2]
-
-    visualize_polylines(im, pred_polylines)
-    visualize_polylines(im, polylines)
-
-    a = np.load(inp) # /home/fatemeh/Downloads/hedge/results/test_mini/embs_polylines/pos_000003.npz
-    a = torch.tensor(a["feat"], dtype=torch.float32).unsqueeze(0)
-    preds = detr_polyline_inference(model=model,feats=a,image_sizes=[image_sizes[0]],score_thresh=0.9,topk=20,device=device)
-"""
-
-
 if __name__ == "__main__":
     cfg = dict(
+        mode="infer",  # "train" or "infer"
         exp="detr_polyline_12",
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
@@ -1634,7 +1696,21 @@ if __name__ == "__main__":
         disable_tqdm=True,
         save_every=3000,
         seed=42,
+        # data splits (train/val, optional)
+        save_splits=True,
+        split_dir=Path("/home/fatemeh/Downloads/hedge/results/test_256_dino256"),
         # checkpoints
         resume_ckpt=None,
+        # inference
+        infer_ckpt=Path(
+            "/home/fatemeh/Downloads/hedge/results/training/detr_polyline_12.pt"
+        ),
+        infer_embed_dir=None,
+        infer_split="val",  # "train", "val", or "all"
+        infer_out_dir=Path(
+            "/home/fatemeh/Downloads/hedge/results/test_256_dino256/inference"
+        ),
+        infer_score_thresh=0.0,
+        infer_topk=20,
     )
     main(OmegaConf.create(cfg))
