@@ -660,23 +660,23 @@ class DetrPolylineFromEmbeddings(nn.Module):
     """
     Input: x (B, L, in_dim), with L = grid_h * grid_w
     Output:
-      pred_logits: (B, Q, num_classes+1)
-      pred_boxes: (B, Q, 4) in [0,1], cxcywh
-      pred_polylines: (B, Q, K, 2) in [0,1]
+      pred_logits: (B, P, num_classes+1)
+      pred_boxes: (B, P, 4) in [0,1], cxcywh
+      pred_polylines: (B, P, K, 2) in [0,1]
       aux_outputs: list[dict], optional
 
     MapTR-style query layout:
-      instance_embedding: (Q, 2D)
+      instance_embedding: (P, 2D)
       pts_embedding: (K, 2D)
-      object_query_embed: (Q*K, 2D), split into query_pos/query_content
-      decoder hs: (num_layers, B, Q*K, D) -> (num_layers, B, Q, K, D)
+      object_query_embed: (P*K, 2D), split into query_pos/query_content
+      decoder hs: (num_layers, B, P*K, D) -> (num_layers, B, P, K, D)
     """
 
     def __init__(
         self,
         in_dim: int = 1024,
         num_classes: int = 1,
-        num_queries: int = 100,
+        num_polylines: int = 100,
         d_model: int = 256,
         nhead: int = 8,
         num_encoder_layers: int = 4,
@@ -693,7 +693,8 @@ class DetrPolylineFromEmbeddings(nn.Module):
         assert query_embed_mode in {"detr", "legacy"}
 
         self.num_classes = num_classes
-        self.num_queries = num_queries
+        self.num_polylines = num_polylines
+        self.num_queries = num_polylines * num_points
         self.grid_h, self.grid_w = grid_size
         self.num_points = num_points
         self.aux_loss = aux_loss
@@ -701,7 +702,7 @@ class DetrPolylineFromEmbeddings(nn.Module):
 
         self.input_proj = nn.Linear(in_dim, d_model)
         self.pos_embed = PositionEmbeddingSine2D(num_pos_feats=d_model // 2)
-        self.instance_embedding = nn.Embedding(num_queries, d_model * 2)
+        self.instance_embedding = nn.Embedding(num_polylines, d_model * 2)
         self.pts_embedding = nn.Embedding(num_points, d_model * 2)
 
         if query_embed_mode == "detr":
@@ -732,25 +733,25 @@ class DetrPolylineFromEmbeddings(nn.Module):
 
     def _build_hierarchical_queries(self) -> Tuple[torch.Tensor, torch.Tensor]:
         pts_embeds = self.pts_embedding.weight.unsqueeze(0)  # (1,K,2D)
-        instance_embeds = self.instance_embedding.weight.unsqueeze(1)  # (Q,1,2D)
-        object_query_embed = (pts_embeds + instance_embeds).flatten(0, 1)  # (Q*K,2D)
-        query_pos, query_content = object_query_embed.chunk(2, dim=-1)  # (Q*K,D)
+        instance_embeds = self.instance_embedding.weight.unsqueeze(1)  # (P,1,2D)
+        object_query_embed = (pts_embeds + instance_embeds).flatten(0, 1)  # (P*K,2D)
+        query_pos, query_content = object_query_embed.chunk(2, dim=-1)  # (P*K,D)
         return query_pos, query_content
 
     def _decode_polylines(
         self,
-        hs: torch.Tensor,  # (num_layers,B,Q*K,D)
-        query_pos: torch.Tensor,  # (Q*K,D)
+        hs: torch.Tensor,  # (num_layers,B,P*K,D)
+        query_pos: torch.Tensor,  # (P*K,D)
     ) -> torch.Tensor:
-        reference_points = self.reference_points(query_pos).sigmoid()  # (Q*K,2)
-        point_logits = self.point_embed(hs)  # (num_layers,B,Q*K,2)
+        reference_points = self.reference_points(query_pos).sigmoid()  # (P*K,2)
+        point_logits = self.point_embed(hs)  # (num_layers,B,P*K,2)
         point_logits = point_logits + inverse_sigmoid(reference_points)[None, None]
         points = point_logits.sigmoid()
 
         return points.view(
             hs.shape[0],
             hs.shape[1],
-            self.num_queries,
+            self.num_polylines,
             self.num_points,
             2,
         )
@@ -788,20 +789,20 @@ class DetrPolylineFromEmbeddings(nn.Module):
             query_content=query_content,
             pos_embed=pos,
             mask=mask,
-        )  # hs: (num_layers,B,Q*K,D)
+        )  # hs: (num_layers,B,P*K,D)
 
         hs_poly = hs.view(
             hs.shape[0],
             B,
-            self.num_queries,
+            self.num_polylines,
             self.num_points,
             hs.shape[-1],
-        )  # (num_layers,B,Q,K,D)
-        outputs_class = self.class_embed(hs_poly.mean(dim=3))  # (num_layers,B,Q,C+1)
-        outputs_poly = self._decode_polylines(hs, query_pos)  # (num_layers,B,Q,K,2)
+        )  # (num_layers,B,P,K,D)
+        outputs_class = self.class_embed(hs_poly.mean(dim=3))  # (num_layers,B,P,C+1)
+        outputs_poly = self._decode_polylines(hs, query_pos)  # (num_layers,B,P,K,2)
         outputs_boxes = box_xyxy_to_cxcywh(
             polyline_to_bbox_xyxy(outputs_poly)
-        )  # (num_layers,B,Q,4)
+        )  # (num_layers,B,P,4)
 
         out = {
             "pred_logits": outputs_class[-1],
@@ -1507,7 +1508,7 @@ def main(cfg):
     model = DetrPolylineFromEmbeddings(
         in_dim=1024,
         num_classes=cfg.num_classes,
-        num_queries=cfg.num_polylines,
+        num_polylines=cfg.num_polylines,
         d_model=cfg.d_model,
         nhead=cfg.nhead,
         num_encoder_layers=cfg.num_encoder_layers,
@@ -1681,7 +1682,7 @@ if __name__ == "__main__":
         # save_path=Path("/home/fkarimineja/exps/hedge"),
         # embed_dir=Path("/home/fkarimineja/data/hedge/test_256_None/embs_polylines"),
         num_points=20,
-        num_polylines=100,  # decoder point queries = num_polylines * num_points
+        num_polylines=11,  # polyline instance queries
         num_classes=1,
         grid_size=(16, 16),
         # base model
