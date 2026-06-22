@@ -1213,6 +1213,24 @@ class DetrPolylineEmbDataset(Dataset):
         return feat, target
 
 
+class DetrPolylineEmbFileListDataset(DetrPolylineEmbDataset):
+    def __init__(self, split_file: Path, num_points: int = 20, normalize: bool = True):
+        split_file = Path(split_file)
+        self.files = []
+        with open(split_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                path = Path(line)
+                if not path.is_absolute():
+                    path = split_file.parent / path
+                self.files.append(path)
+
+        self.num_points = num_points
+        self.normalize = normalize
+
+
 def detr_polyline_collate_fn(batch):
     feats, targets = zip(*batch)
     feats = torch.stack(feats, dim=0)  # (B,196,1024)
@@ -1486,6 +1504,55 @@ def main(cfg):
     if device.type == "cuda":
         print(f"Using device: {torch.cuda.get_device_properties()}")
 
+    model = DetrPolylineFromEmbeddings(
+        in_dim=1024,
+        num_classes=cfg.num_classes,
+        num_queries=cfg.num_polylines,
+        d_model=cfg.d_model,
+        nhead=cfg.nhead,
+        num_encoder_layers=cfg.num_encoder_layers,
+        num_decoder_layers=cfg.num_decoder_layers,
+        dim_feedforward=cfg.dim_feedforward,
+        dropout=cfg.dropout,
+        grid_size=cfg.grid_size,
+        num_points=cfg.num_points,
+        aux_loss=cfg.aux_loss,
+        query_embed_mode=cfg.query_embed_mode,
+    ).to(device)
+
+    if cfg.mode == "infer":
+        if cfg.infer_ckpt is None:
+            raise ValueError("For mode='infer', cfg.infer_ckpt must be set.")
+        load_checkpoint_flexible(model, cfg.infer_ckpt, key_candidates=["model"])
+
+        if cfg.infer_split_file is not None:
+            infer_ds = DetrPolylineEmbFileListDataset(
+                split_file=cfg.infer_split_file,
+                num_points=cfg.num_points,
+                normalize=True,
+            )
+        elif cfg.infer_embed_dir is not None:
+            infer_ds = DetrPolylineEmbDataset(
+                embed_dir=cfg.infer_embed_dir, num_points=cfg.num_points, normalize=True
+            )
+        else:
+            raise ValueError(
+                "For mode='infer', set cfg.infer_split_file or cfg.infer_embed_dir."
+            )
+
+        infer_loader = DataLoader(
+            infer_ds,
+            batch_size=cfg.batch_size,
+            shuffle=False,
+            num_workers=cfg.num_workers,
+            collate_fn=detr_polyline_collate_fn,
+        )
+        infer_model(infer_loader, model, device, cfg)
+        return
+
+    if cfg.mode != "train":
+        raise ValueError("cfg.mode must be 'train' or 'infer'.")
+
     dataset = DetrPolylineEmbDataset(
         embed_dir=cfg.embed_dir, num_points=cfg.num_points, normalize=True
     )
@@ -1540,55 +1607,7 @@ def main(cfg):
         loss_dir=cfg.loss_dir,
         aux_weight=cfg.aux_weight,
     )
-
     criterion.to(device)
-
-    model = DetrPolylineFromEmbeddings(
-        in_dim=1024,
-        num_classes=cfg.num_classes,
-        num_queries=cfg.num_polylines,
-        d_model=cfg.d_model,
-        nhead=cfg.nhead,
-        num_encoder_layers=cfg.num_encoder_layers,
-        num_decoder_layers=cfg.num_decoder_layers,
-        dim_feedforward=cfg.dim_feedforward,
-        dropout=cfg.dropout,
-        grid_size=cfg.grid_size,
-        num_points=cfg.num_points,
-        aux_loss=cfg.aux_loss,
-        query_embed_mode=cfg.query_embed_mode,
-    ).to(device)
-
-    if cfg.mode == "infer":
-        if cfg.infer_ckpt is None:
-            raise ValueError("For mode='infer', cfg.infer_ckpt must be set.")
-        load_checkpoint_flexible(model, cfg.infer_ckpt, key_candidates=["model"])
-
-        if cfg.infer_embed_dir is not None:
-            infer_ds = DetrPolylineEmbDataset(
-                embed_dir=cfg.infer_embed_dir, num_points=cfg.num_points, normalize=True
-            )
-        elif cfg.infer_split == "train":
-            infer_ds = train_ds
-        elif cfg.infer_split == "val":
-            infer_ds = val_ds
-        elif cfg.infer_split == "all":
-            infer_ds = dataset
-        else:
-            raise ValueError("cfg.infer_split must be 'train', 'val', or 'all'.")
-
-        infer_loader = DataLoader(
-            infer_ds,
-            batch_size=cfg.batch_size,
-            shuffle=False,
-            num_workers=cfg.num_workers,
-            collate_fn=detr_polyline_collate_fn,
-        )
-        infer_model(infer_loader, model, device, cfg)
-        return
-
-    if cfg.mode != "train":
-        raise ValueError("cfg.mode must be 'train' or 'infer'.")
 
     if cfg.resume_ckpt is not None:
         load_checkpoint_flexible(model, cfg.resume_ckpt, key_candidates=["model"])
@@ -1705,8 +1724,10 @@ if __name__ == "__main__":
         infer_ckpt=Path(
             "/home/fatemeh/Downloads/hedge/results/training/detr_polyline_12.pt"
         ),
+        infer_split_file=Path(
+            "/home/fatemeh/Downloads/hedge/results/test_256_dino256/val.txt"
+        ),
         infer_embed_dir=None,
-        infer_split="val",  # "train", "val", or "all"
         infer_out_dir=Path(
             "/home/fatemeh/Downloads/hedge/results/test_256_dino256/inference"
         ),
