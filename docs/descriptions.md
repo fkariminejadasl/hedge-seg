@@ -10,6 +10,37 @@ There are 691,006 polylines and 4121 closed shape, which some are not originally
 
 Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of polylines 50. 106,812 polylines in 30,000 images, e.g. pdok_dataset3.
 
+## Overview
+
+- **Initial Investigation**: SAM3, PiDiNet, conventional methods for hedgerow delineation.
+
+- **train_neg_pos_classifier**: Validated DINOv3 on LiDAR-crop classification (hedge vs. non-hedge from ground truth). Result: Good performance. Dataset: `scripts/data/build_lidar_training_dataset.py`.
+
+- **train_detr_hf**: Explored HuggingFace DETR for polyline prediction. Decided to implement custom DETR instead, as HF DETR is streamlined for object detection and difficult to adapt. Data generated in-code.
+
+- **train_detr_dino**: DETR baseline before polyline implementation. Data: `hedge_seg.embeddings_and_pack` (bounding box embeddings).
+
+- **train_detr_dino_polyline**: DETR-like polyline with LiDAR crops, DINOv3 frozen. Added optional diffusion refinement head (3-stage training). **Result: Learned polyline distribution but not precise locations**, even with diffusion. Dataset: `scripts/data/build_lidar_training_dataset.py`.
+
+- **train_detr_dino_polyline_rel**: Same as above, but predicted per-query bounding box first, then polyline points as offsets relative to box. Added geometric losses (`loss_smooth`, `loss_len`, `loss_dir`, `loss_card`). **Result: Still could not learn precise locations, only distribution**. Dataset: `scripts/data/build_lidar_training_dataset.py`.
+
+- **train_detect_ultralytics**: YOLO bounding-box detection on high-resolution PDOK aerial crops to test if low image resolution was the issue. **Result: 70% precision, 60% recall**. Dataset: `scripts/data/{build_pdok_wms_dataset.py,convert_pdok_polylines_to_yolo_bbox.py}`.
+
+- **train_seg_ultralytics**: YOLO instance segmentation with polylines buffered to 15 m radius on high-resolution aerial data. **Result: 80% precision, 70% recall**; outperformed bounding-box detection. Dataset: `scripts/data/{build_pdok_wms_dataset.py,convert_pdok_polylines_to_yolo_seg.py}`.
+
+- **train_semseg_unet_resnet18**: Since integrating Ultralytics with polyline DETR was impractical, trained ResNet18-UNet for binary semantic segmentation (hedge mask + centerline) on high-resolution aerial data with 15 m polyline buffers. **Result: 60% precision, 40% recall numerically, but visual segmentation quality was reasonable**. Dataset: `scripts/data/{build_pdok_wms_dataset.py,convert_pdok_polylines_to_semseg.py}`.
+
+- **train_detr_maptr_polyline**: Reimplemented polyline regression without diffusion, using MapTR hierarchical queries (per-polyline instance + per-point embeddings). Initialized backbone with pretrained ResNet18-UNet. Hypothesized hierarchical query design limited precision learning, but results similar to relative-coordinate approach.
+
+### Key Findings
+
+- **Polyline regression from embeddings** learns distribution well but struggles with precise coordinate prediction.
+- **High-resolution imagery** (PDOK aerial at 25 cm/px) significantly improves detection/segmentation over low-resolution LiDAR crops.
+- **Diffusion refinement** and **relative-coordinate heads** provide minimal improvement for location precision.
+- **Segmentation-based approaches** (YOLO-seg, UNet) outperform direct polyline regression, suggesting the task may be better framed as mask generation.
+
+
+
 ## Code Description
 
 ### Core Library Modules
