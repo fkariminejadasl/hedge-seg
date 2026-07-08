@@ -1,5 +1,11 @@
 """
-Dataset is generated in this code.
+Fine-tune HuggingFace DETR on COCO-style bounding-box dataset from LiDAR crops using transformers.Trainer.
+
+Data: Bounding-box annotations built from ground-truth polylines on LiDAR crop images.
+Dataset: Generated in-code from chip images and labels.
+Purpose: Explore HuggingFace DETR for bounding-box detection; used to decide on custom DETR implementation.
+Note: HF DETR is streamlined for bounding boxes and difficult to adapt for polyline outputs.
+Based on: https://huggingface.co/learn/cookbook/en/fine_tuning_detr_custom_dataset (with adaptations and bug fixes).
 """
 
 import json
@@ -22,11 +28,6 @@ from transformers import (
     TrainingArguments,
     pipeline,
 )
-
-"""
-It is mainly based on https://huggingface.co/learn/cookbook/en/fine_tuning_detr_custom_dataset. 
-I made some adjustments to fit my dataset and needs, and I also fixed a few bugs.
-"""
 
 
 def convert_xyxy_to_xywh(xmin, ymin, xmax, ymax):
