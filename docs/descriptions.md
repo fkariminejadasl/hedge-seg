@@ -31,6 +31,9 @@ Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of pol
 - **train_semseg_unet_resnet18**: Since integrating Ultralytics with polyline DETR was impractical, trained ResNet18-UNet for binary semantic segmentation (hedge mask + centerline) on high-resolution aerial data with 15 m polyline buffers. **Result: 60% precision, 40% recall numerically, but visual segmentation quality was reasonable**. Dataset: `scripts/data/{build_pdok_wms_dataset.py,convert_pdok_polylines_to_semseg.py}`.
 
 - **train_detr_maptr_polyline**: Reimplemented polyline regression without diffusion, using MapTR hierarchical queries (per-polyline instance + per-point embeddings). Initialized backbone with pretrained ResNet18-UNet. Hypothesized hierarchical query design limited precision learning, but results similar to relative-coordinate approach.
+    - LiDAR only (all 25 images), aerial only and combined​
+    - Tree and hedgerow or only hedgerow
+    - Different backbone/embeddings: DINOv3 sat, Google Satellite embeddings
 
 ### Key Findings
 

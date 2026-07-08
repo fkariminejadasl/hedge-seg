@@ -18,10 +18,12 @@ Directly tesing it with SAM 3 and PiDiNet (edge detection) didn't result in a sa
 
 Image to vector models where given image and extract vectors directly. Vector can be polyline (curve), and polygon.
 
-### Backbone
+### Backbone / Embeddings
 
-- [DINOv3](https://arxiv.org/pdf/2508.10104)
+- [DINOv3](https://arxiv.org/pdf/2508.10104) from [collections](https://huggingface.co/collections/facebook/dinov3).
 - [PE (Perception Encoder)](https://arxiv.org/pdf/2504.13181)
+- Google AlphaEarth / [Satellite Embedding](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_SATELLITE_EMBEDDING_V1_ANNUAL): a precomputed geospatial embedding dataset in which each approximately 10 m × 10 m ground pixel has one 64-dimensional embedding vector for each calendar year. The dataset is available in Google Earth Engine as `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`. 
+
 
 ### Self Driving 
 
