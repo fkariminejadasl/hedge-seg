@@ -101,6 +101,33 @@ def inverse_sigmoid(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
     return torch.log(x / (1.0 - x))
 
 
+def gen_sineembed_for_position(
+    pos: torch.Tensor, num_pos_feats: int = 128, temperature: int = 10000
+) -> torch.Tensor:
+    """
+    Sine embedding for continuous 2D positions (DAB/Conditional-DETR style).
+
+    pos: (..., 2) normalized in [0,1]
+    returns: (..., 2*num_pos_feats), cat(pos_y, pos_x) to match PositionEmbeddingSine2D
+    """
+    scale = 2 * torch.pi
+    dim_t = torch.arange(num_pos_feats, dtype=torch.float32, device=pos.device)
+    dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats)
+
+    x_embed = pos[..., 0] * scale
+    y_embed = pos[..., 1] * scale
+    pos_x = x_embed[..., None] / dim_t
+    pos_y = y_embed[..., None] / dim_t
+
+    pos_x = torch.stack(
+        (pos_x[..., 0::2].sin(), pos_x[..., 1::2].cos()), dim=-1
+    ).flatten(-2)
+    pos_y = torch.stack(
+        (pos_y[..., 0::2].sin(), pos_y[..., 1::2].cos()), dim=-1
+    ).flatten(-2)
+    return torch.cat((pos_y, pos_x), dim=-1)
+
+
 # -------------------------
 # Positional encoding (2D sine)
 # -------------------------
@@ -233,6 +260,9 @@ class DETRTransformer(nn.Module):
         query_content: Optional[torch.Tensor] = None,  # (Q, D)
         pos_embed: Optional[torch.Tensor] = None,  # (B, L, D)
         mask: Optional[torch.Tensor] = None,  # (B, L)
+        reference_points: Optional[torch.Tensor] = None,  # (B, Q, 2) in [0,1]
+        reg_branches: Optional[nn.ModuleList] = None,  # per-layer offset heads
+        ref_point_head: Optional[nn.Module] = None,  # sine embed -> query_pos MLP
     ):
         B, _, _ = src.shape
         query_embed = query_embed.unsqueeze(0).expand(B, -1, -1)  # (B,Q,D)
@@ -242,15 +272,18 @@ class DETRTransformer(nn.Module):
             tgt = query_content.unsqueeze(0).expand(B, -1, -1)  # (B,Q,D)
 
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
-        hs = self.decoder(
+        hs, refs = self.decoder(
             tgt,
             memory,
             memory_key_padding_mask=mask,
             pos=pos_embed,
             query_pos=query_embed,
+            reference_points=reference_points,
+            reg_branches=reg_branches,
+            ref_point_head=ref_point_head,
         )
-        # hs: (num_layers, B, Q, D)
-        return hs, memory
+        # hs: (num_layers, B, Q, D); refs: (num_layers, B, Q, 2) or None
+        return hs, refs, memory
 
 
 class DETRTransformerEncoder(nn.Module):
@@ -296,11 +329,32 @@ class DETRTransformerDecoder(nn.Module):
         memory_key_padding_mask: Optional[torch.Tensor] = None,
         pos: Optional[torch.Tensor] = None,
         query_pos: Optional[torch.Tensor] = None,
+        reference_points: Optional[torch.Tensor] = None,  # (B, Q, 2) in [0,1]
+        reg_branches: Optional[nn.ModuleList] = None,
+        ref_point_head: Optional[nn.Module] = None,
     ):
-        output = tgt
-        intermediate = []
+        refine = reference_points is not None
+        if refine:
+            assert reg_branches is not None and ref_point_head is not None
+            assert len(reg_branches) == len(self.layers)
 
-        for layer in self.layers:
+        output = tgt
+        ref = reference_points
+        intermediate = []
+        intermediate_refs = []
+
+        for lid, layer in enumerate(self.layers):
+            if refine:
+                # Query positional embedding follows the current point location,
+                # so attention is conditioned on where each point currently is.
+                d_model = output.shape[-1]
+                query_sine = gen_sineembed_for_position(
+                    ref, num_pos_feats=d_model // 2
+                )  # (B,Q,D)
+                layer_query_pos = ref_point_head(query_sine)
+            else:
+                layer_query_pos = query_pos
+
             output = layer(
                 output,
                 memory,
@@ -309,22 +363,27 @@ class DETRTransformerDecoder(nn.Module):
                 tgt_key_padding_mask=tgt_key_padding_mask,
                 memory_key_padding_mask=memory_key_padding_mask,
                 pos=pos,
-                query_pos=query_pos,
+                query_pos=layer_query_pos,
             )
-            if self.return_intermediate:
-                intermediate.append(
-                    self.norm(output) if self.norm is not None else output
-                )
+            out_normed = self.norm(output) if self.norm is not None else output
 
-        if self.norm is not None:
-            output = self.norm(output)
+            if refine:
+                delta = reg_branches[lid](out_normed)  # (B,Q,2)
+                new_ref = (delta + inverse_sigmoid(ref)).sigmoid()
+                intermediate_refs.append(new_ref)
+                ref = new_ref.detach()
+
+            if self.return_intermediate:
+                intermediate.append(out_normed)
 
         if self.return_intermediate:
-            if self.norm is not None:
-                intermediate[-1] = output
-            return torch.stack(intermediate)
+            hs = torch.stack(intermediate)
+            refs = torch.stack(intermediate_refs) if refine else None
+            return hs, refs
 
-        return output.unsqueeze(0)
+        hs = out_normed.unsqueeze(0)
+        refs = intermediate_refs[-1].unsqueeze(0) if refine else None
+        return hs, refs
 
 
 class DETRTransformerEncoderLayer(nn.Module):
@@ -610,7 +669,11 @@ class LegacyTransformerWrapper(nn.Module):
         query_content: Optional[torch.Tensor] = None,  # (Q,D)
         pos_embed: Optional[torch.Tensor] = None,  # (B,L,D)
         mask: Optional[torch.Tensor] = None,  # (B,L)
+        reference_points: Optional[torch.Tensor] = None,  # unsupported, must be None
+        reg_branches: Optional[nn.ModuleList] = None,
+        ref_point_head: Optional[nn.Module] = None,
     ):
+        assert reference_points is None, "legacy mode does not support refinement"
         B, _, _ = src.shape
 
         if pos_embed is not None:
@@ -648,7 +711,7 @@ class LegacyTransformerWrapper(nn.Module):
             )
             hs = output.unsqueeze(0)
 
-        return hs, memory
+        return hs, None, memory
 
 
 # =========================================================
@@ -688,9 +751,12 @@ class DetrPolylineFromEmbeddings(nn.Module):
         aux_loss: bool = True,
         normalize_before: bool = False,
         query_embed_mode: str = "detr",  # "detr" or "legacy"
+        with_refine: bool = True,
     ):
         super().__init__()
         assert query_embed_mode in {"detr", "legacy"}
+        if with_refine and query_embed_mode != "detr":
+            raise ValueError("with_refine=True requires query_embed_mode='detr'")
 
         self.num_classes = num_classes
         self.num_polylines = num_polylines
@@ -699,6 +765,7 @@ class DetrPolylineFromEmbeddings(nn.Module):
         self.num_points = num_points
         self.aux_loss = aux_loss
         self.query_embed_mode = query_embed_mode
+        self.with_refine = with_refine
 
         self.input_proj = nn.Linear(in_dim, d_model)
         self.pos_embed = PositionEmbeddingSine2D(num_pos_feats=d_model // 2)
@@ -729,7 +796,21 @@ class DetrPolylineFromEmbeddings(nn.Module):
 
         self.class_embed = nn.Linear(d_model, num_classes + 1)
         self.reference_points = nn.Linear(d_model, 2)
-        self.point_embed = MLP(d_model, d_model, 2, num_layers=3)
+
+        if with_refine:
+            # Maps sine embedding of current reference point -> query_pos, per layer.
+            self.ref_point_head = MLP(d_model, d_model, d_model, num_layers=2)
+            # One offset head per decoder layer (MapTR-style iterative refinement).
+            self.reg_branches = _get_clones(
+                MLP(d_model, d_model, 2, num_layers=3), num_decoder_layers
+            )
+            # Zero-init so refinement starts as identity: layer outputs equal the
+            # initial reference points, and offsets grow from zero.
+            for reg in self.reg_branches:
+                nn.init.zeros_(reg.layers[-1].weight)
+                nn.init.zeros_(reg.layers[-1].bias)
+        else:
+            self.point_embed = MLP(d_model, d_model, 2, num_layers=3)
 
     def _build_hierarchical_queries(self) -> Tuple[torch.Tensor, torch.Tensor]:
         pts_embeds = self.pts_embedding.weight.unsqueeze(0)  # (1,K,2D)
@@ -782,14 +863,22 @@ class DetrPolylineFromEmbeddings(nn.Module):
         pos = self.pos_embed(B=B, H=self.grid_h, W=self.grid_w, device=x.device)
         query_pos, query_content = self._build_hierarchical_queries()
 
+        reference_points = None
+        if self.with_refine:
+            reference_points = self.reference_points(query_pos).sigmoid()  # (P*K,2)
+            reference_points = reference_points.unsqueeze(0).expand(B, -1, -1)
+
         mask = None
-        hs, memory = self.transformer(
+        hs, refs, memory = self.transformer(
             src=src,
             query_embed=query_pos,
             query_content=query_content,
             pos_embed=pos,
             mask=mask,
-        )  # hs: (num_layers,B,P*K,D)
+            reference_points=reference_points,
+            reg_branches=self.reg_branches if self.with_refine else None,
+            ref_point_head=self.ref_point_head if self.with_refine else None,
+        )  # hs: (num_layers,B,P*K,D); refs: (num_layers,B,P*K,2) or None
 
         hs_poly = hs.view(
             hs.shape[0],
@@ -799,7 +888,12 @@ class DetrPolylineFromEmbeddings(nn.Module):
             hs.shape[-1],
         )  # (num_layers,B,P,K,D)
         outputs_class = self.class_embed(hs_poly.mean(dim=3))  # (num_layers,B,P,C+1)
-        outputs_poly = self._decode_polylines(hs, query_pos)  # (num_layers,B,P,K,2)
+        if self.with_refine:
+            outputs_poly = refs.view(
+                refs.shape[0], B, self.num_polylines, self.num_points, 2
+            )  # (num_layers,B,P,K,2)
+        else:
+            outputs_poly = self._decode_polylines(hs, query_pos)
         outputs_boxes = box_xyxy_to_cxcywh(
             polyline_to_bbox_xyxy(outputs_poly)
         )  # (num_layers,B,P,4)
@@ -1568,6 +1662,7 @@ def main(cfg):
         num_points=cfg.num_points,
         aux_loss=cfg.aux_loss,
         query_embed_mode=cfg.query_embed_mode,
+        with_refine=cfg.with_refine,
     ).to(device)
 
     if cfg.mode == "infer":
@@ -1723,7 +1818,7 @@ def main(cfg):
 if __name__ == "__main__":
     cfg = dict(
         mode="infer",  # "train" or "infer"
-        exp="detr_polyline_18",
+        exp="detr_polyline_20",
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
             "/home/fatemeh/Downloads/hedge/results/test_256_dino256/embs_polylines"
@@ -1731,7 +1826,7 @@ if __name__ == "__main__":
         # save_path=Path("/home/fkarimineja/exps/hedge"),
         # embed_dir=Path("/home/fkarimineja/data/hedge/test_256_None/embs_polylines"),
         num_points=20,
-        num_polylines=11,  # polyline instance queries
+        num_polylines=20,  # polyline instance queries
         num_classes=1,
         grid_size=(16, 16),
         # base model
@@ -1743,6 +1838,7 @@ if __name__ == "__main__":
         dropout=0.01,  # default 0.1
         aux_loss=True,
         query_embed_mode="detr",  # "detr" or "legacy"
+        with_refine=True,  # per-layer reference-point refinement (MapTR-style)
         eos_coef=0.05,
         # criterion and matcher
         class_cost=1.0,
@@ -1772,7 +1868,7 @@ if __name__ == "__main__":
         resume_ckpt=None,
         # inference
         infer_ckpt=Path(
-            "/home/fatemeh/Downloads/hedge/results/training/best_detr_polyline_18.pt"
+            "/home/fatemeh/Downloads/hedge/results/training/best_detr_polyline_20.pt"
         ),
         infer_split_file=Path(
             "/home/fatemeh/Downloads/hedge/results/test_256_dino256/val.txt"
@@ -1781,7 +1877,7 @@ if __name__ == "__main__":
         infer_out_dir=Path(
             "/home/fatemeh/Downloads/hedge/results/test_256_dino256/inference"
         ),
-        infer_score_thresh=0.0,
+        infer_score_thresh=0.5,
         infer_topk=20,
     )
     main(OmegaConf.create(cfg))
