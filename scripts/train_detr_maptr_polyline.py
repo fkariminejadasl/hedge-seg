@@ -870,9 +870,6 @@ class HungarianMatcherPolyline(nn.Module):
                 )
                 continue
 
-            tgt_bbox_xyxy = polyline_to_bbox_xyxy(tgt_poly)
-            tgt_bbox = box_xyxy_to_cxcywh(tgt_bbox_xyxy)
-
             cost_class = -out_prob[b][:, tgt_ids]
 
             Q = out_poly[b].shape[0]
@@ -886,17 +883,25 @@ class HungarianMatcherPolyline(nn.Module):
             cost_rev = torch.cdist(out_flat, tgt_rev, p=1) / float(2 * K)
             cost_poly = torch.minimum(cost_fwd, cost_rev)
 
-            cost_bbox = torch.cdist(out_box[b], tgt_bbox, p=1) / 4.0
-
-            out_bbox_xyxy = box_cxcywh_to_xyxy(out_box[b]).clamp(0.0, 1.0)
-            cost_giou = -generalized_box_iou_xyxy(out_bbox_xyxy, tgt_bbox_xyxy)
-
             C = (
                 self.cost.class_cost * cost_class
                 + self.cost.poly_cost * cost_poly
-                + self.cost.bbox_cost * cost_bbox
-                + self.cost.bbox_giou_cost * cost_giou
-            ).cpu()
+            )
+
+            if self.cost.bbox_cost > 0 or self.cost.bbox_giou_cost > 0:
+                tgt_bbox_xyxy = polyline_to_bbox_xyxy(tgt_poly)
+
+                if self.cost.bbox_cost > 0:
+                    tgt_bbox = box_xyxy_to_cxcywh(tgt_bbox_xyxy)
+                    cost_bbox = torch.cdist(out_box[b], tgt_bbox, p=1) / 4.0
+                    C = C + self.cost.bbox_cost * cost_bbox
+
+                if self.cost.bbox_giou_cost > 0:
+                    out_bbox_xyxy = box_cxcywh_to_xyxy(out_box[b]).clamp(0.0, 1.0)
+                    cost_giou = -generalized_box_iou_xyxy(out_bbox_xyxy, tgt_bbox_xyxy)
+                    C = C + self.cost.bbox_giou_cost * cost_giou
+
+            C = C.cpu()
 
             row_ind, col_ind = linear_sum_assignment(C)
             indices.append(
@@ -969,14 +974,30 @@ class DetrPolylineCriterion(nn.Module):
         suffix: str = "",
     ) -> Dict[str, torch.Tensor]:
         indices = self.matcher(outputs, targets)
+        zero = outputs["pred_polylines"].new_tensor(0.0)
 
         loss_ce = self.loss_labels(outputs, targets, indices)
         loss_poly = self.loss_polylines(outputs, targets, indices)
-        loss_bbox = self.loss_boxes(outputs, targets, indices)
-        loss_giou = self.loss_bbox_giou(outputs, targets, indices)
-        loss_smooth = self.loss_smoothness(outputs, indices)
-        loss_card = self.loss_cardinality(outputs, targets)
-        loss_len, loss_dir = self.loss_length_direction(outputs, targets, indices)
+        loss_bbox = (
+            self.loss_boxes(outputs, targets, indices)
+            if self.loss_bbox_w > 0
+            else zero
+        )
+        loss_giou = (
+            self.loss_bbox_giou(outputs, targets, indices)
+            if self.loss_bbox_giou_w > 0
+            else zero
+        )
+        loss_smooth = (
+            self.loss_smoothness(outputs, indices) if self.loss_smooth_w > 0 else zero
+        )
+        loss_card = (
+            self.loss_cardinality(outputs, targets) if self.loss_card_w > 0 else zero
+        )
+        if self.loss_len_w > 0 or self.loss_dir_w > 0:
+            loss_len, loss_dir = self.loss_length_direction(outputs, targets, indices)
+        else:
+            loss_len, loss_dir = zero, zero
 
         loss_total = (
             loss_ce
@@ -1111,48 +1132,75 @@ class DetrPolylineCriterion(nn.Module):
         return F.l1_loss(pred_counts, tgt_counts)
 
     def loss_length_direction(self, outputs, targets, indices):
-        pred_poly = outputs["pred_polylines"]
+        """
+        Length and direction losses for matched polylines.
+
+        Important:
+        - The forward/reverse GT orientation is chosen using the same ordered L1
+        criterion as loss_polylines.
+        - This avoids one loss supervising the forward order while another loss
+        supervises the reversed order.
+        - Direction loss uses a larger epsilon than 1e-6 because predicted adjacent
+        points can collapse early in training, making direction nearly undefined.
+        """
+        pred_poly = outputs["pred_polylines"]  # (B, Q, K, 2)
+
         loss_len = pred_poly.new_tensor(0.0)
         loss_dir = pred_poly.new_tensor(0.0)
-        n = 0
+        n_matched = 0
+
+        dir_eps = 1e-3
+        gt_seg_eps = 1e-6
 
         for b, (src_idx, tgt_idx) in enumerate(indices):
             if len(src_idx) == 0:
                 continue
 
-            s = pred_poly[b, src_idx]
-            t = targets[b]["polylines"][tgt_idx]
-            t_rev = torch.flip(t, dims=[1])
+            s = pred_poly[b, src_idx]                  # (M, K, 2)
+            t = targets[b]["polylines"][tgt_idx]       # (M, K, 2)
+            t_rev = torch.flip(t, dims=[1])            # (M, K, 2)
 
-            s_v = s[:, 1:] - s[:, :-1]
-            t_v = t[:, 1:] - t[:, :-1]
-            tr_v = t_rev[:, 1:] - t_rev[:, :-1]
+            # Choose orientation using the same logic as loss_polylines.
+            l1_fwd = F.l1_loss(s, t, reduction="none").sum(dim=(1, 2))      # (M,)
+            l1_rev = F.l1_loss(s, t_rev, reduction="none").sum(dim=(1, 2))  # (M,)
 
-            s_len = torch.norm(s_v, dim=-1)
-            t_len = torch.norm(t_v, dim=-1)
-            tr_len = torch.norm(tr_v, dim=-1)
+            use_rev = (l1_rev < l1_fwd).detach()  # boolean, no gradient needed
+            t_ord = torch.where(use_rev[:, None, None], t_rev, t)
 
-            len_fwd = F.l1_loss(s_len, t_len, reduction="none").mean(dim=1)
-            len_rev = F.l1_loss(s_len, tr_len, reduction="none").mean(dim=1)
+            # Segment vectors.
+            s_v = s[:, 1:] - s[:, :-1]          # (M, K-1, 2)
+            t_v = t_ord[:, 1:] - t_ord[:, :-1]  # (M, K-1, 2)
 
-            s_dir = F.normalize(s_v, dim=-1, eps=1e-6)
-            t_dir = F.normalize(t_v, dim=-1, eps=1e-6)
-            tr_dir = F.normalize(tr_v, dim=-1, eps=1e-6)
+            # Segment length loss.
+            s_len = torch.linalg.norm(s_v, dim=-1)  # (M, K-1)
+            t_len = torch.linalg.norm(t_v, dim=-1)  # (M, K-1)
 
-            dir_fwd = (1.0 - (s_dir * t_dir).sum(dim=-1)).mean(dim=1)
-            dir_rev = (1.0 - (s_dir * tr_dir).sum(dim=-1)).mean(dim=1)
+            len_per_poly = F.l1_loss(s_len, t_len, reduction="none").mean(dim=1)
+            loss_len = loss_len + len_per_poly.sum()
 
-            use_rev = (len_rev + dir_rev) < (len_fwd + dir_fwd)
+            # Direction loss.
+            # Mask invalid GT segments, just in case duplicate GT points exist.
+            valid = (t_len > gt_seg_eps).float()  # (M, K-1)
 
-            loss_len = loss_len + torch.where(use_rev, len_rev, len_fwd).sum()
-            loss_dir = loss_dir + torch.where(use_rev, dir_rev, dir_fwd).sum()
-            n += s.shape[0]
+            s_norm = torch.linalg.norm(s_v, dim=-1, keepdim=True).clamp_min(dir_eps)
+            t_norm = torch.linalg.norm(t_v, dim=-1, keepdim=True).clamp_min(dir_eps)
 
-        if n == 0:
+            s_dir = s_v / s_norm
+            t_dir = t_v / t_norm
+
+            cosine = (s_dir * t_dir).sum(dim=-1).clamp(-1.0, 1.0)  # (M, K-1)
+            dir_loss = 1.0 - cosine
+
+            dir_per_poly = (dir_loss * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(1.0)
+            loss_dir = loss_dir + dir_per_poly.sum()
+
+            n_matched += s.shape[0]
+
+        if n_matched == 0:
             z = pred_poly.new_tensor(0.0)
             return z, z
 
-        return loss_len / n, loss_dir / n
+        return loss_len / n_matched, loss_dir / n_matched
 
 
 # -------------------------
@@ -1163,7 +1211,7 @@ class DetrPolylineCriterion(nn.Module):
 class DetrPolylineEmbDataset(Dataset):
     """
     Expected per file:
-      feat: (196,1024)
+      feat: (256,1024) # DINO features (default 14 x 14 = 196 tokens)
       polylines: (num_obj,K,2) in xy pixel coords (not normalized)
       labels: (num_obj,)
       image_size: (H,W)
@@ -1472,6 +1520,7 @@ def load_checkpoint_flexible(
         state = ckpt
 
     missing, unexpected = module.load_state_dict(state, strict=strict)
+    print(f"Epoch:{ckpt['epoch']}")
     print(f"Loaded checkpoint from {ckpt_path}")
     print(f"  missing keys: {len(missing)}")
     print(f"  unexpected keys: {len(unexpected)}")
@@ -1674,7 +1723,7 @@ def main(cfg):
 if __name__ == "__main__":
     cfg = dict(
         mode="infer",  # "train" or "infer"
-        exp="detr_polyline_12",
+        exp="detr_polyline_18",
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
         embed_dir=Path(
             "/home/fatemeh/Downloads/hedge/results/test_256_dino256/embs_polylines"
@@ -1698,23 +1747,23 @@ if __name__ == "__main__":
         # criterion and matcher
         class_cost=1.0,
         poly_cost=5.0,
-        bbox_cost=2.0,
+        bbox_cost=0.0,
         loss_poly=5.0,
-        loss_bbox=2.0,
-        loss_bbox_giou=2.0,
-        loss_smooth=0.05,
-        loss_card=0.5,
-        loss_len=1.0,
-        loss_dir=0.5,
+        loss_bbox=0.0,
+        loss_bbox_giou=0.0,
+        loss_smooth=0.0,
+        loss_card=0.0,
+        loss_len=0.0,
+        loss_dir=0.0, # 0.005
         aux_weight=0.5,
         # optimizer / training
-        n_epochs=1,  # 300, 500, 3000
+        n_epochs=2000,  # 300, 500, 3000
         batch_size=256,  # 4x256=1024 (dino256), 5x256=1280 (dino224)
         num_workers=23,  # 17
         max_lr=1e-4,  # 3e-5, 1e-4, # 3e-4,
         weight_decay=1e-2,
         disable_tqdm=True,
-        save_every=3000,
+        save_every=2000,
         seed=42,
         # data splits (train/val, optional)
         save_splits=True,
@@ -1723,7 +1772,7 @@ if __name__ == "__main__":
         resume_ckpt=None,
         # inference
         infer_ckpt=Path(
-            "/home/fatemeh/Downloads/hedge/results/training/detr_polyline_12.pt"
+            "/home/fatemeh/Downloads/hedge/results/training/best_detr_polyline_18.pt"
         ),
         infer_split_file=Path(
             "/home/fatemeh/Downloads/hedge/results/test_256_dino256/val.txt"
