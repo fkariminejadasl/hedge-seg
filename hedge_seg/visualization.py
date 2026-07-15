@@ -263,6 +263,7 @@ def show_polyline_grid(
                 ax.plot(
                     polyline[:, 0],
                     polyline[:, 1],
+                    "o-",
                     linewidth=linewidth,
                 )
 
@@ -380,7 +381,7 @@ for seed in [42, 123, 456]:
         title="Inference",
     )
 
-# visualize a grid of polylines
+# visualize a grid of polylines from data generated from scripts/train_detr_maptr_polyline.py
 show_polyline_grid(
     image_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/images",
     polyline_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/inference/polylines",
@@ -390,5 +391,22 @@ show_polyline_grid(
     image_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/images",
     polyline_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/labels_processed",
     title="GT",
+)
+
+# visualize a grid of polylines from data generated from scripts/train_detr_unet_polyline.py
+show_polyline_grid(
+    image_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2/images",
+    polyline_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2_detr/polylines",
+    title="GT",
+)
+show_polyline_grid(
+    image_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2/images",
+    polyline_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2_detr/inference_final_unet2/polylines",
+    title="Inference (final epoch-2000 ckpt, unet2)",
+)
+show_polyline_grid(
+    image_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2/images",
+    polyline_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2_detr/inference_final_unet3/polylines",
+    title="Inference (final epoch-2000 ckpt, unet3)",
 )
 """
