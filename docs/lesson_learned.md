@@ -1,6 +1,6 @@
 ## MapTR lessons
 
-BEV resolution: MapTR-tiny uses a 30 cm BEV cell size over a (30 x 60) m area, giving a (100 x 200) BEV grid (`projects/configs/maptr/maptr_tiny_r50_24e_t4.py`). MapTR-nano uses 75 cm cells, giving a (40 x 80) grid. 
+BEV resolution: MapTR-tiny uses a 30 cm BEV cell size over a (30 x 60) m area, giving a (100 x 200) BEV grid (`projects/configs/maptr/maptr_tiny_r50_24e.py`). MapTR-nano uses 75 cm cells, giving a (40 x 80) grid. 
 
 The decoder uses self-attention among hierarchical instance and point queries, and deformable cross-attention from these queries to the BEV features.
 
@@ -105,5 +105,31 @@ zigzag, and any early one clears up.
 So the length loss idea is not the cause. The early zigzag is just the starting
 state before the order is learned. A zigzag only becomes a real problem when a loss that
 does not care about point order is strong enough to keep it.
+
+## Why ordered L1 is preferable to a tolerance loss
+
+With approximately 100,000 polylines whose ground-truth noise is mostly unbiased, L1 regression learns the conditional median. Random annotation errors therefore tend to average out, and the model may predict the true visible hedge location more accurately than some individual labels.
+
+A tolerance band, where the loss becomes zero within ±ε, does not correct a systematic offset in the ground truth. It only declares a range of positions acceptable. It also removes the gradient near the target, exactly where the model is refining point placement and point ordering. Since ordered point loss is the main signal that teaches each predicted point its correct position in the sequence, weakening it may leave small zigzags, swapped points, or imprecise geometry.
+
+Therefore, keep the standard ordered L1 loss for training. During inference and evaluation, compare predictions using buffered precision and recall at several tolerances, such as 1 m, 5 m, 10 m, and 15 m. This allows the evaluation to account for annotation uncertainty without weakening the training signal.
+
+## TODOs
+
+Phase A — data + split, one batch of small changes:
+
+Converter: open closed rings, raise min_length_px to ~40 px (10 m).
+Spatial split script from center_world (block split + drop residual overlaps + KDTree verification).
+Training script: accept explicit split files instead of the internal random split.
+Convert dataset3 (30k), spot-check ~20 overlays.
+Phase B — baseline on a ~5k spatially-blocked subset of dataset3 (frozen backbone, augment on, scheduler enabled, eval_every=5), plus the buffered precision/recall metric so results are comparable to the YOLO-seg result (80% precision, 70% recall).
+
+Phase C — decoupled self-attention as a clean A/B while the baseline trains (regression-tested with the one-image overfit).
+
+Phase D — results-driven: full 30k run, backbone unfreezing with low lr, and tolerance-loss/border-filtering only if the error analysis points at them.
+
+For the baseline, use a subset of dataset3 with the blocked split rather than dataset2: it is consistent with the eventual 30k run, and the backbone was trained on dataset2-derived data, so dataset2 val images also leak through the frozen backbone features. (Dataset3 likely overlaps dataset2 geographically too, but that is a second-order effect.)
+
+Note: the spatial split will make the first val numbers look worse than a random split would have. That is expected; they are the real baseline to improve from.
 
 
