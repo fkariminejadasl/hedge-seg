@@ -1,4 +1,15 @@
-# Why extra losses cause a zigzag (and why only poly + class overfits)
+## MapTR lessons
+
+BEV resolution: MapTR-tiny uses a 30 cm BEV cell size over a (30 x 60) m area, giving a (100 x 200) BEV grid (`projects/configs/maptr/maptr_tiny_r50_24e_t4.py`). MapTR-nano uses 75 cm cells, giving a (40 x 80) grid. 
+
+The decoder uses self-attention among hierarchical instance and point queries, and deformable cross-attention from these queries to the BEV features.
+
+A coarse BEV token may summarize several nearby polylines. The important factor is the spatial granularity of the BEV features. If downsampling removes the polylines’ relative positions, and that information is not retained in the feature channels, the decoder cannot reliably separate or localize them.
+
+Having more polylines than BEV tokens is not inherently a problem because there is no one-token-per-polyline assignment. Each hierarchical point query can sample multiple BEV locations, and multiple queries can use overlapping BEV features. The polylines remain distinguishable only if those features preserve enough spatial information about them.
+
+
+## Why extra losses cause a zigzag (and why only poly + class overfits)
 
 The problem: the model predicts 20 points per line, but the points come out in the
 wrong order, so the line looks like a zigzag around the right place.
