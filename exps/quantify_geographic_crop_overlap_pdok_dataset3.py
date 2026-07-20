@@ -1,69 +1,40 @@
-import glob
-import json
-
-import numpy as np
-from scipy.spatial import cKDTree
-
-files = sorted(
-    glob.glob("/home/fatemeh/Downloads/hedge/results/pdok_dataset3/labels/*.json")
-)
-centers = np.array([json.load(open(f))["center_world"] for f in files])
-print(f"{len(centers)} crops")
-
-tree = cKDTree(centers)
-# two 250m crops overlap iff Chebyshev distance between centers < 250
-pairs = tree.query_pairs(r=250.0, p=np.inf)
-deg = np.zeros(len(centers), int)
-for i, j in pairs:
-    deg[i] += 1
-    deg[j] += 1
-print(
-    f"crops overlapping at least one other crop: {(deg > 0).sum()} ({(deg > 0).mean() * 100:.1f}%)"
-)
-print(f"mean overlapping neighbors per crop: {deg.mean():.1f}, max: {deg.max()}")
-
-# simulate a random 80/20 split: fraction of val crops overlapping a train crop
-rng = np.random.default_rng(42)
-perm = rng.permutation(len(centers))
-val = set(perm[int(0.8 * len(centers)) :])
-leak = 0
-adj = {}
-for i, j in pairs:
-    adj.setdefault(i, []).append(j)
-    adj.setdefault(j, []).append(i)
-for v in val:
-    if any(
-        n not in val for n in adj.get(v, [])
-    ):  # means the neighbor belongs to training
-        leak += 1
-print(
-    f"random 80/20 split: {leak}/{len(val)} val crops ({leak / len(val) * 100:.1f}%) overlap a training crop"
-)
-
-
 """
-# independently verify zero val-train overlap
-import json, glob
+Quantify geographic crop overlap in pdok_dataset3 and verify the spatial
+train/val split produced by scripts/data/convert_pdok_polylines_to_detr_polyline.py
+leaves zero overlap between splits.
+"""
+
 from pathlib import Path
-import numpy as np
-from scipy.spatial import cKDTree
 
-labels = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset3/labels")
-out = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/polylines")
-val_stems = {p.stem for p in (out / "val").glob("*.npz")}
-train_stems = {p.stem for p in (out / "train").glob("*.npz")}
-assert not (val_stems & train_stems), "stem in both splits!"
+from hedge_seg.utils import geographic_overlap_stats, verify_no_split_overlap
 
-stems, centers = [], []
-for f in sorted(labels.glob("pos_*.json")):
-    stems.append(f.stem)
-    centers.append(json.load(open(f))["center_world"])
-centers = np.asarray(centers)
-is_val = np.array([s in val_stems for s in stems])
-assert is_val.sum() == len(val_stems) and (~is_val).sum() == len(train_stems)
+labels_dir = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset3/labels")
+out_root = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines")
 
-tree = cKDTree(centers)
-pairs = tree.query_pairs(r=250.0, p=np.inf, output_type="ndarray")
-cross = (is_val[pairs[:, 0]] != is_val[pairs[:, 1]]).sum()
-print(f"independent check: {len(pairs)} overlapping pairs total, {cross} val-train pairs (must be 0)")
-"""
+stats = geographic_overlap_stats(labels_dir, val_fraction=0.2, seed=42)
+print(f"{stats['n_crops']} crops, chip size {stats['chip_m']:.0f}m")
+print(
+    f"crops overlapping at least one other crop: "
+    f"{stats['frac_crops_with_overlap'] * 100:.1f}%"
+)
+print(
+    f"mean overlapping neighbors per crop: {stats['mean_neighbors']:.1f}, "
+    f"max: {stats['max_neighbors']}"
+)
+print(
+    f"naive random 80/20 split: "
+    f"{stats['naive_split_val_leak_frac'] * 100:.1f}% of val crops "
+    f"overlap a training crop"
+)
+
+# Independently verify the actual spatial split has zero leakage (recomputes
+# overlap from labels_dir's center_world, not from the split code itself).
+check = verify_no_split_overlap(
+    labels_dir, out_root / "polylines" / "train", out_root / "polylines" / "val"
+)
+print(
+    f"spatial split: train={check['n_train']}, val={check['n_val']}, "
+    f"{check['n_overlapping_pairs']} overlapping pairs total, "
+    f"{check['n_val_train_overlap_pairs']} val-train pairs (must be 0)"
+)
+assert check["n_val_train_overlap_pairs"] == 0

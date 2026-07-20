@@ -114,22 +114,61 @@ A tolerance band, where the loss becomes zero within ±ε, does not correct a sy
 
 Therefore, keep the standard ordered L1 loss for training. During inference and evaluation, compare predictions using buffered precision and recall at several tolerances, such as 1 m, 5 m, 10 m, and 15 m. This allows the evaluation to account for annotation uncertainty without weakening the training signal.
 
-## TODOs
+## A closed ring can have a near-duplicate point right after the start too
 
-Phase A — data + split, one batch of small changes:
+Opening a closed ring by dropping only the last point assumes the ring is
+otherwise clean. In pdok_dataset3, 14 of 302 closed rings (4.6%) also have a
+near-duplicate point right after the start (or before the end), e.g.
+`[p0, p0+eps, ..., pN-eps, p0]`. Dropping only the last point still leaves a
+near-zero-length first segment, which behaves like the box/length-loss
+failure mode: a degenerate segment with an almost-undefined direction.
 
-Converter: open closed rings, raise min_length_px to ~40 px (10 m).
-Spatial split script from center_world (block split + drop residual overlaps + KDTree verification).
-Training script: accept explicit split files instead of the internal random split.
-Convert dataset3 (30k), spot-check ~20 overlays.
-Phase B — baseline on a ~5k spatially-blocked subset of dataset3 (frozen backbone, augment on, scheduler enabled, eval_every=5), plus the buffered precision/recall metric so results are comparable to the YOLO-seg result (80% precision, 70% recall).
+Fix: collapse consecutive near-duplicate points (within closed_eps_px) before
+checking whether the ring is closed, then drop the last point
+(`open_closed_ring` in `scripts/data/convert_pdok_polylines_to_detr_polyline.py`).
+Verified on the full dataset: 0 rings left with a near-zero segment after the
+fix, versus 12 before.
 
-Phase C — decoupled self-attention as a clean A/B while the baseline trains (regression-tested with the one-image overfit).
+## Done
 
-Phase D — results-driven: full 30k run, backbone unfreezing with low lr, and tolerance-loss/border-filtering only if the error analysis points at them.
+Phase A — data + split:
 
-For the baseline, use a subset of dataset3 with the blocked split rather than dataset2: it is consistent with the eventual 30k run, and the backbone was trained on dataset2-derived data, so dataset2 val images also leak through the frozen backbone features. (Dataset3 likely overlaps dataset2 geographically too, but that is a second-order effect.)
+- Converter opens closed rings (with the near-duplicate-point fix above) and
+  raises min_length_px to 40 px (10 m).
+- Geographic train/val split from center_world: crops grouped into 5 km
+  blocks, blocks hashed into train/val, connected components of overlapping
+  crops assigned as a whole, KDTree-verified zero overlap. Rationale for
+  needing this: pdok_dataset3 crops are sampled per polyline, so 72.6% of
+  crops overlap at least one other crop, and a naive random 80/20 split lets
+  68.5% of val crops overlap a training crop (`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`).
+- Training script reads train/val from the split directories instead of an
+  internal random split.
+- Converted dataset3 (30k images): train=24,253, val=5,747 (19.2%),
+  103,434 polylines kept, 3,378 dropped as short, 302 rings opened, spot
+  checked via 20 GT overlays. Stats reproducible with
+  `exps/dataset_stats.py` and `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`.
 
-Note: the spatial split will make the first val numbers look worse than a random split would have. That is expected; they are the real baseline to improve from.
+## TODO
+
+Phase B — baseline on a ~5k spatially-blocked subset of dataset3's train
+split, evaluated on the full val split (frozen backbone, augment on,
+scheduler enabled, eval_every=5), plus the buffered precision/recall metric
+so results are comparable to the YOLO-seg result (80% precision, 70% recall).
+
+For the baseline, use a subset of dataset3 with the blocked split rather than
+dataset2: it is consistent with the eventual 30k run, and the backbone was
+trained on dataset2-derived data, so dataset2 val images also leak through
+the frozen backbone features. (Dataset3 likely overlaps dataset2
+geographically too, but that is a second-order effect.)
+
+Note: the spatial split will make the first val numbers look worse than a
+random split would have. That is expected; they are the real baseline to
+improve from.
+
+Phase C — decoupled self-attention as a clean A/B while the baseline trains
+(regression-tested with the one-image overfit).
+
+Phase D — results-driven: full 30k run, backbone unfreezing with low lr, and
+tolerance-loss/border-filtering only if the error analysis points at them.
 
 

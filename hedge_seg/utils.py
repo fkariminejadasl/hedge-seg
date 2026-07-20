@@ -1,10 +1,15 @@
 import json
+import math
+from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import rasterio
 from rasterio.features import rasterize
 from rasterio.windows import from_bounds
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
+from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 
@@ -78,6 +83,136 @@ def get_closed_polylines(json_dir):
         if closed_polylines:
             closed_polylines_dic[json_path.stem] = closed_polylines
     return closed_polylines_dic
+
+
+def iter_polylines_from_json_dir(json_dir):
+    """Yield (stem, polyline) for every polyline in every pos_*.json label file."""
+    for p in sorted(Path(json_dir).glob("pos_*.json")):
+        data = json.loads(p.read_text(encoding="utf-8"))
+        for line in data.get("polylines_px", []) or []:
+            yield p.stem, line
+
+
+def iter_polylines_from_npz_dir(npz_dir):
+    """Yield (stem, polyline) for every polyline in every *.npz polyline file
+    (as written by scripts/data/convert_pdok_polylines_to_detr_polyline.py)."""
+    for p in sorted(Path(npz_dir).glob("*.npz")):
+        d = np.load(p)
+        for line in d["polylines"]:
+            yield p.stem, line
+
+
+def closed_ring_ratio(polyline_iter, gap_eps_px=2.0):
+    """
+    Fraction of polylines that are closed rings: first and last point within
+    gap_eps_px. Polylines with fewer than 3 points are not counted (a 2-point
+    line cannot meaningfully be a ring).
+    """
+    n_total = 0
+    n_closed = 0
+    for _, line in polyline_iter:
+        pts = np.asarray(line, dtype=float)
+        if pts.shape[0] < 3:
+            continue
+        n_total += 1
+        gap = math.hypot(pts[-1, 0] - pts[0, 0], pts[-1, 1] - pts[0, 1])
+        if gap <= gap_eps_px:
+            n_closed += 1
+    ratio = n_closed / n_total if n_total else 0.0
+    return n_closed, n_total, ratio
+
+
+def short_polyline_ratio(polyline_iter, min_length_px=40.0):
+    """Fraction of polylines shorter (by arc length) than min_length_px."""
+    n_total = 0
+    n_short = 0
+    for _, line in polyline_iter:
+        pts = np.asarray(line, dtype=float)
+        n_total += 1
+        length = (
+            float(np.linalg.norm(np.diff(pts, axis=0), axis=1).sum())
+            if pts.shape[0] >= 2
+            else 0.0
+        )
+        if length < min_length_px:
+            n_short += 1
+    ratio = n_short / n_total if n_total else 0.0
+    return n_short, n_total, ratio
+
+
+def _load_crop_centers(labels_dir):
+    json_files = sorted(Path(labels_dir).glob("pos_*.json"))
+    centers, chip_m = [], 0.0
+    for f in json_files:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        centers.append(data["center_world"])
+        chip_m = max(chip_m, float(data["chip_size_m"]))
+    return json_files, np.asarray(centers, dtype=np.float64), chip_m
+
+
+def geographic_overlap_stats(labels_dir, val_fraction=0.2, seed=42):
+    """
+    Quantify how much geographic crop overlap exists in a raw label directory
+    (center_world in each pos_*.json), and how much of it would leak into a
+    naive random train/val split. Two crops overlap iff the Chebyshev distance
+    between their centers is below chip_size_m.
+    """
+    json_files, centers, chip_m = _load_crop_centers(labels_dir)
+    n = len(json_files)
+
+    tree = cKDTree(centers)
+    pairs = tree.query_pairs(r=chip_m, p=np.inf, output_type="ndarray")
+    deg = np.zeros(n, dtype=int)
+    for i, j in pairs:
+        deg[i] += 1
+        deg[j] += 1
+
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(n)
+    val = set(perm[int((1 - val_fraction) * n) :].tolist())
+    adj = {}
+    for i, j in pairs:
+        adj.setdefault(i, []).append(j)
+        adj.setdefault(j, []).append(i)
+    leak = sum(1 for v in val if any(nb not in val for nb in adj.get(v, [])))
+
+    return {
+        "n_crops": n,
+        "chip_m": chip_m,
+        "n_overlapping_pairs": len(pairs),
+        "frac_crops_with_overlap": float((deg > 0).mean()) if n else 0.0,
+        "mean_neighbors": float(deg.mean()) if n else 0.0,
+        "max_neighbors": int(deg.max()) if n else 0,
+        "naive_split_val_leak_frac": leak / len(val) if val else 0.0,
+    }
+
+
+def verify_no_split_overlap(labels_dir, train_npz_dir, val_npz_dir):
+    """
+    Independently verify a geographic train/val split: recompute crop overlap
+    from the raw label directory's center_world (not from the split code
+    itself) and check that no val crop overlaps a train crop.
+    """
+    val_stems = {p.stem for p in Path(val_npz_dir).glob("*.npz")}
+    train_stems = {p.stem for p in Path(train_npz_dir).glob("*.npz")}
+    assert not (val_stems & train_stems), "stem present in both splits"
+
+    json_files, centers, chip_m = _load_crop_centers(labels_dir)
+    is_val = np.array([f.stem in val_stems for f in json_files])
+    assert is_val.sum() == len(val_stems)
+    assert (~is_val).sum() == len(train_stems)
+
+    tree = cKDTree(centers)
+    pairs = tree.query_pairs(r=chip_m, p=np.inf, output_type="ndarray")
+    n_cross = (
+        int((is_val[pairs[:, 0]] != is_val[pairs[:, 1]]).sum()) if len(pairs) else 0
+    )
+    return {
+        "n_train": int((~is_val).sum()),
+        "n_val": int(is_val.sum()),
+        "n_overlapping_pairs": len(pairs),
+        "n_val_train_overlap_pairs": n_cross,
+    }
 
 
 def get_polyline_length(xs, ys):

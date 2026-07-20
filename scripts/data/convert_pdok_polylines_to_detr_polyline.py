@@ -16,8 +16,9 @@ no val crop overlaps a train crop. Optionally, val also avoids areas used by ano
 dataset (for example the semseg backbone training data), via avoid_label_dirs.
 
 Label cleaning:
-- closed rings (first and last point within closed_eps_px) are opened by
-  removing the last point, so the forward/reverse ordered L1 loss applies
+- closed rings (first and last point within closed_eps_px, after collapsing
+  any near-duplicate consecutive points) are opened by dropping the last
+  point, so the forward/reverse ordered L1 loss applies
 - polylines shorter than min_length_px (after opening) are dropped
 
 Input dataset layout (from build_pdok_wms_dataset.py):
@@ -80,16 +81,35 @@ def polyline_length_px(points) -> float:
     return float(np.linalg.norm(np.diff(pts, axis=0), axis=1).sum())
 
 
+def _dedupe_consecutive(points: list, eps_px: float) -> list:
+    """Collapse consecutive points closer than eps_px to the first of the pair."""
+    out = [points[0]]
+    for p in points[1:]:
+        if math.hypot(p[0] - out[-1][0], p[1] - out[-1][1]) > eps_px:
+            out.append(p)
+    return out
+
+
 def open_closed_ring(points: list, closed_eps_px: float) -> Tuple[list, bool]:
     """
     If first and last point are within closed_eps_px, drop the last point so
     the polyline becomes an open chain (the fwd/rev ordered L1 loss assumes
     open chains; a ring would punish a correct shape drawn with another cut).
+
+    Some rings have a near-duplicate point right after the start (or before
+    the end) in addition to the closure itself, e.g. [p0, p0+eps, ..., pN-eps,
+    p0]: dropping only the last point would still leave a near-zero-length
+    first segment. Consecutive near-duplicates are collapsed first so the
+    closure check and the cut both operate on the cleaned-up ring.
     """
-    if len(points) >= 3:
-        gap = math.hypot(points[-1][0] - points[0][0], points[-1][1] - points[0][1])
-        if gap <= closed_eps_px:
-            return points[:-1], True
+    if len(points) < 3:
+        return points, False
+    points = _dedupe_consecutive(points, closed_eps_px)
+    if len(points) < 3:
+        return points, False
+    gap = math.hypot(points[-1][0] - points[0][0], points[-1][1] - points[0][1])
+    if gap <= closed_eps_px:
+        return points[:-1], True
     return points, False
 
 
