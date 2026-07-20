@@ -15,7 +15,7 @@ MapTR-style head (was: DINO-style flat polyline queries + diffusion refinement):
   used. When length/direction are enabled, the forward/reverse GT orientation
   is chosen by the same ordered-L1 criterion as the polyline loss.
 
-UNet-ResNet18 image backbone (was: precomputed DINOv3 embeddings of LiDAR crops), 
+UNet-ResNet18 image backbone (was: precomputed DINOv3 embeddings of LiDAR crops),
 similar code as train_detr_maptr_polyline.py with these changes:
 - Backbone on high-resolution PDOK aerial images (25 cm/px, 1000 x 1000),
   initialized from the train_semseg_unet_resnet18.py semseg checkpoint,
@@ -1098,7 +1098,9 @@ class DetrPolylineFromImage(nn.Module):
     stride; the token grid is then (pad_to/stride, pad_to/stride).
     """
 
-    def __init__(self, backbone: ResNet18UNetFeatures, detr: DetrPolylineFromEmbeddings):
+    def __init__(
+        self, backbone: ResNet18UNetFeatures, detr: DetrPolylineFromEmbeddings
+    ):
         super().__init__()
         self.backbone = backbone
         self.detr = detr
@@ -1108,9 +1110,10 @@ class DetrPolylineFromImage(nn.Module):
     ) -> Dict[str, torch.Tensor]:
         feat = self.backbone(images)  # (B,C,h,w)
         B, C, h, w = feat.shape
-        assert (h, w) == (self.detr.grid_h, self.detr.grid_w), (
-            f"Feature grid {(h, w)} != detr grid {(self.detr.grid_h, self.detr.grid_w)}"
-        )
+        assert (h, w) == (
+            self.detr.grid_h,
+            self.detr.grid_w,
+        ), f"Feature grid {(h, w)} != detr grid {(self.detr.grid_h, self.detr.grid_w)}"
         tokens = feat.flatten(2).transpose(1, 2)  # (B,h*w,C)
         return self.detr(tokens, return_features=return_features)
 
@@ -1175,10 +1178,7 @@ class HungarianMatcherPolyline(nn.Module):
             cost_rev = torch.cdist(out_flat, tgt_rev, p=1) / float(2 * K)
             cost_poly = torch.minimum(cost_fwd, cost_rev)
 
-            C = (
-                self.cost.class_cost * cost_class
-                + self.cost.poly_cost * cost_poly
-            )
+            C = self.cost.class_cost * cost_class + self.cost.poly_cost * cost_poly
 
             if self.cost.bbox_cost > 0 or self.cost.bbox_giou_cost > 0:
                 tgt_bbox_xyxy = polyline_to_bbox_xyxy(tgt_poly)
@@ -1271,9 +1271,7 @@ class DetrPolylineCriterion(nn.Module):
         loss_ce = self.loss_labels(outputs, targets, indices)
         loss_poly = self.loss_polylines(outputs, targets, indices)
         loss_bbox = (
-            self.loss_boxes(outputs, targets, indices)
-            if self.loss_bbox_w > 0
-            else zero
+            self.loss_boxes(outputs, targets, indices) if self.loss_bbox_w > 0 else zero
         )
         loss_giou = (
             self.loss_bbox_giou(outputs, targets, indices)
@@ -1448,19 +1446,19 @@ class DetrPolylineCriterion(nn.Module):
             if len(src_idx) == 0:
                 continue
 
-            s = pred_poly[b, src_idx]                  # (M, K, 2)
-            t = targets[b]["polylines"][tgt_idx]       # (M, K, 2)
-            t_rev = torch.flip(t, dims=[1])            # (M, K, 2)
+            s = pred_poly[b, src_idx]  # (M, K, 2)
+            t = targets[b]["polylines"][tgt_idx]  # (M, K, 2)
+            t_rev = torch.flip(t, dims=[1])  # (M, K, 2)
 
             # Choose orientation using the same logic as loss_polylines.
-            l1_fwd = F.l1_loss(s, t, reduction="none").sum(dim=(1, 2))      # (M,)
+            l1_fwd = F.l1_loss(s, t, reduction="none").sum(dim=(1, 2))  # (M,)
             l1_rev = F.l1_loss(s, t_rev, reduction="none").sum(dim=(1, 2))  # (M,)
 
             use_rev = (l1_rev < l1_fwd).detach()  # boolean, no gradient needed
             t_ord = torch.where(use_rev[:, None, None], t_rev, t)
 
             # Segment vectors.
-            s_v = s[:, 1:] - s[:, :-1]          # (M, K-1, 2)
+            s_v = s[:, 1:] - s[:, :-1]  # (M, K-1, 2)
             t_v = t_ord[:, 1:] - t_ord[:, :-1]  # (M, K-1, 2)
 
             # Segment length loss.
@@ -1483,7 +1481,9 @@ class DetrPolylineCriterion(nn.Module):
             cosine = (s_dir * t_dir).sum(dim=-1).clamp(-1.0, 1.0)  # (M, K-1)
             dir_loss = 1.0 - cosine
 
-            dir_per_poly = (dir_loss * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(1.0)
+            dir_per_poly = (dir_loss * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(
+                1.0
+            )
             loss_dir = loss_dir + dir_per_poly.sum()
 
             n_matched += s.shape[0]
@@ -1607,33 +1607,6 @@ class DetrPolylineImageDataset(Dataset):
             "stem": npz_path.stem,
         }
         return x, target
-
-
-class DetrPolylineImageFileListDataset(DetrPolylineImageDataset):
-    def __init__(
-        self,
-        split_file: Path,
-        image_dir: Path,
-        num_points: int = 20,
-        pad_to: int = 1024,
-        augment: bool = False,
-    ):
-        split_file = Path(split_file)
-        self.image_dir = Path(image_dir)
-        self.files = []
-        with open(split_file) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                path = Path(line)
-                if not path.is_absolute():
-                    path = split_file.parent / path
-                self.files.append(path)
-
-        self.num_points = num_points
-        self.pad_to = pad_to
-        self.augment = augment
 
 
 def detr_polyline_collate_fn(batch):
@@ -1923,22 +1896,6 @@ def load_checkpoint_flexible(
     return ckpt
 
 
-def save_train_val_split_files(dataset, train_ds, val_ds, split_dir: Path):
-    split_dir.mkdir(parents=True, exist_ok=True)
-
-    split_paths = {
-        "train": [dataset.files[i] for i in train_ds.indices],
-        "val": [dataset.files[i] for i in val_ds.indices],
-    }
-
-    for split, files in split_paths.items():
-        with open(split_dir / f"{split}.txt", "w") as f:
-            for path in files:
-                f.write(str(path) + "\n")
-
-    print(f"Saved train/val split to {split_dir}")
-
-
 # -------------------------
 # Main
 # -------------------------
@@ -1985,7 +1942,7 @@ def main(cfg):
     if cfg.mode == "preview":
         preview_ds = DetrPolylineImageDataset(
             image_dir=cfg.image_dir,
-            polyline_dir=cfg.polyline_dir,
+            polyline_dir=cfg.train_polyline_dir,
             num_points=cfg.num_points,
             pad_to=cfg.pad_to,
             augment=cfg.augment,
@@ -1996,28 +1953,17 @@ def main(cfg):
     if cfg.mode == "infer":
         if cfg.infer_ckpt is None:
             raise ValueError("For mode='infer', cfg.infer_ckpt must be set.")
+        if cfg.infer_polyline_dir is None:
+            raise ValueError("For mode='infer', cfg.infer_polyline_dir must be set.")
         load_checkpoint_flexible(model, cfg.infer_ckpt, key_candidates=["model"])
 
-        if cfg.infer_split_file is not None:
-            infer_ds = DetrPolylineImageFileListDataset(
-                split_file=cfg.infer_split_file,
-                image_dir=cfg.image_dir,
-                num_points=cfg.num_points,
-                pad_to=cfg.pad_to,
-                augment=False,
-            )
-        elif cfg.infer_polyline_dir is not None:
-            infer_ds = DetrPolylineImageDataset(
-                image_dir=cfg.image_dir,
-                polyline_dir=cfg.infer_polyline_dir,
-                num_points=cfg.num_points,
-                pad_to=cfg.pad_to,
-                augment=False,
-            )
-        else:
-            raise ValueError(
-                "For mode='infer', set cfg.infer_split_file or cfg.infer_polyline_dir."
-            )
+        infer_ds = DetrPolylineImageDataset(
+            image_dir=cfg.image_dir,
+            polyline_dir=cfg.infer_polyline_dir,
+            num_points=cfg.num_points,
+            pad_to=cfg.pad_to,
+            augment=False,
+        )
 
         infer_loader = DataLoader(
             infer_ds,
@@ -2033,36 +1979,24 @@ def main(cfg):
     if cfg.mode != "train":
         raise ValueError("cfg.mode must be 'train', 'infer' or 'preview'.")
 
-    # Two dataset views over the same files: augmentation only on train.
-    dataset = DetrPolylineImageDataset(
+    # Geographically split train/val directories produced by
+    # scripts/data/convert_pdok_polylines_to_detr_polyline.py.
+    # Augmentation only on train.
+    train_ds = DetrPolylineImageDataset(
         image_dir=cfg.image_dir,
-        polyline_dir=cfg.polyline_dir,
+        polyline_dir=cfg.train_polyline_dir,
         num_points=cfg.num_points,
         pad_to=cfg.pad_to,
         augment=cfg.augment,
     )
-    dataset_plain = DetrPolylineImageDataset(
+    val_ds = DetrPolylineImageDataset(
         image_dir=cfg.image_dir,
-        polyline_dir=cfg.polyline_dir,
+        polyline_dir=cfg.val_polyline_dir,
         num_points=cfg.num_points,
         pad_to=cfg.pad_to,
         augment=False,
     )
-    n_train = int(0.8 * len(dataset))
-    perm = torch.randperm(
-        len(dataset), generator=torch.Generator().manual_seed(cfg.seed)
-    ).tolist()
-    train_ds = torch.utils.data.Subset(dataset, perm[:n_train])
-    val_ds = torch.utils.data.Subset(dataset_plain, perm[n_train:])
-    print(f"Dataset: total={len(dataset)}, train={len(train_ds)}, val={len(val_ds)}")
-
-    if cfg.save_splits:
-        split_dir = (
-            Path(cfg.split_dir)
-            if cfg.split_dir is not None
-            else cfg.save_path / "splits"
-        )
-        save_train_val_split_files(dataset, train_ds, val_ds, split_dir)
+    print(f"Dataset: train={len(train_ds)}, val={len(val_ds)}")
 
     # persistent_workers avoids respawning worker processes every epoch, which
     # dominates the epoch time for small datasets.
@@ -2132,9 +2066,7 @@ def main(cfg):
         )
         run_eval = (epoch % cfg.eval_every == 0) or (epoch == cfg.n_epochs)
         eval_losses = (
-            eval_one_epoch(eval_loader, model, criterion, device)
-            if run_eval
-            else None
+            eval_one_epoch(eval_loader, model, criterion, device) if run_eval else None
         )
 
         e_time = datetime.now().replace(microsecond=0)
@@ -2184,10 +2116,14 @@ if __name__ == "__main__":
         mode="infer",  # "train", "infer" or "preview"
         exp="detr_unet_polyline_3",
         save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
-        # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py)
-        image_dir=Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset2/images"),
-        polyline_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/pdok_dataset2_detr/polylines"
+        # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
+        # which writes geographically split polylines/{train,val} directories)
+        image_dir=Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset3/images"),
+        train_polyline_dir=Path(
+            "/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/polylines/train"
+        ),
+        val_polyline_dir=Path(
+            "/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/polylines/val"
         ),
         pad_to=1024,  # images zero-padded 1000 -> 1024 (divisible by 32)
         augment=False,  # flip/rot90 of image + polylines (train split only)
@@ -2221,7 +2157,7 @@ if __name__ == "__main__":
         loss_smooth=0.0,
         loss_card=0.0,
         loss_len=0.0,
-        loss_dir=0.0, # 0.005
+        loss_dir=0.0,  # 0.005
         aux_weight=0.5,
         # optimizer / training
         n_epochs=2000,
@@ -2231,28 +2167,24 @@ if __name__ == "__main__":
         weight_decay=1e-2,
         disable_tqdm=True,
         save_every=2000,
-        eval_every=1,  # evaluate every k epochs (best checkpoint only on eval epochs)
+        eval_every=5,  # evaluate every k epochs (best checkpoint only on eval epochs)
         seed=42,
-        # data splits (train/val, optional)
-        save_splits=True,
-        split_dir=Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset2_detr"),
         # checkpoints
         resume_ckpt=None,
         # preview
         preview_out_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/pdok_dataset2_detr/preview"
+            "/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/preview"
         ),
         preview_n=10,
         # inference
         infer_ckpt=Path(
             "/home/fatemeh/Downloads/hedge/results/training/detr_unet_polyline_2.pt"
         ),
-        infer_split_file=Path(
-            "/home/fatemeh/Downloads/hedge/results/pdok_dataset2_detr/train.txt"
+        infer_polyline_dir=Path(
+            "/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/polylines/val"
         ),
-        infer_polyline_dir=None,
         infer_out_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/pdok_dataset2_detr/inference"
+            "/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/inference"
         ),
         infer_score_thresh=0.5,
         infer_topk=60,

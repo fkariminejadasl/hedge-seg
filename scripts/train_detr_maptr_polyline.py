@@ -990,10 +990,7 @@ class HungarianMatcherPolyline(nn.Module):
             cost_rev = torch.cdist(out_flat, tgt_rev, p=1) / float(2 * K)
             cost_poly = torch.minimum(cost_fwd, cost_rev)
 
-            C = (
-                self.cost.class_cost * cost_class
-                + self.cost.poly_cost * cost_poly
-            )
+            C = self.cost.class_cost * cost_class + self.cost.poly_cost * cost_poly
 
             if self.cost.bbox_cost > 0 or self.cost.bbox_giou_cost > 0:
                 tgt_bbox_xyxy = polyline_to_bbox_xyxy(tgt_poly)
@@ -1086,9 +1083,7 @@ class DetrPolylineCriterion(nn.Module):
         loss_ce = self.loss_labels(outputs, targets, indices)
         loss_poly = self.loss_polylines(outputs, targets, indices)
         loss_bbox = (
-            self.loss_boxes(outputs, targets, indices)
-            if self.loss_bbox_w > 0
-            else zero
+            self.loss_boxes(outputs, targets, indices) if self.loss_bbox_w > 0 else zero
         )
         loss_giou = (
             self.loss_bbox_giou(outputs, targets, indices)
@@ -1263,19 +1258,19 @@ class DetrPolylineCriterion(nn.Module):
             if len(src_idx) == 0:
                 continue
 
-            s = pred_poly[b, src_idx]                  # (M, K, 2)
-            t = targets[b]["polylines"][tgt_idx]       # (M, K, 2)
-            t_rev = torch.flip(t, dims=[1])            # (M, K, 2)
+            s = pred_poly[b, src_idx]  # (M, K, 2)
+            t = targets[b]["polylines"][tgt_idx]  # (M, K, 2)
+            t_rev = torch.flip(t, dims=[1])  # (M, K, 2)
 
             # Choose orientation using the same logic as loss_polylines.
-            l1_fwd = F.l1_loss(s, t, reduction="none").sum(dim=(1, 2))      # (M,)
+            l1_fwd = F.l1_loss(s, t, reduction="none").sum(dim=(1, 2))  # (M,)
             l1_rev = F.l1_loss(s, t_rev, reduction="none").sum(dim=(1, 2))  # (M,)
 
             use_rev = (l1_rev < l1_fwd).detach()  # boolean, no gradient needed
             t_ord = torch.where(use_rev[:, None, None], t_rev, t)
 
             # Segment vectors.
-            s_v = s[:, 1:] - s[:, :-1]          # (M, K-1, 2)
+            s_v = s[:, 1:] - s[:, :-1]  # (M, K-1, 2)
             t_v = t_ord[:, 1:] - t_ord[:, :-1]  # (M, K-1, 2)
 
             # Segment length loss.
@@ -1298,7 +1293,9 @@ class DetrPolylineCriterion(nn.Module):
             cosine = (s_dir * t_dir).sum(dim=-1).clamp(-1.0, 1.0)  # (M, K-1)
             dir_loss = 1.0 - cosine
 
-            dir_per_poly = (dir_loss * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(1.0)
+            dir_per_poly = (dir_loss * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(
+                1.0
+            )
             loss_dir = loss_dir + dir_per_poly.sum()
 
             n_matched += s.shape[0]
@@ -1863,7 +1860,7 @@ if __name__ == "__main__":
         loss_smooth=0.0,
         loss_card=0.0,
         loss_len=0.0,
-        loss_dir=0.0, # 0.005
+        loss_dir=0.0,  # 0.005
         aux_weight=0.5,
         # optimizer / training
         n_epochs=2000,  # 300, 500, 3000
