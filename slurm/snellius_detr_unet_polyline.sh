@@ -41,7 +41,10 @@ conda activate hedge
 echo "activate my virtual env: $CONDA_DEFAULT_ENV"
 
 echo "start training"
-PYTHONPATH=$HOME/dev/hedge-seg python $script_name
+# python -u: without it stdout is block buffered (8 KB) because it goes to a
+# file, so the .out log lags tens of epochs behind the run while tensorboard
+# and checkpoints are current, which looks like a hung job.
+PYTHONPATH=$HOME/dev/hedge-seg python -u $script_name
 echo "end training"
 
 echo $(date)

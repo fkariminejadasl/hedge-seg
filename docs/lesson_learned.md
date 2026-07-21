@@ -192,6 +192,20 @@ Consequences:
   eval loader: 8 workers means 16 processes, which is right for the 18 CPUs
   that come with one A100.
 
+## A slurm log that stops updating is usually just buffering
+
+In the first cluster run the .out file stopped at "Epoch 005 starting" while
+nvtop showed the GPU busy, tensorboard showed 26 epochs, and best_1.pt was an
+hour newer than the log. Nothing was wrong: Python block buffers stdout (8 KB)
+when it is a file rather than a terminal, and one epoch prints about 330
+bytes, so roughly 25 epochs accumulate before each flush. Tensorboard is
+unaffected because SummaryWriter flushes on its own timer, and checkpoints are
+written directly.
+
+Fix: run the training script with `python -u` in the slurm script. Before
+concluding a cluster job is stuck, compare the log timestamp against the
+checkpoint mtime and the job state, not the log alone.
+
 ## Done
 
 Phase A — data + split:
