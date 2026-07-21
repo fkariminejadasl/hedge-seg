@@ -1998,7 +1998,20 @@ def main(cfg):
         pad_to=cfg.pad_to,
         augment=False,
     )
-    print(f"Dataset: train={len(train_ds)}, val={len(val_ds)}")
+
+    # Optional training subset (seeded), to run at a smaller scale before
+    # committing to the full train split. Validation always uses the full
+    # val split, so numbers stay comparable across subset sizes.
+    n_train_full = len(train_ds)
+    if cfg.n_train_subset is not None and cfg.n_train_subset < n_train_full:
+        idx = torch.randperm(
+            n_train_full, generator=torch.Generator().manual_seed(cfg.seed)
+        )[: cfg.n_train_subset].tolist()
+        train_ds = torch.utils.data.Subset(train_ds, idx)
+
+    print(
+        f"Dataset: train={len(train_ds)} (of {n_train_full}), val={len(val_ds)}"
+    )
 
     # persistent_workers avoids respawning worker processes every epoch, which
     # dominates the epoch time for small datasets.
@@ -2045,6 +2058,7 @@ def main(cfg):
     if cfg.resume_ckpt is not None:
         load_checkpoint_flexible(model, cfg.resume_ckpt, key_candidates=["model"])
 
+    cfg.save_path.mkdir(parents=True, exist_ok=True)
     tb_dir = cfg.save_path / f"tensorboard/{cfg.exp}"
     tb_dir.mkdir(parents=True, exist_ok=True)
     writer = tensorboard.SummaryWriter(tb_dir)
@@ -2107,7 +2121,7 @@ def main(cfg):
             print(f"Saved best: {best_val:.4f} at epoch {epoch}")
         if epoch % cfg.save_every == 0:
             torch.save(ckpt, cfg.save_path / f"{cfg.exp}_{epoch}.pt")
-        # scheduler.step()
+        scheduler.step()
 
     torch.save(ckpt, cfg.save_path / f"{cfg.exp}.pt")
     print(f"Saved final model: {best_val:.4f} at epoch {epoch}")
@@ -2115,16 +2129,17 @@ def main(cfg):
 
 if __name__ == "__main__":
     cfg = dict(
-        mode="infer",  # "train", "infer" or "preview"
-        exp="detr_unet_polyline_3",
-        save_path=EXP_ROOT,
+        mode="train",  # "train", "infer" or "preview"
+        exp="detr_unet_polyline_4",
+        save_path=EXP_ROOT / "detr_unet_polyline",
         # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
         # which writes geographically split polylines/{train,val} directories)
         image_dir=DATA_ROOT / "pdok_dataset3/images",
         train_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/train",
         val_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         pad_to=1024,  # images zero-padded 1000 -> 1024 (divisible by 32)
-        augment=False,  # flip/rot90 of image + polylines (train split only)
+        augment=True,  # flip/rot90 of image + polylines (train split only)
+        n_train_subset=5000,  # None = full train split (24k); val is always full
         # backbone
         backbone_ckpt=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
         feature_stage="up3",  # "up3": stride 16, 64x64 tokens; "enc4": stride 32, 32x32
@@ -2156,13 +2171,15 @@ if __name__ == "__main__":
         loss_dir=0.0,  # 0.005
         aux_weight=0.5,
         # optimizer / training
-        n_epochs=2000,
-        batch_size=4,  # images are 1024x1024; up3 gives 4096 tokens
-        num_workers=8,
+        # Set batch_size from exps/probe_batch_size.py on the target GPU, and
+        # num_workers from the CPUs per GPU (A100: 18, H100: 16).
+        n_epochs=150,
+        batch_size=16,  # images are 1024x1024; up3 gives 4096 tokens
+        num_workers=12,
         max_lr=1e-4,
         weight_decay=1e-2,
         disable_tqdm=True,
-        save_every=2000,
+        save_every=50,
         eval_every=5,  # evaluate every k epochs (best checkpoint only on eval epochs)
         seed=42,
         # checkpoints
