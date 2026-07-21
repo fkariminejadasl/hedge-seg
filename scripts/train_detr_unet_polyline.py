@@ -1904,6 +1904,10 @@ def load_checkpoint_flexible(
 
 def main(cfg):
     print_roots()
+    # Same layout as train_semseg_unet_resnet18.py: save_path/<exp>/best_<exp>.pt,
+    # with <exp>.sh and <exp>_<jobid>.out next to save_path on the cluster.
+    cfg.save_path = cfg.save_path / f"{cfg.exp}"
+    cfg.save_path.mkdir(parents=True, exist_ok=True)
     set_seed(cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -2009,9 +2013,7 @@ def main(cfg):
         )[: cfg.n_train_subset].tolist()
         train_ds = torch.utils.data.Subset(train_ds, idx)
 
-    print(
-        f"Dataset: train={len(train_ds)} (of {n_train_full}), val={len(val_ds)}"
-    )
+    print(f"Dataset: train={len(train_ds)} (of {n_train_full}), val={len(val_ds)}")
 
     # persistent_workers avoids respawning worker processes every epoch, which
     # dominates the epoch time for small datasets.
@@ -2058,8 +2060,7 @@ def main(cfg):
     if cfg.resume_ckpt is not None:
         load_checkpoint_flexible(model, cfg.resume_ckpt, key_candidates=["model"])
 
-    cfg.save_path.mkdir(parents=True, exist_ok=True)
-    tb_dir = cfg.save_path / f"tensorboard/{cfg.exp}"
+    tb_dir = cfg.save_path / "tensorboard"
     tb_dir.mkdir(parents=True, exist_ok=True)
     writer = tensorboard.SummaryWriter(tb_dir)
     best_val = float("inf")
@@ -2130,7 +2131,7 @@ def main(cfg):
 if __name__ == "__main__":
     cfg = dict(
         mode="train",  # "train", "infer" or "preview"
-        exp="detr_unet_polyline_4",
+        exp="1",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
         save_path=EXP_ROOT / "detr_unet_polyline",
         # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
         # which writes geographically split polylines/{train,val} directories)
@@ -2171,11 +2172,15 @@ if __name__ == "__main__":
         loss_dir=0.0,  # 0.005
         aux_weight=0.5,
         # optimizer / training
-        # Set batch_size from exps/probe_batch_size.py on the target GPU, and
-        # num_workers from the CPUs per GPU (A100: 18, H100: 16).
+        # batch_size from exps/probe_batch_size.py on an A100-40GB: 16 -> 5.8 GB,
+        # 64 -> 22.7 GB, and throughput is flat past 16 (0.028 vs 0.026 s/image),
+        # so a bigger batch only costs optimizer steps per epoch. 16 also matches
+        # the DETR batch size that max_lr=1e-4 is tuned for.
+        # num_workers: train and eval loaders each keep their own persistent
+        # workers, so 8 means 16 processes for the 18 CPUs of one A100.
         n_epochs=150,
         batch_size=16,  # images are 1024x1024; up3 gives 4096 tokens
-        num_workers=12,
+        num_workers=8,
         max_lr=1e-4,
         weight_decay=1e-2,
         disable_tqdm=True,
@@ -2188,7 +2193,7 @@ if __name__ == "__main__":
         preview_out_dir=DATA_ROOT / "pdok_dataset3_polylines/preview",
         preview_n=10,
         # inference
-        infer_ckpt=EXP_ROOT / "detr_unet_polyline_2.pt",
+        infer_ckpt=EXP_ROOT / "detr_unet_polyline/1/best_1.pt",
         infer_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         infer_out_dir=DATA_ROOT / "pdok_dataset3_polylines/inference",
         infer_score_thresh=0.5,

@@ -164,6 +164,34 @@ caught by `verify_no_split_overlap` in `exps/quantify_geographic_crop_overlap_pd
 which is a good argument for keeping such checks as asserts in the analysis
 scripts rather than as one-off manual checks.
 
+## The largest batch that fits is not the batch size to use
+
+Probed on an A100-40GB with `exps/probe_batch_size.py` (real train step:
+forward, loss, backward, optimizer, since backward dominates peak memory):
+
+| batch | peak GB | s/step | s/image |
+|---|---|---|---|
+| 4 | 1.55 | 0.123 | 0.0307 |
+| 16 | 5.76 | 0.445 | 0.0278 |
+| 32 | 11.41 | 0.861 | 0.0269 |
+| 64 | 22.67 | 1.678 | 0.0262 |
+
+Memory is linear in batch size (about 0.354 GB per 1024x1024 image), so 40 GB
+would fit roughly 100 images. But time per image is already flat at batch 16:
+going from 16 to 64 saves 6% per image while cutting optimizer steps per epoch
+by 4 (313 to 78 for a 5,000 image epoch). The GPU is saturated well before it
+is full, so the extra memory buys steps, not speed.
+
+Consequences:
+- Pick the batch size where s/image stops improving, not the one that fills
+  the GPU. Here that is 16, which also matches the effective batch size DETR's
+  lr=1e-4 is tuned for.
+- Headroom left over is useful for other things: a larger model, a finer
+  feature stage (`up3` -> stride 8), or unfreezing the backbone.
+- num_workers has to account for persistent workers on both the train and the
+  eval loader: 8 workers means 16 processes, which is right for the 18 CPUs
+  that come with one A100.
+
 ## Done
 
 Phase A — data + split:

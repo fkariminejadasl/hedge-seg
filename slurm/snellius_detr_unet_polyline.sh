@@ -4,8 +4,10 @@
 #SBATCH --time=12:00:00
 #SBATCH -o /home/%u/exps/hedge/detr_unet_polyline/1_%j.out
 
-# Copy to $HOME/exps/hedge/detr_unet_polyline/<n>.sh, edit the -o line and the
-# exp name in the training script cfg, then: sbatch <n>.sh
+# Copy to $HOME/exps/hedge/detr_unet_polyline/<n>.sh, set the -o line and the
+# exp name in the training script cfg to the same <n>, then: sbatch <n>.sh
+# Outputs land in $HOME/exps/hedge/detr_unet_polyline/<n>/best_<n>.pt, next to
+# <n>.sh and <n>_<jobid>.out, the same layout as semseg_unet.
 #
 # A100: 4 GPUs / 72 CPUs per node -> 18 CPUs per GPU.
 # H100: 4 GPUs / 64 CPUs per node -> 16 CPUs per GPU (faster, longer queue).
