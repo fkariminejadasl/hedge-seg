@@ -55,6 +55,7 @@ from torch.utils import tensorboard
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+from hedge_seg.paths import CLUSTER_EXP_ROOT, DATA_ROOT, EXP_ROOT, print_roots
 from hedge_seg.training_utils import set_seed
 
 IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
@@ -1902,6 +1903,7 @@ def load_checkpoint_flexible(
 
 
 def main(cfg):
+    print_roots()
     set_seed(cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -2115,22 +2117,16 @@ if __name__ == "__main__":
     cfg = dict(
         mode="infer",  # "train", "infer" or "preview"
         exp="detr_unet_polyline_3",
-        save_path=Path("/home/fatemeh/Downloads/hedge/results/training"),
+        save_path=EXP_ROOT,
         # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
         # which writes geographically split polylines/{train,val} directories)
-        image_dir=Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset3/images"),
-        train_polyline_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/polylines/train"
-        ),
-        val_polyline_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/polylines/val"
-        ),
+        image_dir=DATA_ROOT / "pdok_dataset3/images",
+        train_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/train",
+        val_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         pad_to=1024,  # images zero-padded 1000 -> 1024 (divisible by 32)
         augment=False,  # flip/rot90 of image + polylines (train split only)
         # backbone
-        backbone_ckpt=Path(
-            "/home/fatemeh/Downloads/hedge/snellius/semseg_unet/4/best_4.pt"
-        ),
+        backbone_ckpt=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
         feature_stage="up3",  # "up3": stride 16, 64x64 tokens; "enc4": stride 32, 32x32
         freeze_backbone=True,
         num_points=20,
@@ -2172,20 +2168,12 @@ if __name__ == "__main__":
         # checkpoints
         resume_ckpt=None,
         # preview
-        preview_out_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/preview"
-        ),
+        preview_out_dir=DATA_ROOT / "pdok_dataset3_polylines/preview",
         preview_n=10,
         # inference
-        infer_ckpt=Path(
-            "/home/fatemeh/Downloads/hedge/results/training/detr_unet_polyline_2.pt"
-        ),
-        infer_polyline_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/polylines/val"
-        ),
-        infer_out_dir=Path(
-            "/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/inference"
-        ),
+        infer_ckpt=EXP_ROOT / "detr_unet_polyline_2.pt",
+        infer_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
+        infer_out_dir=DATA_ROOT / "pdok_dataset3_polylines/inference",
         infer_score_thresh=0.5,
         infer_topk=60,
     )

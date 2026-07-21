@@ -4,12 +4,11 @@ train/val split produced by scripts/data/convert_pdok_polylines_to_detr_polyline
 leaves zero overlap between splits.
 """
 
-from pathlib import Path
-
+from hedge_seg.paths import DATA_ROOT
 from hedge_seg.utils import geographic_overlap_stats, verify_no_split_overlap
 
-labels_dir = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset3/labels")
-out_root = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines")
+labels_dir = DATA_ROOT / "pdok_dataset3/labels"
+out_root = DATA_ROOT / "pdok_dataset3_polylines"
 
 stats = geographic_overlap_stats(labels_dir, val_fraction=0.2, seed=42)
 print(f"{stats['n_crops']} crops, chip size {stats['chip_m']:.0f}m")

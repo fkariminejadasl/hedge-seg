@@ -129,6 +129,41 @@ checking whether the ring is closed, then drop the last point
 Verified on the full dataset: 0 rings left with a near-zero segment after the
 fix, versus 12 before.
 
+## Why block_m = 5000 m for the geographic split
+
+The block size only has to satisfy two things: much larger than the 250 m
+crop, so blocks and overlap groups do not fight each other, and small enough
+that there are many blocks to hash, so the achieved val fraction lands near
+the target. At 30k crops spread over the Netherlands, 5 km blocks give 19.1%
+val against a 20% target, which is close enough. There is no optimum here; if
+the exact fraction ever matters, the fix is to retry seeds until the achieved
+fraction is within a tolerance, not to tune the block size.
+
+## Length filters must be checked on the stored polyline
+
+The converter first filters raw polylines by length, then resamples them to
+20 equidistant points. `resample_polyline_equidistant` rounds coordinates to
+0.1 px, so a polyline sitting right on the threshold (40.006 px) can end up a
+hair below it (39.9997 px) after resampling. Two polylines in pdok_dataset3
+did exactly this and were stored despite being under the threshold.
+
+Fix: re-check the length after resampling, since the resampled polyline is
+what training actually sees. Border clipping was verified not to change
+lengths (0 of 13,416 polylines), so the check after resampling is enough.
+
+## Regenerating a split must delete the old outputs
+
+The converter writes `polylines/{train,val}/*.npz`. Re-running it with
+different split settings (for example after enabling `avoid_label_dirs`) can
+move a crop from val to train, but the stale copy in the other directory
+survives, so the same image ends up in both splits. This is silent: 30,004
+files were written for 30,000 images, with 4 stems duplicated.
+
+Fix: delete existing NPZs in both split directories before writing. This was
+caught by `verify_no_split_overlap` in `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`,
+which is a good argument for keeping such checks as asserts in the analysis
+scripts rather than as one-off manual checks.
+
 ## Done
 
 Phase A — data + split:
@@ -143,10 +178,13 @@ Phase A — data + split:
   68.5% of val crops overlap a training crop (`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`).
 - Training script reads train/val from the split directories instead of an
   internal random split.
-- Converted dataset3 (30k images): train=24,253, val=5,747 (19.2%),
-  103,434 polylines kept, 3,378 dropped as short, 302 rings opened, spot
+- Converted dataset3 (30k images): train=24,257, val=5,743 (19.1%),
+  103,432 polylines kept, 3,380 dropped as short, 302 rings opened, spot
   checked via 20 GT overlays. Stats reproducible with
   `exps/dataset_stats.py` and `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`.
+- `hedge_seg/paths.py` resolves DATA_ROOT / EXP_ROOT / CLUSTER_EXP_ROOT from
+  a filesystem marker, so scripts no longer need path edits when moving
+  between the local machine and the cluster.
 
 ## TODO
 

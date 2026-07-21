@@ -68,6 +68,7 @@ from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
 from hedge_seg.label_postprocess import resample_polyline_equidistant
+from hedge_seg.paths import DATA_ROOT, print_roots
 
 
 def load_json(path: Path) -> dict:
@@ -137,6 +138,12 @@ def convert_label_file(
             n_skipped += 1
             continue
         resampled = resample_polyline_equidistant(line, num_points)
+        # Re-check on the resampled polyline: that is what training sees, and
+        # resampling rounds coordinates to 0.1 px, so a polyline sitting right
+        # on the threshold can end up a hair below it.
+        if polyline_length_px(resampled) < min_length_px:
+            n_skipped += 1
+            continue
         kept.append(resampled)
 
     if kept:
@@ -300,8 +307,14 @@ def convert_dataset(
         avoid_label_dirs=avoid_label_dirs,
     )
 
+    # Remove stale NPZs first: a re-run with different split settings can move
+    # a crop from val to train, and the leftover copy in the other directory
+    # would silently put the same image in both splits.
     for name in ["train", "val"]:
-        (out_root / "polylines" / name).mkdir(parents=True, exist_ok=True)
+        split_dir = out_root / "polylines" / name
+        split_dir.mkdir(parents=True, exist_ok=True)
+        for stale in split_dir.glob("*.npz"):
+            stale.unlink()
     overlay_dir = out_root / "overlays"
     if n_overlays > 0:
         overlay_dir.mkdir(parents=True, exist_ok=True)
@@ -365,9 +378,10 @@ def convert_dataset(
 
 
 def main() -> None:
+    print_roots()
     convert_dataset(
-        dataset_root=Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset2"),
-        out_root=Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset2_polylines"),
+        dataset_root=DATA_ROOT / "pdok_dataset3",
+        out_root=DATA_ROOT / "pdok_dataset3_polylines",
         num_points=20,
         class_id=0,
         # Drop polylines shorter than this (in pixels): 40 px = 10 m at 25 cm/px.
@@ -379,9 +393,8 @@ def main() -> None:
         val_fraction=0.2,
         seed=42,
         n_overlays=20,
-        # On the cluster, set this to [Path(".../pdok_dataset2/labels")] so val
-        # avoids the areas used to train the semseg backbone.
-        avoid_label_dirs=None,
+        # Keep val away from the areas used to train the semseg backbone.
+        avoid_label_dirs=[DATA_ROOT / "pdok_dataset2/labels"],
     )
 
 

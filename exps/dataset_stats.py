@@ -11,6 +11,7 @@ iter_polylines_from_npz_dir, closed_ring_ratio, short_polyline_ratio}.
 
 from pathlib import Path
 
+from hedge_seg.paths import DATA_ROOT
 from hedge_seg.utils import (
     closed_ring_ratio,
     iter_polylines_from_json_dir,
@@ -56,7 +57,7 @@ def report(dataset_root: Path, out_root: Path, min_length_px: float = 40.0):
 
 if __name__ == "__main__":
     report(
-        dataset_root=Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset3"),
-        out_root=Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines"),
+        dataset_root=DATA_ROOT / "pdok_dataset3",
+        out_root=DATA_ROOT / "pdok_dataset3_polylines",
         min_length_px=40.0,
     )
