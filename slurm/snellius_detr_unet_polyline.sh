@@ -3,6 +3,10 @@
 #SBATCH --partition=gpu_a100
 #SBATCH --time=12:00:00
 #SBATCH -o /home/%u/exps/hedge/detr_unet_polyline/1_%j.out
+# Slurm mails when the job ends or fails. This comes from the cluster, so it
+# arrives even if the laptop is off.
+##SBATCH --mail-type=END,FAIL
+##SBATCH --mail-user=fkariminejadasl@gmail.com
 
 # Copy to $HOME/exps/hedge/detr_unet_polyline/<n>.sh, set the -o line and the
 # exp name in the training script cfg to the same <n>, then: sbatch <n>.sh
