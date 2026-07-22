@@ -206,6 +206,30 @@ Fix: run the training script with `python -u` in the slurm script. Before
 concluding a cluster job is stuck, compare the log timestamp against the
 checkpoint mtime and the job state, not the log alone.
 
+## A frozen run with the GPU idle is a DataLoader worker hang
+
+Symptom: the log stops, but the main process spins at ~100% CPU while the GPU
+sits at 0%, and (in a laptop run) the machine still feels busy. This is not
+slow training, it is a hang. It froze the 5000-image laptop run at epoch 11,
+right after the first eval (eval was epoch 10).
+
+Cause: to load images fast, the DataLoader starts a few worker processes. There
+are different ways to start them: fork (old, simple) and forkserver (newer).
+Python 3.14 changed the default to forkserver, which deadlocks with persistent
+workers across the eval to train transition: after the eval epoch the workers
+respawn and the main process gets stuck coordinating with them.
+
+Fix: force the fork start method for the DataLoader
+(`multiprocessing_context="fork"`, done via `_mp_context` in
+`scripts/train_detr_unet_polyline.py`). fork is safe here because the workers do
+no CUDA work. The cluster was never affected (its Python defaults to fork, and
+the cluster run passed many eval transitions), but the fix protects both.
+
+How to tell a hang from slow training: check GPU utilization (nvtop), not just
+the log. 0% GPU with a busy CPU means a worker hang; a busy GPU means it is just
+slow. `scripts/smoke_test_train_detr_unet_polyline.py` reproduces the eval to
+train transitions quickly and fails if this regresses.
+
 ## Done
 
 Phase A — data + split:
