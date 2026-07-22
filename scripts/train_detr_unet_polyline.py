@@ -1616,6 +1616,17 @@ def detr_polyline_collate_fn(batch):
     return images, list(targets)
 
 
+def _mp_context(num_workers: int):
+    """
+    DataLoader worker start method. Python 3.14 defaults multiprocessing to
+    forkserver, which deadlocks with persistent DataLoader workers across the
+    eval->train transition (workers respawn, the main process spins at 100%
+    CPU with the GPU idle, and training hangs). fork is the traditional method
+    for DataLoader and is safe here because the workers do no CUDA work.
+    """
+    return "fork" if num_workers > 0 else None
+
+
 @torch.no_grad()
 def preview_dataset(dataset, out_dir: Path, n: int = 8, dpi: int = 150):
     """
@@ -1978,6 +1989,7 @@ def main(cfg):
             num_workers=cfg.num_workers,
             collate_fn=detr_polyline_collate_fn,
             persistent_workers=cfg.num_workers > 0,
+            multiprocessing_context=_mp_context(cfg.num_workers),
         )
         infer_model(infer_loader, model, device, cfg)
         return
@@ -2035,6 +2047,7 @@ def main(cfg):
         num_workers=cfg.num_workers,
         collate_fn=detr_polyline_collate_fn,
         persistent_workers=cfg.num_workers > 0,
+        multiprocessing_context=_mp_context(cfg.num_workers),
     )
     eval_loader = DataLoader(
         val_ds,
@@ -2043,6 +2056,7 @@ def main(cfg):
         num_workers=cfg.num_workers,
         collate_fn=detr_polyline_collate_fn,
         persistent_workers=cfg.num_workers > 0,
+        multiprocessing_context=_mp_context(cfg.num_workers),
     )
 
     matcher = HungarianMatcherPolyline(
