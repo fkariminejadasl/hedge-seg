@@ -12,7 +12,7 @@ Needs a free GPU (it will OOM if a real training run is using it), the backbone
 checkpoint, and pdok_dataset3 + its converted polylines. Run it after changing
 the training script, the dataset, or the env:
 
-    PYTHONPATH=. python scripts/smoke_test_train_detr_unet_polyline.py
+    PYTHONPATH=. python exps/smoke_test_train_detr_unet_polyline.py
 """
 
 import sys

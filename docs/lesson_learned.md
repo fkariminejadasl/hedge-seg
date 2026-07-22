@@ -227,7 +227,7 @@ the cluster run passed many eval transitions), but the fix protects both.
 
 How to tell a hang from slow training: check GPU utilization (nvtop), not just
 the log. 0% GPU with a busy CPU means a worker hang; a busy GPU means it is just
-slow. `scripts/smoke_test_train_detr_unet_polyline.py` reproduces the eval to
+slow. `exps/smoke_test_train_detr_unet_polyline.py` reproduces the eval to
 train transitions quickly and fails if this regresses.
 
 ## Done
