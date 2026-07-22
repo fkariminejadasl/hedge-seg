@@ -46,9 +46,7 @@ def report(dataset_root: Path, out_root: Path, min_length_px: float = 40.0):
         f"[{dataset_root.name}] short polylines (raw, < {min_length_px:.0f}px): "
         f"{n_short}/{n_total_s} ({short_frac * 100:.2f}%)"
     )
-    n_short_c, n_total_sc, short_frac_c = short_polyline_ratio(
-        converted, min_length_px
-    )
+    n_short_c, n_total_sc, short_frac_c = short_polyline_ratio(converted, min_length_px)
     print(
         f"[{out_root.name}] short polylines (converted, should be 0): "
         f"{n_short_c}/{n_total_sc} ({short_frac_c * 100:.2f}%)"

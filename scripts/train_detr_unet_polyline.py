@@ -2003,17 +2003,28 @@ def main(cfg):
         augment=False,
     )
 
-    # Optional training subset (seeded), to run at a smaller scale before
-    # committing to the full train split. Validation always uses the full
-    # val split, so numbers stay comparable across subset sizes.
+    # Optional seeded subsets, to run at a smaller scale before committing to
+    # the full split. n_val_subset only shrinks how many val images are scored
+    # each eval; use it to speed up eval on a run whose val split is not the
+    # final honest one (e.g. a local run with the leaky split). For a real
+    # baseline number keep it None so val stays comparable across runs.
     n_train_full = len(train_ds)
+    n_val_full = len(val_ds)
     if cfg.n_train_subset is not None and cfg.n_train_subset < n_train_full:
         idx = torch.randperm(
             n_train_full, generator=torch.Generator().manual_seed(cfg.seed)
         )[: cfg.n_train_subset].tolist()
         train_ds = torch.utils.data.Subset(train_ds, idx)
+    if cfg.n_val_subset is not None and cfg.n_val_subset < n_val_full:
+        idx = torch.randperm(
+            n_val_full, generator=torch.Generator().manual_seed(cfg.seed)
+        )[: cfg.n_val_subset].tolist()
+        val_ds = torch.utils.data.Subset(val_ds, idx)
 
-    print(f"Dataset: train={len(train_ds)} (of {n_train_full}), val={len(val_ds)}")
+    print(
+        f"Dataset: train={len(train_ds)} (of {n_train_full}), "
+        f"val={len(val_ds)} (of {n_val_full})"
+    )
 
     # persistent_workers avoids respawning worker processes every epoch, which
     # dominates the epoch time for small datasets.
@@ -2131,6 +2142,10 @@ def main(cfg):
 if __name__ == "__main__":
     cfg = dict(
         mode="train",  # "train", "infer" or "preview"
+        # Committed values are the cluster baseline. A throwaway laptop run
+        # overrides: exp="<n>_laptop", num_workers=4, eval_every=10,
+        # n_val_subset=1000 (its val split is leakier, so full val is not the
+        # honest number anyway).
         exp="1",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
         save_path=EXP_ROOT / "detr_unet_polyline",
         # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
@@ -2140,7 +2155,8 @@ if __name__ == "__main__":
         val_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         pad_to=1024,  # images zero-padded 1000 -> 1024 (divisible by 32)
         augment=True,  # flip/rot90 of image + polylines (train split only)
-        n_train_subset=5000,  # None = full train split (24k); val is always full
+        n_train_subset=5000,  # None = full train split (24k)
+        n_val_subset=None,  # None = full val split; subset only speeds up eval
         # backbone
         backbone_ckpt=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
         feature_stage="up3",  # "up3": stride 16, 64x64 tokens; "enc4": stride 32, 32x32
@@ -2180,7 +2196,7 @@ if __name__ == "__main__":
         # workers, so 8 means 16 processes for the 18 CPUs of one A100.
         n_epochs=150,
         batch_size=16,  # images are 1024x1024; up3 gives 4096 tokens
-        num_workers=8,
+        num_workers=8,  # 8 train + 8 eval = 16 procs for the 18 CPUs of an A100
         max_lr=1e-4,
         weight_decay=1e-2,
         disable_tqdm=True,
