@@ -81,6 +81,27 @@ that log.
 
 Ask before submitting a job. Slurm jobs cost budget and run for hours.
 
+## Stopping a local training run
+
+- Stop it gently first: `pkill -TERM -f <script>` (or Ctrl-C if foreground) so
+  the process releases the GPU cleanly. Only hard-kill (`pkill -9`) if it does
+  not exit within ~10 s.
+- Hard-killing a process while it is using the GPU can leave the driver wedged:
+  the GPU stays at high power (P1, boosted clocks, 100% util stuck) and stays
+  hot with the fan loud, even though nothing is training. `nvidia-smi` shows no
+  compute process, and `power.draw`/`clocks.sm`/`pstate` reveal the real state
+  (idle is ~5-15 W and P8).
+- To un-wedge it, open and cleanly close a small CUDA context, which makes the
+  driver re-check and drop to idle. Do NOT `nvidia-smi --gpu-reset` while Xorg
+  uses the GPU; it crashes the display.
+
+  ```
+  python -c "import torch; x=torch.zeros(8,device='cuda'); torch.cuda.synchronize(); del x; torch.cuda.empty_cache()"
+  ```
+
+- After any kill, confirm no orphaned workers remain (`pgrep -af <script>`);
+  persistent DataLoader workers do not always die with the parent.
+
 ## Reading a running job
 
 - A log that stops updating is usually stdout buffering, not a hung job. Use

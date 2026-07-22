@@ -244,33 +244,37 @@ Phase A — data + split:
   68.5% of val crops overlap a training crop (`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`).
 - Training script reads train/val from the split directories instead of an
   internal random split.
-- Converted dataset3 (30k images): train=24,257, val=5,743 (19.1%),
-  103,432 polylines kept, 3,380 dropped as short, 302 rings opened, spot
-  checked via 20 GT overlays. Stats reproducible with
-  `exps/dataset_stats.py` and `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`.
+- Converted dataset3 (30k images). The operative cluster split (avoid_label_dirs
+  sees all 5,000 pdok_dataset2 labels) is train=26,902, val=3,098 (10.3%),
+  103,414 polylines, 302 rings opened, 0 val-train overlap; enforcing backbone
+  avoidance halves the val set because 40% of crops sit near semseg areas. The
+  local dry-run (only 10 pdok_dataset2 labels available) was 24,257 / 5,743.
+  Stats reproducible with `exps/dataset_stats.py` and
+  `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`; per-run numbers in
+  `docs/experiment_log.md`.
 - `hedge_seg/paths.py` resolves DATA_ROOT / EXP_ROOT / CLUSTER_EXP_ROOT from
   a filesystem marker, so scripts no longer need path edits when moving
   between the local machine and the cluster.
 
 ## TODO
 
-Phase B — baseline on a ~5k spatially-blocked subset of dataset3's train
-split, evaluated on the full val split (frozen backbone, augment on,
-scheduler enabled, eval_every=5), plus the buffered precision/recall metric
-so results are comparable to the YOLO-seg result (80% precision, 70% recall).
+Phase B — baseline on a 5k spatially-blocked train subset, full val, frozen
+backbone up3, augment on, scheduler on, eval_every=5. Launched as cluster job
+24799874 (exp 1); interrupted by cluster maintenance, best_1.pt saved on the
+cluster. A laptop dry-run on the leaky-val split confirmed the model
+generalizes (eval poly below train poly at epoch 10, unlike the 8-image runs),
+then stopped to spare the laptop. Remaining:
 
-For the baseline, use a subset of dataset3 with the blocked split rather than
-dataset2: it is consistent with the eventual 30k run, and the backbone was
-trained on dataset2-derived data, so dataset2 val images also leak through
-the frozen backbone features. (Dataset3 likely overlaps dataset2
-geographically too, but that is a second-order effect.)
+- Read the cluster baseline result when the cluster is back.
+- Build the buffered precision/recall metric (match predicted to GT polylines
+  within 5/10/15 m). Not done yet, and it is what makes the result comparable
+  to YOLO-seg (80% precision, 70% recall). Loss curves alone cannot be compared.
 
-Note: the spatial split will make the first val numbers look worse than a
-random split would have. That is expected; they are the real baseline to
-improve from.
+Note: the spatial split makes val numbers look worse than a random split would.
+That is expected; they are the real baseline to improve from.
 
-Phase C — decoupled self-attention as a clean A/B while the baseline trains
-(regression-tested with the one-image overfit).
+Phase C — decoupled self-attention (MapTRv2) as a clean A/B, regression-tested
+with the one-image overfit.
 
 Phase D — results-driven: full 30k run, backbone unfreezing with low lr, and
 tolerance-loss/border-filtering only if the error analysis points at them.
