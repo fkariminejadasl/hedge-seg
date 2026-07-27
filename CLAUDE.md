@@ -81,6 +81,34 @@ that log.
 
 Ask before submitting a job. Slurm jobs cost budget and run for hours.
 
+## Bringing a cluster run back to the laptop
+
+- Copy the whole run directory, not the files inside it, so the local mirror
+  keeps the `<n>/` level and matches `~/exps/hedge`:
+
+  ```
+  scp -r me:~/exps/hedge/detr_unet_polyline/1 \
+      /home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/
+  ```
+
+- Point checkpoint configs at `CLUSTER_EXP_ROOT`, never `EXP_ROOT`. It resolves
+  to `~/exps/hedge` on the cluster and to the local mirror on the laptop, so
+  the same line works on both machines with no editing. This applies to
+  `infer_ckpt` and `backbone_ckpt`.
+- Copy the run's val stem list too. See the split note under project specifics.
+
+## Skills
+
+`.claude/skills/` holds the two run procedures, invoked by name:
+
+- `/cluster-run`: commit, push, pull on Snellius, copy and edit the slurm
+  script, sbatch, watch.
+- `/laptop-run`: the laptop config overrides and the nohup launch.
+
+They exist because both are multi-step and easy to get half right. The config
+overrides they list are edits to make in the script, not hidden settings, so
+the committed script always shows the values that actually ran.
+
 ## Stopping a local training run
 
 - Stop it gently first: `pkill -TERM -f <script>` (or Ctrl-C if foreground) so
@@ -137,3 +165,15 @@ Ask before submitting a job. Slurm jobs cost budget and run for hours.
 - For small overfit runs, inspect the final checkpoint, not `best_*.pt`. Best
   is chosen by eval loss, which stops falling after a few epochs when there is
   not enough data to generalize.
+- This holds for real runs too. In cluster run 1 the final epoch 150 checkpoint
+  draws better polylines than `best_1.pt` from epoch 65, even though its eval
+  loss is higher. Never rank checkpoints or report results by eval loss on this
+  task. See "Eval loss is not detection quality" in `docs/lesson_learned.md`.
+- `infer_score_thresh` is a real knob, not a formality. Scores sit near 1, so
+  0.5 keeps almost everything. Cluster run 1 needed 0.95 to match the GT line
+  count.
+- The local and cluster conversions of pdok_dataset3 do NOT produce the same
+  train/val split, because `avoid_label_dirs` sees 10 labels locally and 5,000
+  on the cluster. About 46% of the local val crops were cluster training
+  images. Evaluate a checkpoint only on the val stems of the run that produced
+  it.

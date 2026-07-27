@@ -76,7 +76,7 @@ Two more lessons, both confirmed in the code:
    instead of starting from a zero vector.
 
 
-## Lessons
+## Converting the polyline loss into meters
 
 - The polyline loss is an average L1 error per coordinate, taken over every point of
   every matched line. Points are normalized to [0,1] by the padded image size
@@ -230,6 +230,80 @@ the log. 0% GPU with a busy CPU means a worker hang; a busy GPU means it is just
 slow. `exps/smoke_test_train_detr_unet_polyline.py` reproduces the eval to
 train transitions quickly and fails if this regresses.
 
+## Eval loss is not detection quality
+
+In cluster run 1 the eval loss bottomed near epoch 65 and rose to the end, so
+`best_1.pt` was saved at 65. But the final epoch 150 checkpoint draws better
+polylines: 4.16 lines per image against 3.53 in GT, versus 2.91 for best_1 on
+the same crops. best_1 is cleaner but misses whole hedges. By the loss, best_1
+wins. By the pictures, the last epoch wins.
+
+The reason is what the loss is made of. Most of it is classification over 60
+queries against about 3 real lines. Overfitting first ruins the confidence
+calibration on unseen images, which raises the cross-entropy term, while the
+geometry of the lines keeps improving or stays flat. The number that goes up is
+not the number we care about.
+
+Consequences:
+- Do not pick a checkpoint by eval loss on this task, and do not report eval
+  loss as the result. Always look at the predictions.
+- The buffered precision/recall metric is not an extra for comparing against
+  YOLO-seg. It is required, because without it there is no way to say which of
+  two checkpoints is better. That is why it moved to the front of the queue.
+- Keep saving the final checkpoint, not only `best_*.pt`. Same conclusion as
+  the small overfit runs reached, now for a real 5k run.
+
+## The detection score threshold has to be tuned, 0.5 is not a default
+
+The model's scores are squashed into the top of the range: measured on 400 val
+crops, the deciles are 0.775, 0.909, 0.961, 0.983, 0.990, 0.997. The median
+prediction scores 0.96. So a 0.5 threshold keeps nearly every query and the
+output looks flooded: 6.1 lines per image against 3.4 in GT. At 0.95 the counts
+almost match, 3.50 against 3.39.
+
+This is worth knowing before blaming the model for over-detecting. Much of the
+apparent duplication is a threshold that was never set. It costs nothing to fix
+and needs no retraining.
+
+Two cautions:
+- Matching the count is not the same as matching the location. Only buffered
+  precision/recall says whether the kept lines are the right ones.
+- The right threshold is a property of a trained model, not a constant. Sweep it
+  with the metric once the metric exists, and record the value with the run.
+
+## A checkpoint has to be evaluated on the split it was trained against
+
+Cluster run 1 was trained on the cluster conversion of pdok_dataset3
+(train 26,902 / val 3,098). The local conversion of the same images is
+train 24,257 / val 5,743, because `avoid_label_dirs` only sees the 10
+pdok_dataset2 labels that exist locally, while the cluster sees all 5,000.
+
+Both use the same seed and block hashing, so the cluster val set is roughly a
+subset of the local one. That means about 46% of the local val crops were in
+the cluster's training set. Running a cluster checkpoint over the local val
+directory therefore shows training images about half the time, and the result
+looks better than it is.
+
+The split is part of the run, like the weights. Copy the cluster's val stem
+list next to the checkpoint and filter with it, do not assume two conversions
+of the same dataset agree.
+
+## Ground-truth artifacts that will distort precision and recall
+
+Two label problems are visible by eye in the run 1 figures, and both will show
+up as errors that are not the model's fault:
+
+- Missing hedges. Some clear tree rows are not labelled at all. The model draws
+  them, and a naive metric counts them as false positives.
+- One hedge split into several polylines. In one crop, 3 overlapping GT lines
+  cover a single field boundary while the model predicts 1. A naive one-to-one
+  match counts 1 hit and 2 misses.
+
+So when the buffered metric is built, do not stop at the first number. Look at
+the worst false positives and false negatives before believing them. Merging
+overlapping GT polylines that lie within the buffer of each other is worth
+testing as a preprocessing step.
+
 ## Done
 
 Phase A — data + split:
@@ -259,16 +333,24 @@ Phase A — data + split:
 ## TODO
 
 Phase B — baseline on a 5k spatially-blocked train subset, full val, frozen
-backbone up3, augment on, scheduler on, eval_every=5. Launched as cluster job
-24799874 (exp 1); interrupted by cluster maintenance, best_1.pt saved on the
-cluster. A laptop dry-run on the leaky-val split confirmed the model
-generalizes (eval poly below train poly at epoch 10, unlike the 8-image runs),
-then stopped to spare the laptop. Remaining:
+backbone up3, augment on, scheduler on, eval_every=5. Cluster job 24799874
+(exp 1) finished, 150 epochs in 7 h. The training half is done and the result
+is the first one where predictions sit on real hedgerows in unseen images
+(details in `docs/experiment_log.md`). The measurement half is not. Remaining,
+in order:
 
-- Read the cluster baseline result when the cluster is back.
 - Build the buffered precision/recall metric (match predicted to GT polylines
-  within 5/10/15 m). Not done yet, and it is what makes the result comparable
-  to YOLO-seg (80% precision, 70% recall). Loss curves alone cannot be compared.
+  within 5/10/15 m). This is now blocking, not optional: eval loss disagrees
+  with the pictures about which checkpoint is better, so there is currently no
+  way to rank two runs. It is also what makes the result comparable to YOLO-seg
+  (80% precision, 70% recall).
+- Re-run inference on the cluster val stems only. The local val directory is a
+  different split and about 46% of it was in the cluster's training set, so the
+  current figures are indicative only.
+- Sweep `infer_score_thresh` with that metric. 0.95 matches the GT line count,
+  but count is not location.
+- Check the worst false positives and negatives against the labels before
+  trusting the number, given the GT artifacts above.
 
 Note: the spatial split makes val numbers look worse than a random split would.
 That is expected; they are the real baseline to improve from.

@@ -103,9 +103,44 @@ bbox 3900/903.
 - 1 (cluster, Phase B baseline, 2026-07-21): job 24799874 on gpu_a100.
   5000-image train subset, full val 3098, frozen backbone up3, num_polylines=60,
   augment on, eval_every=5, cosine schedule, 1 enc / 4 dec, batch=16, workers=8,
-  150 ep. 2:40/ep. Interrupted by cluster maintenance; best_1.pt saved on the
-  cluster, results checkable Monday. This is the honest baseline (val is the
+  150 ep. 2:40/ep, 7 h total, finished. This is the honest baseline (val is the
   stricter split that also avoids the semseg backbone areas).
+
+  Losses: train 1.12 at the end. eval fell to about 1.31 near epoch 65, then
+  rose to 1.41 by epoch 150. So it overfits after roughly epoch 65 by the loss.
+
+  First run where the predictions sit on real hedgerows in images the model
+  never saw. Lines follow tree rows and field boundaries instead of only
+  landing in plausible places. Previous DINOv3 runs never did this.
+
+  Score threshold (measured on 400 val crops, best_1.pt): scores are squashed
+  high, deciles 0.775 / 0.909 / 0.961 / 0.983 / 0.990 / 0.997. At the old
+  default 0.5 it predicts 6.1 lines per image against 3.4 in GT. At 0.95 it
+  predicts 3.50 against 3.39. Changed infer_score_thresh to 0.95.
+
+  Checkpoint comparison at threshold 0.95, on the same 32 crops
+  (GT 3.53 lines per image):
+  - best_1.pt (epoch 65 by eval loss): 2.91 per image. Clean, few duplicates,
+    but misses a lot. Often draws 1 line where GT has 3 to 6.
+  - 1_150.pt (final, "overfit"): 4.16 per image. Finds clearly more of the
+    real hedges, at the cost of 2 to 3 near-parallel lines on one hedge.
+  The final checkpoint looks better to the eye than the one eval loss picks.
+  See docs/lesson_learned.md, "Eval loss is not detection quality".
+
+  Two labelling artifacts visible in the same figures, both of which will
+  distort a naive precision/recall number:
+  - GT misses real hedges (pos_012036: a clear tree row is unlabelled, the
+    model draws it, and it would count as a false positive).
+  - GT splits one hedge into several overlapping polylines (pos_024389: 3 GT
+    lines on one boundary, the model predicts 1).
+
+  Caveat on these figures: inference ran on the local
+  pdok_dataset3_polylines/polylines/val, which is the local split (5,743
+  crops), not the cluster split the model was trained against (3,098 crops).
+  The cluster moved about 46% of those crops into train, so roughly half the
+  32 crops shown may have been training images. Numbers above are indicative,
+  not the baseline. Fix before reporting anything: copy the cluster val stem
+  list and run inference only on those.
 
 - 1_laptop (2026-07-22, in progress): laptop RTX PRO 3000. Same as cluster 1 but
   laptop overrides: workers=4, eval_every=10, n_val_subset=1000 (leaky local
