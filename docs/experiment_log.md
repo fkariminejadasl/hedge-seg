@@ -139,17 +139,47 @@ bbox 3900/903.
   crops), not the cluster split the model was trained against (3,098 crops),
   so about half the crops shown were cluster training images.
 
-  Redone on the honest split (2026-07-27). All 3,098 cluster val stems were
-  found in the local val directory, so the cluster set is exactly a subset, as
-  the shared seed and block hashing predicted. Linked them into
-  polylines/val_cluster and re-ran both checkpoints on the same 32 crops at
-  threshold 0.95 (GT 2.44 lines per image, lower than the local val crops):
-  - 1_150.pt: 2.41 per image, 2 crops with no prediction at all.
-  - best_1.pt: 1.75 per image, no empty crops.
-  The final checkpoint now matches the GT line count almost exactly, while the
-  eval-loss-best checkpoint under-detects by about 28%. Same conclusion as on
-  the leaky split, and stronger. Still a count, not a location: the buffered
-  metric is what settles it.
+  Redone on the honest split (2026-07-27). Built polylines/val_cluster, a
+  directory of links to only the crops the cluster used for validation:
+
+  ```
+  ssh me "ls /projects/prjs1025/data/hedge/pdok_dataset3_polylines/polylines/val" \
+    > /home/fatemeh/Downloads/hedge/cluster_val_stems.txt
+
+  cd /home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines
+  mkdir -p polylines/val_cluster
+  while read f; do
+    [ -f "polylines/val/$f" ] && ln -sfn "$(realpath polylines/val/$f)" "polylines/val_cluster/$f"
+  done < /home/fatemeh/Downloads/hedge/cluster_val_stems.txt
+  ls polylines/val_cluster | wc -l
+  ```
+
+  All 3,098 cluster val stems were found in the local val directory, so the
+  cluster set is exactly a subset, as the shared seed and block hashing
+  predicted. Re-ran both checkpoints on the same 32 crops at threshold 0.95.
+  GT is 2.44 lines per image, lower than the local val crops.
+
+  | checkpoint | mean pred/img | mean abs err/img | crops with 0 pred | crops over by 3+ | worst |
+  |---|---|---|---|---|---|
+  | best_1.pt (ep 65) | 1.75 | 1.06 | 0 | 0 | -5 |
+  | 1_150.pt (ep 150) | 2.41 | 1.59 | 2 | 2 | +13 |
+
+  The mean says 1_150 nearly matches GT and best_1 under-detects by 28%. Per
+  image it is the other way round. 1_150 predicts nothing on 2 crops that have
+  real hedges (pos_026918, pos_028651) and 16 lines on pos_024293, which has 3.
+  Those errors cancel in the mean. best_1 is duller but steadier: it never
+  returns nothing and never over-detects badly.
+
+  This reverses the earlier reading taken from the leaky split, where 1_150
+  looked better. Do not conclude either checkpoint is the better model yet.
+  The buffered metric is what settles it. See docs/lesson_learned.md,
+  "An average over images hides errors that cancel".
+
+  By eye on the same crops (screenshots detr_unet_polyline_{gt,best_1,1_150}
+  _val_cluster_t.95.png): on simple crops with one hedge both are accurate and
+  sit on the right feature. Both fail the same way where several labelled lines
+  meet at a junction (pos_009106, pos_013789, pos_027437), predicting one line
+  where GT has three or four. 1_150 falls apart on crowded crops.
 
 - 1_laptop (2026-07-22, in progress): laptop RTX PRO 3000. Same as cluster 1 but
   laptop overrides: workers=4, eval_every=10, n_val_subset=1000 (leaky local

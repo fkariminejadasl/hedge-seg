@@ -2264,10 +2264,4 @@ if __name__ == "__main__":
         infer_score_thresh=0.95,
         infer_topk=60,
     )
-    # Command-line overrides, for example:
-    #   python scripts/train_detr_unet_polyline.py mode=infer \
-    #       infer_ckpt=<path> infer_polyline_dir=<dir> infer_score_thresh=0.95
-    # Meant for inference and quick checks, so comparing checkpoints does not
-    # mean editing this file every time. Training runs should still change the
-    # values here and commit them, so the committed script shows what ran.
-    main(OmegaConf.merge(OmegaConf.create(cfg), OmegaConf.from_cli()))
+    main(OmegaConf.create(cfg))

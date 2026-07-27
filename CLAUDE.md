@@ -3,11 +3,25 @@
 ## How to write
 
 - Use simple language. Short sentences. No em dashes.
+- This is the most important rule, in chat and in documentation. Explain things
+  so they are easy to understand. Do not use a hard word where an easy one
+  works. Do not pack several ideas into one sentence. If an explanation needs a
+  term like "block buffering" or "start method", say what it means in plain
+  words the first time it appears.
 - Do not add formatting flourishes to documentation. Plain text, plain lists.
 - Give full paths so they can be clicked, for example
   `scripts/train_detr_unet_polyline.py`, not "the training script".
 - When asked to diagnose, diagnose first and do not change code until asked.
 - Say which files were inspected before answering a question about the repo.
+
+## Committing
+
+- Never run `git commit` on your own. Make the change, run the formatter, say
+  what changed and why, and propose the commit message. The user reviews it
+  first and then says when to commit.
+- Never run `git push` unless the user says to push.
+- This holds even when the change was asked for and looks finished. Being asked
+  to make a change is not permission to commit it.
 
 ## Before every commit
 
@@ -99,19 +113,22 @@ Ask before submitting a job. Slurm jobs cost budget and run for hours.
 
 ## Looking at an inference result
 
-Override on the command line, do not edit the config:
+Settings live in the cfg block at the bottom of each script. Edit it and run.
+Do not add command-line overrides: a run must be readable from the file alone,
+otherwise the committed script stops being the record of what ran.
 
-```
-PYTHONPATH=. python scripts/train_detr_unet_polyline.py mode=infer \
-    infer_ckpt=<CLUSTER_EXP_ROOT>/detr_unet_polyline/1/1_150.pt \
-    infer_score_thresh=0.95 n_val_subset=32
-PYTHONPATH=. python scripts/show_polyline_results.py <run_dir_a> [<run_dir_b>]
-```
+1. In `scripts/train_detr_unet_polyline.py`, set `mode="infer"` and pick
+   `infer_ckpt`. Alternatives are commented out right under it.
+2. Run it. Output goes to
+   `<infer_out_dir>/<ckpt stem>_<split dir name>_t<threshold>/`, which holds
+   `polylines/` and a `gt/` of links to the ground truth of exactly those
+   crops. Runs never overwrite each other and nothing needs linking by hand.
+3. List the run directories in `scripts/show_polyline_results.py` and run it.
+   It draws one ground-truth figure and one figure per run, over the same
+   crops, so the panels line up.
 
-The run directory is named `<ckpt stem>_<split dir name>_t<threshold>`, so runs
-never overwrite each other, and it contains the matching ground truth already.
-Nothing needs linking or renaming by hand. `show_polyline_results.py` needs an
-environment with cv2, which is not the `hedge` env.
+`infer_polyline_dir` should be `polylines/val_cluster`, not `polylines/val`.
+See the split note under project specifics.
 
 ## Skills
 

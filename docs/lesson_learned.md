@@ -230,28 +230,58 @@ the log. 0% GPU with a busy CPU means a worker hang; a busy GPU means it is just
 slow. `exps/smoke_test_train_detr_unet_polyline.py` reproduces the eval to
 train transitions quickly and fails if this regresses.
 
-## Eval loss is not detection quality
+## Eval loss is not detection quality, and neither is an average count
 
-In cluster run 1 the eval loss bottomed near epoch 65 and rose to the end, so
-`best_1.pt` was saved at 65. But the final epoch 150 checkpoint draws better
-polylines: 4.16 lines per image against 3.53 in GT, versus 2.91 for best_1 on
-the same crops. best_1 is cleaner but misses whole hedges. By the loss, best_1
-wins. By the pictures, the last epoch wins.
+In cluster run 1 the eval loss bottomed near epoch 65, so `best_1.pt` was saved
+at 65, and it kept rising to epoch 150. Three ways of ranking those two
+checkpoints were tried, on the same 32 cluster-val crops at threshold 0.95.
+They do not agree, and two of them are worthless.
 
-The reason is what the loss is made of. Most of it is classification over 60
-queries against about 3 real lines. Overfitting first ruins the confidence
-calibration on unseen images, which raises the cross-entropy term, while the
-geometry of the lines keeps improving or stays flat. The number that goes up is
-not the number we care about.
+1. Eval loss. Says `best_1.pt` wins. But most of the loss is classification
+   over 60 queries against about 3 real lines. Overfitting first ruins the
+   confidence calibration on unseen images, which raises the cross-entropy
+   term, while the geometry of the lines stays flat or improves. The number
+   that goes up is not the number we care about.
+
+2. Average lines per image. Says the epoch 150 checkpoint wins, and almost
+   exactly: 2.41 predicted against 2.44 in the ground truth, while `best_1.pt`
+   gives 1.75 and looks like it under-detects by 28%. This is the trap. The
+   average was right for the wrong reason, see the next lesson.
+
+3. Per-image error, which is closer to the truth. Averaged over the crops,
+   `best_1.pt` is off by 1.06 lines and the epoch 150 checkpoint by 1.59.
+   `best_1.pt` never returns nothing and never over-detects by 3 or more. The
+   epoch 150 checkpoint returns nothing on 2 crops that have real hedges, and
+   on one crowded crop predicts 16 lines where there are 3.
+
+So the honest statement is not "the last epoch is better". It is that eval loss
+cannot rank these checkpoints, a mean count cannot either, and by the only
+measure tried so far that looks at single images, the eval-loss pick is the
+steadier of the two.
 
 Consequences:
 - Do not pick a checkpoint by eval loss on this task, and do not report eval
   loss as the result. Always look at the predictions.
-- The buffered precision/recall metric is not an extra for comparing against
-  YOLO-seg. It is required, because without it there is no way to say which of
-  two checkpoints is better. That is why it moved to the front of the queue.
-- Keep saving the final checkpoint, not only `best_*.pt`. Same conclusion as
-  the small overfit runs reached, now for a real 5k run.
+- The buffered precision/recall metric is required, not an extra. Every cheap
+  substitute tried so far has given a different answer. It is also what makes
+  the result comparable to YOLO-seg.
+- Keep saving the final checkpoint, not only `best_*.pt`. Both are needed to
+  compare at all.
+
+## An average over images hides errors that cancel
+
+The epoch 150 checkpoint predicted 2.41 lines per image against 2.44 in the
+ground truth. That looked like near-perfect cardinality. Per image it was not:
+it missed 2 crops completely and predicted 16 lines on a crop with 3. The
+misses and the over-detections cancelled in the mean.
+
+An average over images can only be trusted once the per-image spread is known.
+The cheap check is the mean absolute error per image, plus a count of the two
+failure modes that matter, predicting nothing and predicting far too much. On
+these 32 crops that check reversed the ranking.
+
+This is the same reason the buffered metric has to be per image and then
+aggregated, never a ratio of two totals.
 
 ## The detection score threshold has to be tuned, 0.5 is not a default
 
@@ -288,42 +318,58 @@ The split is part of the run, like the weights. Copy the cluster's val stem
 list next to the checkpoint and filter with it, do not assume two conversions
 of the same dataset agree.
 
-## An empty result is a code path, and it is the one that breaks
+## The "nothing found" branch is the one that breaks
 
-Raising `infer_score_thresh` to 0.95 made some crops produce no prediction at
-all, and inference crashed with "can't convert cuda:0 device type tensor to
-numpy". The normal path in `detr_polyline_inference` ended with
-`.detach().cpu()`, but the early-return branch for "nothing passed the
-threshold" built its empty tensors with `new_zeros`, which inherits the CUDA
-device, and skipped the `.cpu()`. It went unnoticed because at threshold 0.5
-every crop had something to return.
+Raising `infer_score_thresh` to 0.95 made some crops come back with no
+prediction at all, and inference stopped with "can't convert cuda:0 device type
+tensor to numpy".
 
-The general point: the empty case usually gets written once and never exercised,
-so it drifts away from the main path. When a change makes empty results possible
-(a higher threshold, a stricter filter, a smaller subset), that branch is the
-first place to look. Here the fix is one `.cpu()` per line; the cost was an
-afternoon of thinking the checkpoint was corrupt.
+What happened, step by step:
+
+- Predictions are made on the GPU, so the result tensors live on the GPU.
+- Before saving, they have to be copied to the CPU, because numpy only reads
+  CPU memory. The normal path did that with `.detach().cpu()`.
+- `detr_polyline_inference` has a second, separate path for the case where no
+  prediction passes the threshold. It builds empty tensors with `new_zeros` and
+  returns early. Someone (us) forgot the `.cpu()` on that path.
+- `new_zeros` makes a new tensor on the same device as the tensor it is called
+  on. That is its documented job, and it is what you want almost everywhere. So
+  the empty tensors stayed on the GPU, and saving them failed.
+
+This is our bug, not a PyTorch bug. PyTorch is doing exactly what it says it
+does; it never silently moves data between GPU and CPU, because a hidden copy
+would be slow and would hide mistakes. The error message is PyTorch refusing to
+guess.
+
+At threshold 0.5 every crop had at least one prediction, so this branch never
+ran and the mistake stayed hidden.
+
+The general point: the "nothing found" branch is usually written once and never
+exercised, so it slowly drifts away from the main path. When a change makes
+empty results possible, such as a higher threshold or a stricter filter, look
+there first.
 
 ## Output directories should name themselves after what produced them
 
 Comparing two checkpoints used to mean editing `infer_out_dir` and
 `infer_ckpt`, running, renaming the previous ground-truth directory, re-running
-a symlink loop, then editing paths in the plotting code. Every step was manual,
-so a figure could not be traced back to the checkpoint, split and threshold that
-made it, and re-running quietly overwrote the previous result.
+a symlink loop by hand, then editing paths in the plotting code. Every step was
+manual, so a figure could not be traced back to the checkpoint, split and
+threshold that made it, and re-running quietly overwrote the previous result.
 
-Two changes remove all of it:
+Two changes remove all of that, without adding any hidden setting:
 
 - `infer` writes to `<root>/<ckpt stem>_<split dir name>_t<threshold>/`, so
-  `1_150_val_cluster_t0.95` says exactly what it is and nothing collides.
+  `1_150_val_cluster_t0.95` says exactly what it is and two runs cannot collide.
 - It writes the matching ground truth as symlinks into `gt/` inside that same
-  directory, for exactly the crops that were run. The prediction grid and the
-  GT grid then cannot disagree about which images they show.
+  directory, for exactly the crops that were run. The prediction figure and the
+  ground-truth figure then cannot disagree about which images they show.
 
-Plus command-line overrides via `OmegaConf.from_cli()`, so a comparison is two
-commands and no file edits. Keep that for inference and quick checks only.
-Training runs should still edit and commit the config, because the committed
-script is the record of what ran.
+The settings still live in the cfg block at the bottom of the script, and they
+are still committed. That is deliberate. Command-line overrides were tried and
+removed: they make a run depend on something the file does not show, so the
+committed script stops being the record of what ran. Switching a commented-out
+line in the cfg is visible in the diff, which is the point.
 
 ## Ground-truth artifacts that will distort precision and recall
 
@@ -367,27 +413,42 @@ Phase A — data + split:
   a filesystem marker, so scripts no longer need path edits when moving
   between the local machine and the cluster.
 
+Phase B — training half:
+
+- Cluster job 24799874 (exp 1) finished, 150 epochs in 7 h on a 5k
+  spatially-blocked train subset, frozen backbone up3, augment on, scheduler
+  on, eval_every=5. First run whose predictions sit on real hedgerows in
+  images the model never saw.
+- Inference re-run on the cluster val split only, using `polylines/val_cluster`
+  (commands in `docs/experiment_log.md`). The local val directory is a
+  different split, about 46% of it was in the cluster's training set, so
+  figures taken from it were not the baseline.
+- `infer_score_thresh` raised from 0.5 to 0.95, which is where the predicted
+  line count stops being obviously wrong. Not a swept value, see TODO.
+- Inference made reproducible: self-naming run directories, ground truth
+  linked next to the predictions, no manual steps.
+
 ## TODO
 
-Phase B — baseline on a 5k spatially-blocked train subset, full val, frozen
-backbone up3, augment on, scheduler on, eval_every=5. Cluster job 24799874
-(exp 1) finished, 150 epochs in 7 h. The training half is done and the result
-is the first one where predictions sit on real hedgerows in unseen images
-(details in `docs/experiment_log.md`). The measurement half is not. Remaining,
-in order:
+Phase B — measurement half. Nothing here needs a new training run. The blocker
+is that there is still no way to say which checkpoint is better: eval loss says
+`best_1.pt`, mean line count says `1_150.pt`, and per-image error says
+`best_1.pt` again. In order:
 
 - Build the buffered precision/recall metric (match predicted to GT polylines
-  within 5/10/15 m). This is now blocking, not optional: eval loss disagrees
-  with the pictures about which checkpoint is better, so there is currently no
-  way to rank two runs. It is also what makes the result comparable to YOLO-seg
-  (80% precision, 70% recall).
-- Re-run inference on the cluster val stems only. The local val directory is a
-  different split and about 46% of it was in the cluster's training set, so the
-  current figures are indicative only.
-- Sweep `infer_score_thresh` with that metric. 0.95 matches the GT line count,
-  but count is not location.
+  within 5/10/15 m). Must be computed per image and then aggregated, never as a
+  ratio of two totals, because errors cancel in a total. This is what makes the
+  result comparable to YOLO-seg (80% precision, 70% recall).
+- Score both checkpoints with it and settle the ranking.
+- Then sweep `infer_score_thresh` with that metric. 0.95 was chosen because it
+  matches the GT line count, which the per-image numbers show is not a good
+  enough reason.
 - Check the worst false positives and negatives against the labels before
-  trusting the number, given the GT artifacts above.
+  trusting any number, given the GT artifacts above. Test whether merging
+  overlapping GT polylines within the buffer changes the result.
+- Look at the junction failure: where several labelled lines meet, both
+  checkpoints predict one line instead of three or four. Worth knowing whether
+  that is a query-count limit, a matching effect, or a label convention.
 
 Note: the spatial split makes val numbers look worse than a random split would.
 That is expected; they are the real baseline to improve from.
