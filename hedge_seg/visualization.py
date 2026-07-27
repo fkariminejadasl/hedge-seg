@@ -326,6 +326,12 @@ def show_mask_grid(
     plt.show(block=False)
 
 
+# To view an inference run of scripts/train_detr_unet_polyline.py, use
+# scripts/show_polyline_results.py <run_dir>. It takes the run directory, which
+# holds both the predictions and the matching ground truth, and draws both grids
+# over the same crops. Do not put show_polyline_grid calls at module level here:
+# they would run on every `import hedge_seg.visualization`.
+
 """
 from pathlib import Path
 main_path = Path(f"/home/fatemeh/Downloads/hedge/results")

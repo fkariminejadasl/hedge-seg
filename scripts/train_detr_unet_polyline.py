@@ -1616,6 +1616,16 @@ def detr_polyline_collate_fn(batch):
     return images, list(targets)
 
 
+def _seeded_subset(dataset, n: Optional[int], seed: int):
+    """Deterministic subset of a dataset, or the dataset itself if n is None."""
+    if n is None or n >= len(dataset):
+        return dataset
+    idx = torch.randperm(len(dataset), generator=torch.Generator().manual_seed(seed))[
+        :n
+    ].tolist()
+    return torch.utils.data.Subset(dataset, idx)
+
+
 def _mp_context(num_workers: int):
     """
     DataLoader worker start method. Python 3.14 defaults multiprocessing to
@@ -1793,14 +1803,17 @@ def detr_polyline_inference(
             polys = polys[keep]
             bx = bx[keep]
         else:
+            # .cpu() here too: new_zeros inherits the device, and an image with
+            # no prediction above the threshold used to return CUDA tensors that
+            # crashed the caller's .numpy(). Only shows up at a high threshold.
             results.append(
                 {
-                    "scores": scores.new_zeros((0,)),
-                    "labels": labels.new_zeros((0,), dtype=torch.long),
-                    "polylines_norm": polys.new_zeros((0, polys.shape[1], 2)),
-                    "polylines_px": polys.new_zeros((0, polys.shape[1], 2)),
-                    "boxes_norm": bx.new_zeros((0, 4)),
-                    "boxes_px_xyxy": bx.new_zeros((0, 4)),
+                    "scores": scores.new_zeros((0,)).cpu(),
+                    "labels": labels.new_zeros((0,), dtype=torch.long).cpu(),
+                    "polylines_norm": polys.new_zeros((0, polys.shape[1], 2)).cpu(),
+                    "polylines_px": polys.new_zeros((0, polys.shape[1], 2)).cpu(),
+                    "boxes_norm": bx.new_zeros((0, 4)).cpu(),
+                    "boxes_px_xyxy": bx.new_zeros((0, 4)).cpu(),
                 }
             )
             continue
@@ -1840,13 +1853,26 @@ def detr_polyline_inference(
 def infer_model(loader, model, device, cfg):
     model.eval()
 
-    out_dir = (
+    # The output directory names itself after what produced it, so two
+    # checkpoints or two thresholds never overwrite each other and a stale
+    # directory can never be mistaken for a fresh one. Manually naming these
+    # was the step that made results irreproducible.
+    root = (
         Path(cfg.infer_out_dir)
         if cfg.infer_out_dir is not None
         else cfg.save_path / f"{cfg.exp}_inference"
     )
+    run_name = (
+        f"{Path(cfg.infer_ckpt).stem}"
+        f"_{Path(cfg.infer_polyline_dir).name}"
+        f"_t{cfg.infer_score_thresh:g}"
+    )
+    out_dir = root / run_name
     pred_dir = out_dir / "polylines"
+    gt_dir = out_dir / "gt"
     pred_dir.mkdir(parents=True, exist_ok=True)
+    gt_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Inference output: {out_dir}")
 
     for images, targets in tqdm(loader, disable=cfg.disable_tqdm):
         image_sizes = []
@@ -1871,14 +1897,23 @@ def infer_model(loader, model, device, cfg):
         )
 
         for pred, target, image_size in zip(preds, targets, image_sizes):
+            stem = target["stem"]
             np.savez_compressed(
-                pred_dir / f"{target['stem']}.npz",
+                pred_dir / f"{stem}.npz",
                 polylines=pred["polylines_px"].numpy(),
                 polylines_norm=pred["polylines_norm"].numpy(),
                 scores=pred["scores"].numpy(),
                 labels=pred["labels"].numpy(),
                 image_size=np.asarray(image_size, dtype=np.int32),
             )
+            # Link the ground truth of exactly the crops that were run, so the
+            # prediction grid and the GT grid always show the same images.
+            src = (Path(cfg.infer_polyline_dir) / f"{stem}.npz").resolve()
+            link = gt_dir / f"{stem}.npz"
+            if src.exists():
+                if link.is_symlink() or link.exists():
+                    link.unlink()
+                link.symlink_to(src)
 
 
 # =========================================================
@@ -1981,6 +2016,11 @@ def main(cfg):
             pad_to=cfg.pad_to,
             augment=False,
         )
+        # Same seeded subset as training eval, so a small n_val_subset gives a
+        # quick inference run on the same images for every checkpoint, which is
+        # what makes visual checkpoint comparisons meaningful.
+        infer_ds = _seeded_subset(infer_ds, cfg.n_val_subset, cfg.seed)
+        print(f"Inference on {len(infer_ds)} images")
 
         infer_loader = DataLoader(
             infer_ds,
@@ -2022,16 +2062,8 @@ def main(cfg):
     # baseline number keep it None so val stays comparable across runs.
     n_train_full = len(train_ds)
     n_val_full = len(val_ds)
-    if cfg.n_train_subset is not None and cfg.n_train_subset < n_train_full:
-        idx = torch.randperm(
-            n_train_full, generator=torch.Generator().manual_seed(cfg.seed)
-        )[: cfg.n_train_subset].tolist()
-        train_ds = torch.utils.data.Subset(train_ds, idx)
-    if cfg.n_val_subset is not None and cfg.n_val_subset < n_val_full:
-        idx = torch.randperm(
-            n_val_full, generator=torch.Generator().manual_seed(cfg.seed)
-        )[: cfg.n_val_subset].tolist()
-        val_ds = torch.utils.data.Subset(val_ds, idx)
+    train_ds = _seeded_subset(train_ds, cfg.n_train_subset, cfg.seed)
+    val_ds = _seeded_subset(val_ds, cfg.n_val_subset, cfg.seed)
 
     print(
         f"Dataset: train={len(train_ds)} (of {n_train_full}), "
@@ -2223,10 +2255,19 @@ if __name__ == "__main__":
         preview_out_dir=DATA_ROOT / "pdok_dataset3_polylines/preview",
         preview_n=10,
         # inference
-        infer_ckpt=EXP_ROOT / "detr_unet_polyline/1/best_1.pt",
-        infer_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
+        # CLUSTER_EXP_ROOT, not EXP_ROOT: cluster runs write here, and locally
+        # it points at the scp'd mirror, so this path needs no editing when
+        # running inference on a cluster checkpoint from either machine.
+        infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/1/best_1.pt",
+        infer_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val_cluster",
         infer_out_dir=DATA_ROOT / "pdok_dataset3_polylines/inference",
-        infer_score_thresh=0.5,
+        infer_score_thresh=0.95,
         infer_topk=60,
     )
-    main(OmegaConf.create(cfg))
+    # Command-line overrides, for example:
+    #   python scripts/train_detr_unet_polyline.py mode=infer \
+    #       infer_ckpt=<path> infer_polyline_dir=<dir> infer_score_thresh=0.95
+    # Meant for inference and quick checks, so comparing checkpoints does not
+    # mean editing this file every time. Training runs should still change the
+    # values here and commit them, so the committed script shows what ran.
+    main(OmegaConf.merge(OmegaConf.create(cfg), OmegaConf.from_cli()))

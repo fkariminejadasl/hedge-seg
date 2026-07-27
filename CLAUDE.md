@@ -97,6 +97,22 @@ Ask before submitting a job. Slurm jobs cost budget and run for hours.
   `infer_ckpt` and `backbone_ckpt`.
 - Copy the run's val stem list too. See the split note under project specifics.
 
+## Looking at an inference result
+
+Override on the command line, do not edit the config:
+
+```
+PYTHONPATH=. python scripts/train_detr_unet_polyline.py mode=infer \
+    infer_ckpt=<CLUSTER_EXP_ROOT>/detr_unet_polyline/1/1_150.pt \
+    infer_score_thresh=0.95 n_val_subset=32
+PYTHONPATH=. python scripts/show_polyline_results.py <run_dir_a> [<run_dir_b>]
+```
+
+The run directory is named `<ckpt stem>_<split dir name>_t<threshold>`, so runs
+never overwrite each other, and it contains the matching ground truth already.
+Nothing needs linking or renaming by hand. `show_polyline_results.py` needs an
+environment with cv2, which is not the `hedge` env.
+
 ## Skills
 
 `.claude/skills/` holds the two run procedures, invoked by name:

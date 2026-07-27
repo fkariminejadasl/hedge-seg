@@ -134,13 +134,22 @@ bbox 3900/903.
   - GT splits one hedge into several overlapping polylines (pos_024389: 3 GT
     lines on one boundary, the model predicts 1).
 
-  Caveat on these figures: inference ran on the local
+  Caveat on the numbers above: that inference ran on the local
   pdok_dataset3_polylines/polylines/val, which is the local split (5,743
-  crops), not the cluster split the model was trained against (3,098 crops).
-  The cluster moved about 46% of those crops into train, so roughly half the
-  32 crops shown may have been training images. Numbers above are indicative,
-  not the baseline. Fix before reporting anything: copy the cluster val stem
-  list and run inference only on those.
+  crops), not the cluster split the model was trained against (3,098 crops),
+  so about half the crops shown were cluster training images.
+
+  Redone on the honest split (2026-07-27). All 3,098 cluster val stems were
+  found in the local val directory, so the cluster set is exactly a subset, as
+  the shared seed and block hashing predicted. Linked them into
+  polylines/val_cluster and re-ran both checkpoints on the same 32 crops at
+  threshold 0.95 (GT 2.44 lines per image, lower than the local val crops):
+  - 1_150.pt: 2.41 per image, 2 crops with no prediction at all.
+  - best_1.pt: 1.75 per image, no empty crops.
+  The final checkpoint now matches the GT line count almost exactly, while the
+  eval-loss-best checkpoint under-detects by about 28%. Same conclusion as on
+  the leaky split, and stronger. Still a count, not a location: the buffered
+  metric is what settles it.
 
 - 1_laptop (2026-07-22, in progress): laptop RTX PRO 3000. Same as cluster 1 but
   laptop overrides: workers=4, eval_every=10, n_val_subset=1000 (leaky local

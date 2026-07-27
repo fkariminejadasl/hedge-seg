@@ -288,6 +288,43 @@ The split is part of the run, like the weights. Copy the cluster's val stem
 list next to the checkpoint and filter with it, do not assume two conversions
 of the same dataset agree.
 
+## An empty result is a code path, and it is the one that breaks
+
+Raising `infer_score_thresh` to 0.95 made some crops produce no prediction at
+all, and inference crashed with "can't convert cuda:0 device type tensor to
+numpy". The normal path in `detr_polyline_inference` ended with
+`.detach().cpu()`, but the early-return branch for "nothing passed the
+threshold" built its empty tensors with `new_zeros`, which inherits the CUDA
+device, and skipped the `.cpu()`. It went unnoticed because at threshold 0.5
+every crop had something to return.
+
+The general point: the empty case usually gets written once and never exercised,
+so it drifts away from the main path. When a change makes empty results possible
+(a higher threshold, a stricter filter, a smaller subset), that branch is the
+first place to look. Here the fix is one `.cpu()` per line; the cost was an
+afternoon of thinking the checkpoint was corrupt.
+
+## Output directories should name themselves after what produced them
+
+Comparing two checkpoints used to mean editing `infer_out_dir` and
+`infer_ckpt`, running, renaming the previous ground-truth directory, re-running
+a symlink loop, then editing paths in the plotting code. Every step was manual,
+so a figure could not be traced back to the checkpoint, split and threshold that
+made it, and re-running quietly overwrote the previous result.
+
+Two changes remove all of it:
+
+- `infer` writes to `<root>/<ckpt stem>_<split dir name>_t<threshold>/`, so
+  `1_150_val_cluster_t0.95` says exactly what it is and nothing collides.
+- It writes the matching ground truth as symlinks into `gt/` inside that same
+  directory, for exactly the crops that were run. The prediction grid and the
+  GT grid then cannot disagree about which images they show.
+
+Plus command-line overrides via `OmegaConf.from_cli()`, so a comparison is two
+commands and no file edits. Keep that for inference and quick checks only.
+Training runs should still edit and commit the config, because the committed
+script is the record of what ran.
+
 ## Ground-truth artifacts that will distort precision and recall
 
 Two label problems are visible by eye in the run 1 figures, and both will show
