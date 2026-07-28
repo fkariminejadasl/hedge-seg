@@ -103,83 +103,47 @@ bbox 3900/903.
 - 1 (cluster, Phase B baseline, 2026-07-21): job 24799874 on gpu_a100.
   5000-image train subset, full val 3098, frozen backbone up3, num_polylines=60,
   augment on, eval_every=5, cosine schedule, 1 enc / 4 dec, batch=16, workers=8,
-  150 ep. 2:40/ep, 7 h total, finished. This is the honest baseline (val is the
-  stricter split that also avoids the semseg backbone areas).
+  150 ep. 2:40/ep, 7 h total.
 
-  Losses: train 1.12 at the end. eval fell to about 1.31 near epoch 65, then
-  rose to 1.41 by epoch 150. So it overfits after roughly epoch 65 by the loss.
+  Losses: train 1.12 at the end, eval down to ~1.31 near epoch 65 then up to
+  1.41 by 150. Overfits after ~65 by the loss.
 
-  First run where the predictions sit on real hedgerows in images the model
-  never saw. Lines follow tree rows and field boundaries instead of only
-  landing in plausible places. Previous DINOv3 runs never did this.
+  First run whose predictions sit on real hedgerows in images the model never
+  saw. Lines follow tree rows and field boundaries. DINOv3 runs never did this.
 
-  Score threshold (measured on 400 val crops, best_1.pt): scores are squashed
-  high, deciles 0.775 / 0.909 / 0.961 / 0.983 / 0.990 / 0.997. At the old
-  default 0.5 it predicts 6.1 lines per image against 3.4 in GT. At 0.95 it
-  predicts 3.50 against 3.39. Changed infer_score_thresh to 0.95.
+  Scores are squashed high, deciles on 400 crops 0.775 / 0.909 / 0.961 / 0.983 /
+  0.990 / 0.997, so infer_score_thresh went 0.5 -> 0.95.
 
-  Checkpoint comparison at threshold 0.95, on the same 32 crops
-  (GT 3.53 lines per image):
-  - best_1.pt (epoch 65 by eval loss): 2.91 per image. Clean, few duplicates,
-    but misses a lot. Often draws 1 line where GT has 3 to 6.
-  - 1_150.pt (final, "overfit"): 4.16 per image. Finds clearly more of the
-    real hedges, at the cost of 2 to 3 near-parallel lines on one hedge.
-  The final checkpoint looks better to the eye than the one eval loss picks.
-  See docs/lesson_learned.md, "Eval loss is not detection quality".
+  Checkpoints on the cluster val split (32 crops, t=0.95, GT 2.44 lines/img):
 
-  Two labelling artifacts visible in the same figures, both of which will
-  distort a naive precision/recall number:
-  - GT misses real hedges (pos_012036: a clear tree row is unlabelled, the
-    model draws it, and it would count as a false positive).
-  - GT splits one hedge into several overlapping polylines (pos_024389: 3 GT
-    lines on one boundary, the model predicts 1).
+  | checkpoint | pred/img | abs err/img | 0 pred | over by 3+ | worst |
+  |---|---|---|---|---|---|
+  | best_1.pt (ep 65) | 1.75 | 1.06 | 0 | 0 | -5 |
+  | 1_150.pt (ep 150) | 2.41 | 1.59 | 2 | 2 | +13 |
 
-  Caveat on the numbers above: that inference ran on the local
-  pdok_dataset3_polylines/polylines/val, which is the local split (5,743
-  crops), not the cluster split the model was trained against (3,098 crops),
-  so about half the crops shown were cluster training images.
+  The mean flatters 1_150. Per image it predicts nothing on pos_026918 and
+  pos_028651 and 16 lines on pos_024293, which has 3, and those cancel. Neither
+  checkpoint is established as better. See docs/lesson_learned.md, "No cheap
+  measure can rank two checkpoints".
 
-  Redone on the honest split (2026-07-27). Built polylines/val_cluster, a
-  directory of links to only the crops the cluster used for validation:
+  By eye (screenshots detr_unet_polyline_{1_gt,best_1,1_150}_*cluster_t.95.png):
+  both accurate on simple single-hedge crops; both predict one line where
+  several labelled lines meet at a junction (pos_009106, pos_013789,
+  pos_027437); 1_150 falls apart on crowded crops. Label problems seen: hedges
+  missing from GT, and one hedge split into several overlapping GT lines.
+
+  polylines/val_cluster holds the 3,098 crops the cluster used for val, all
+  found locally. Built with:
 
   ```
   ssh me "ls /projects/prjs1025/data/hedge/pdok_dataset3_polylines/polylines/val" \
     > /home/fatemeh/Downloads/hedge/cluster_val_stems.txt
-
   cd /home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines
   mkdir -p polylines/val_cluster
   while read f; do
     [ -f "polylines/val/$f" ] && ln -sfn "$(realpath polylines/val/$f)" "polylines/val_cluster/$f"
   done < /home/fatemeh/Downloads/hedge/cluster_val_stems.txt
-  ls polylines/val_cluster | wc -l
   ```
-
-  All 3,098 cluster val stems were found in the local val directory, so the
-  cluster set is exactly a subset, as the shared seed and block hashing
-  predicted. Re-ran both checkpoints on the same 32 crops at threshold 0.95.
-  GT is 2.44 lines per image, lower than the local val crops.
-
-  | checkpoint | mean pred/img | mean abs err/img | crops with 0 pred | crops over by 3+ | worst |
-  |---|---|---|---|---|---|
-  | best_1.pt (ep 65) | 1.75 | 1.06 | 0 | 0 | -5 |
-  | 1_150.pt (ep 150) | 2.41 | 1.59 | 2 | 2 | +13 |
-
-  The mean says 1_150 nearly matches GT and best_1 under-detects by 28%. Per
-  image it is the other way round. 1_150 predicts nothing on 2 crops that have
-  real hedges (pos_026918, pos_028651) and 16 lines on pos_024293, which has 3.
-  Those errors cancel in the mean. best_1 is duller but steadier: it never
-  returns nothing and never over-detects badly.
-
-  This reverses the earlier reading taken from the leaky split, where 1_150
-  looked better. Do not conclude either checkpoint is the better model yet.
-  The buffered metric is what settles it. See docs/lesson_learned.md,
-  "An average over images hides errors that cancel".
-
-  By eye on the same crops (screenshots detr_unet_polyline_{gt,best_1,1_150}
-  _val_cluster_t.95.png): on simple crops with one hedge both are accurate and
-  sit on the right feature. Both fail the same way where several labelled lines
-  meet at a junction (pos_009106, pos_013789, pos_027437), predicting one line
-  where GT has three or four. 1_150 falls apart on crowded crops.
 
 - 1_laptop (2026-07-22, in progress): laptop RTX PRO 3000. Same as cluster 1 but
   laptop overrides: workers=4, eval_every=10, n_val_subset=1000 (leaky local

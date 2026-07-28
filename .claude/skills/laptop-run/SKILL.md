@@ -12,8 +12,7 @@ pdok_dataset2 labels), so a laptop run's val numbers are not the honest
 baseline. Use it to watch the learning curve, not to report a final number.
 
 Paths come from `hedge_seg/paths.py` and resolve to the local machine
-automatically. Run scripts with `PYTHONPATH=. python` and the `hedge` conda
-env, which has geopandas/rasterio (the base env does not).
+automatically. Always `conda activate hedge` first, never base.
 
 ## Config overrides (edit in the cfg, do not commit)
 

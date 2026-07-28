@@ -8,6 +8,14 @@
   works. Do not pack several ideas into one sentence. If an explanation needs a
   term like "block buffering" or "start method", say what it means in plain
   words the first time it appears.
+- Keep it short. Docs, commit messages and chat all tend to grow. Before
+  finishing any text, cut it. Say the finding, the reason, and the number, then
+  stop. Drop background the reader already has, restatements of the same point,
+  and sentences that only lead into the next one.
+- Editing a doc means rewriting the section, not appending to it. If a new
+  paragraph overlaps an old one, merge them. A lesson is one short section, not
+  a history of what we thought over time.
+- A commit message is a few lines plus the numbers that matter. Not a report.
 - Do not add formatting flourishes to documentation. Plain text, plain lists.
 - Give full paths so they can be clicked, for example
   `scripts/train_detr_unet_polyline.py`, not "the training script".
@@ -61,8 +69,16 @@ Do not leave a doc describing the old behavior.
 ## Environments
 
 Local:
-- conda env `hedge` has geopandas, shapely, rasterio. The base env does not.
-  Run scripts with `PYTHONPATH=. python ...` from the repo root.
+- Always the conda env `hedge`, never base:
+
+  ```
+  conda activate hedge
+  PYTHONPATH=. python scripts/<script>.py
+  ```
+
+  Dependencies belong in `pyproject.toml` and get installed into `hedge`.
+  (Claude's own shell calls use `conda run -n hedge ...` instead, because
+  `conda activate` does not survive between calls. Same env.)
 - GPU is an RTX PRO 3000 with 12.3 GB, so it is only good for smoke tests and
   one image overfit runs.
 
@@ -130,6 +146,15 @@ otherwise the committed script stops being the record of what ran.
 `infer_polyline_dir` should be `polylines/val_cluster`, not `polylines/val`.
 See the split note under project specifics.
 
+## Screenshots
+
+`/home/fatemeh/Downloads/hedge/screenshots/`. Name a figure `<model>_<what it
+shows>`, so it can be found without being told. The model prefix matters, the
+run directory alone does not say which model it came from:
+`detr_unet_polyline_1_150_val_cluster_t.95.png`,
+`detr_unet_polyline_1_gt_cluster_t.95.png`,
+`detr_unet_polyline_exp1_tensorboard.png`.
+
 ## Skills
 
 `.claude/skills/` holds the two run procedures, invoked by name:
@@ -195,16 +220,12 @@ the committed script always shows the values that actually ran.
 - Only the ordered point loss knows about point order. Box, length and
   direction losses do not, and they stabilize a zigzag if their weight is high.
   Keep them at 0 unless there is a reason.
-- For small overfit runs, inspect the final checkpoint, not `best_*.pt`. Best
-  is chosen by eval loss, which stops falling after a few epochs when there is
-  not enough data to generalize.
-- This holds for real runs too. In cluster run 1 the final epoch 150 checkpoint
-  draws better polylines than `best_1.pt` from epoch 65, even though its eval
-  loss is higher. Never rank checkpoints or report results by eval loss on this
-  task. See "Eval loss is not detection quality" in `docs/lesson_learned.md`.
+- Never rank checkpoints or report results by eval loss, and do not trust a
+  mean over images either. Both gave the wrong answer on cluster run 1. Inspect
+  the final checkpoint as well as `best_*.pt`. See "No cheap measure can rank
+  two checkpoints" in `docs/lesson_learned.md`.
 - `infer_score_thresh` is a real knob, not a formality. Scores sit near 1, so
-  0.5 keeps almost everything. Cluster run 1 needed 0.95 to match the GT line
-  count.
+  0.5 keeps almost everything. Cluster run 1 uses 0.95.
 - The local and cluster conversions of pdok_dataset3 do NOT produce the same
   train/val split, because `avoid_label_dirs` sees 10 labels locally and 5,000
   on the cluster. About 46% of the local val crops were cluster training
