@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=12:00:00
-#SBATCH -o /home/%u/exps/hedge/detr_unet_polyline/1_%j.out
+#SBATCH --time=16:00:00
+#SBATCH -o /home/%u/exps/hedge/detr_unet_polyline/2_%j.out
 # Slurm mails when the job ends or fails. This comes from the cluster, so it
 # arrives even if the laptop is off.
 ##SBATCH --mail-type=END,FAIL

@@ -230,36 +230,64 @@ the log. 0% GPU with a busy CPU means a worker hang; a busy GPU means it is just
 slow. `exps/smoke_test_train_detr_unet_polyline.py` reproduces the eval to
 train transitions quickly and fails if this regresses.
 
-## No cheap measure can rank two checkpoints
+## No cheap measure can rank two checkpoints, so build the real one
 
-Cluster run 1, two checkpoints, same 32 cluster-val crops at threshold 0.95.
-Three cheap rankings, three different answers:
+Cluster run 1, two checkpoints, same cluster-val crops at threshold 0.95. Three
+cheap rankings gave three answers: eval loss picked `best_1.pt` (epoch 65),
+mean lines per image picked `1_150.pt`, mean error per image picked `best_1.pt`
+again. The mean count is the trap: per image `1_150.pt` predicts nothing on two
+crops that have hedges and 16 lines on a crop that has 3, and those cancel.
 
-- Eval loss picks `best_1.pt` (epoch 65). But most of the loss is
-  classification over 60 queries against about 3 real lines, so overfitting
-  hurts confidence calibration long before it hurts geometry.
-- Mean lines per image picks `1_150.pt`: 2.41 against 2.44 in GT, while
-  `best_1.pt` gives 1.75 and looks 28% low.
-- Mean error per image picks `best_1.pt` again: 1.06 against 1.59.
+Buffered length over all 3,098 val crops settled it. `1_150.pt` wins at every
+buffer, F1 0.640 against 0.614 at 10 m. So the checkpoint the eval loss calls
+overfit is the better detector, and its advantage is recall.
 
-The mean count is the trap. Per image, `1_150.pt` predicts nothing on 2 crops
-that have hedges and 16 lines on a crop that has 3, and those cancel.
-`best_1.pt` never returns nothing and never over-detects by 3 or more.
+Two rules follow. Do not report eval loss as a result, and do not early-stop on
+it. Aggregate per image and then average, never as a ratio of two totals,
+because errors of opposite sign cancel in a total.
 
-So do not report eval loss as a result, and never trust a mean over images
-without the per-image spread. The buffered metric must be per image and then
-aggregated, never a ratio of two totals. Keep both checkpoints, since ranking
-them needs both.
+## Chamfer plus Hungarian is the wrong metric for polylines
 
-## The score threshold has to be tuned, 0.5 is not a default
+The obvious detection metric is to pair each prediction with one GT line, the
+way a box detector pairs by IoU, and call the pair a hit if the chamfer
+distance is under 5, 10 or 15 m. It gives F1 0.41 where buffered length gives
+0.64, on the same predictions, and the figures agree with 0.64.
 
-Scores sit near 1: on 400 val crops the deciles are 0.775, 0.909, 0.961, 0.983,
-0.990, 0.997. So 0.5 keeps almost every query and the output looks flooded, 6.1
-lines per image against 3.4 in GT. At 0.95 it is 3.50 against 3.39.
+Two ordinary cases break the pairing:
 
-Check the threshold before blaming the model for over-detecting. But matching
-the count is not matching the location, and 0.95 was picked on count alone.
-Sweep it with the buffered metric and record the value with the run.
+- A hedge that turns a corner is one L-shaped GT line. A prediction covering
+  one leg is half right, but chamfer averages over the whole GT line, so the
+  far leg pushes the average to about 17 m and the pair fails at every
+  threshold. The correct half is thrown away.
+- A hedge stored as three overlapping GT lines can be paired with only one of
+  them. The other two count as misses even though the hedge was covered.
+
+Buffered length never pairs anything. It asks how much of the drawn length lies
+within r of a real hedge, and how much of the real hedge length has something
+drawn within r of it. Both cases then score honestly. Use `buffered_length_pr`
+in `hedge_seg/metrics.py`; `matched_pr` is kept there only to reproduce this.
+
+## Recall is limited by the score head, not by perception
+
+Sweeping `infer_score_thresh` down to 0.05 on run 1 gives recall 0.75 at 10 m,
+with precision falling to 0.41 and 8.4 predictions per image against 2.1 GT
+lines. So the model already draws a line within 10 m of three quarters of all
+GT hedge length. Those lines exist and are then discarded.
+
+They are discarded because the scores cannot rank them. Deciles on 400 crops
+are 0.775, 0.909, 0.961, 0.983, 0.990, 0.997, so nearly every prediction scores
+above 0.9 and good and bad lines look alike. F1 goes 0.632 at 0.90, 0.640 at
+0.95, 0.494 at 0.98: a knife edge, where 0.03 of threshold costs a third of the
+score. A calibrated score would fade gradually.
+
+This is not about images with no hedges; every crop has at least one. It is
+about the 58 of 60 queries that must be labelled "no object" in every image.
+`eos_coef=0.05` makes calling one of them a hedge cheap, so nothing pushes
+their scores down. Raising `eos_coef`, or replacing the softmax class head with
+a focal sigmoid head as Deformable-DETR and MapTRv2 do, is the change to try.
+
+The threshold itself is already at its optimum for `1_150.pt` at 0.95. Sweeping
+it further is not where the recall is.
 
 ## A checkpoint has to be evaluated on the split it was trained against
 
@@ -306,18 +334,44 @@ show.
 Settings stay in the committed cfg block. Command-line overrides were tried and
 removed: they make a run depend on something the file does not show.
 
-## Ground-truth artifacts that will distort precision and recall
+## Two label artifacts, one real and one that turned out not to matter
 
-Both visible by eye in the run 1 figures:
+Both are visible by eye in the run 1 figures, but only one survives measurement.
 
-- Hedges missing from the labels. The model draws them, and a naive metric
-  counts them as false positives.
-- One hedge split into several polylines. In one crop 3 overlapping GT lines
-  cover a single boundary while the model predicts 1, scoring 1 hit 2 misses.
+- One hedge split into several overlapping polylines: **not a problem**.
+  Merging GT lines within 10 m of each other removes 0.8% of GT lines and moves
+  F1 by 0.001. Buffered length is immune to it anyway, since it measures length
+  covered rather than lines matched. Do not spend more time on it.
+- Hedges missing from the labels: **still open**. The model draws them and the
+  metric counts them as false positives, so the reported precision of 0.70 is a
+  lower bound. Nothing can be fixed in the labels; the useful work is to
+  quantify it by classing the unmatched predictions in the lowest-precision
+  crops, so the result can be stated honestly.
 
-Do not stop at the first number the metric gives. Look at the worst false
-positives and negatives, and test merging GT polylines that lie within the
-buffer of each other.
+The general rule stands: measure the artifact before designing around it. The
+first one cost a paragraph of worry and was worth 0.001.
+
+## The worst crops were campsites, and filtering them out is not worth it
+
+Ranking val crops by false-positive length put the same thing on top every
+time: rows of identical chalets on small plots, each plot ringed by a clipped
+hedge. Not housing estates, which is what they look like. Top10NL lists 6
+building footprints in one whole 250 m crop and calls the ground grassland,
+because a chalet is not a registered building, so a built-up or building
+filter misses them entirely. The layer that finds them is
+`functioneel_gebied_vlak`, field `typefunctioneelgebied`, values camping,
+vakantiepark, bungalowpark, caravanpark. On 13 crops sorted by eye the
+separation was clean, 8 of 8 bad and 0 of 5 good.
+
+Then measuring killed the idea. Those crops are 315 of 3,098, 10.2%. Excluding
+them moves F1 from 0.640 to 0.652. They really are harder, 0.542 against 0.652,
+but 10% of crops cannot move a per-image average much.
+
+Two lessons. A crop that looks urban may be a campsite, and the layer that
+identifies a land use is not always the obvious one. And an exclusion can
+always be tested by dropping crops at scoring time
+(`exps/probe_recreation_crops.py` writes the stem list) before anyone touches
+the dataset. That test cost an afternoon and saved a reconversion.
 
 ## Done
 
@@ -355,40 +409,61 @@ Phase B — training half:
   (commands in `docs/experiment_log.md`). The local val directory is a
   different split, about 46% of it was in the cluster's training set, so
   figures taken from it were not the baseline.
-- `infer_score_thresh` raised from 0.5 to 0.95, which is where the predicted
-  line count stops being obviously wrong. Not a swept value, see TODO.
+- `infer_score_thresh` raised from 0.5 to 0.95 on line count, then confirmed by
+  sweep: 0.95 is the optimum for `1_150.pt`.
 - Inference made reproducible: self-naming run directories, ground truth
   linked next to the predictions, no manual steps.
 
+Phase B — measurement half. All of it, and it needed no training run:
+
+- `hedge_seg/metrics.py` and `exps/probe_polyline_pr.py`: buffered-length
+  precision and recall per image at 5, 10 and 15 m, plus the stratification,
+  the threshold sweep, the GT merge test and the geometry check.
+- Baseline on the 3,098 cluster val crops at 10 m: `1_150.pt` 0.70 precision,
+  0.59 recall, F1 0.640. At 15 m 0.78 / 0.67. It beats `best_1.pt` at every
+  buffer, so the ranking is settled and the eval loss was wrong.
+- Rough placement against YOLO-seg (80% precision, 70% recall): close on
+  precision at 15 m, behind on recall. Not the same measurement, so it is a
+  placement and not a parity claim.
+- Chamfer plus Hungarian rejected, with the reason recorded.
+- GT merging measured and dropped. Campsite exclusion measured and dropped.
+- Straightness and length checked: predictions match the labels, so the
+  "the model only draws straight lines" worry from the figures was wrong.
+- Recall traced to the score head rather than to perception.
+
 ## TODO
 
-Phase B — measurement half. Nothing here needs a new training run. The blocker
-is that there is still no way to say which checkpoint is better: eval loss says
-`best_1.pt`, mean line count says `1_150.pt`, and per-image error says
-`best_1.pt` again. In order:
+Phase C — the two runs the measurement points at, in order:
 
-- Build the buffered precision/recall metric (match predicted to GT polylines
-  within 5/10/15 m). Must be computed per image and then aggregated, never as a
-  ratio of two totals, because errors cancel in a total. This is what makes the
-  result comparable to YOLO-seg (80% precision, 70% recall).
-- Score both checkpoints with it and settle the ranking.
-- Then sweep `infer_score_thresh` with that metric. 0.95 was chosen because it
-  matches the GT line count, which the per-image numbers show is not a good
-  enough reason.
-- Check the worst false positives and negatives against the labels before
-  trusting any number, given the GT artifacts above. Test whether merging
-  overlapping GT polylines within the buffer changes the result.
-- Look at the junction failure: where several labelled lines meet, both
-  checkpoints predict one line instead of three or four. Worth knowing whether
-  that is a query-count limit, a matching effect, or a label convention.
+- Exp 2, running: full 26,902 train crops, 45 epochs, everything else identical
+  to exp 1. A data-only A/B, so any score change is caused by data. Score every
+  saved checkpoint with `exps/probe_polyline_pr.py`, not with the eval loss.
+- Exp 3: the score head. Raise `eos_coef` from 0.05, or swap the softmax class
+  head for a focal sigmoid head. This is the biggest single lever the
+  measurement found, since recall at threshold 0.05 is already 0.75. Keep it a
+  separate run so it is not confounded with the data change. A cheap read first:
+  resume from `1_150.pt` with the new coefficient for a few epochs and watch
+  whether the score distribution spreads out.
+
+Then, results-driven:
+
+- Quantify the missing-label rate by classing unmatched predictions in the
+  lowest-precision crops. It sets how much of the 0.30 false-positive length is
+  real error, and it is needed before any precision number is published.
+- Tree lines as a second class, from
+  `Top10NL2023_inrichtingselementen_lijn_bomenrij.shp`. Worth doing for the
+  class itself, not for the hedgerow score: precision is already 0.70 to 0.83
+  and the worst false positives were campsites, not tree rows. The crop world
+  extents already exist, so it is clip to each crop, append with `label=1`, set
+  `num_classes=2`.
+- Backbone unfreezing with low lr, and MapTRv2 decoupled self-attention,
+  regression-tested with the one-image overfit.
+- LiDAR height (`ahn4_10m_perc_95_normalized_height.tif`) last. At 10 m per
+  pixel it cannot localise a 3 m hedge, only say that tall vegetation is
+  present, which helps the part that is least broken. If tried, fuse it as a
+  side branch so the semseg-pretrained RGB backbone stays untouched.
 
 Note: the spatial split makes val numbers look worse than a random split would.
 That is expected; they are the real baseline to improve from.
-
-Phase C — decoupled self-attention (MapTRv2) as a clean A/B, regression-tested
-with the one-image overfit.
-
-Phase D — results-driven: full 30k run, backbone unfreezing with low lr, and
-tolerance-loss/border-filtering only if the error analysis points at them.
 
 

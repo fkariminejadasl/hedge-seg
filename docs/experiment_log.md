@@ -122,9 +122,54 @@ bbox 3900/903.
   | 1_150.pt (ep 150) | 2.41 | 1.59 | 2 | 2 | +13 |
 
   The mean flatters 1_150. Per image it predicts nothing on pos_026918 and
-  pos_028651 and 16 lines on pos_024293, which has 3, and those cancel. Neither
-  checkpoint is established as better. See docs/lesson_learned.md, "No cheap
-  measure can rank two checkpoints".
+  pos_028651 and 16 lines on pos_024293, which has 3, and those cancel. Counts
+  cannot rank the two; the buffered metric below can.
+
+- exp 1 scored, 2026-07-28. `exps/probe_polyline_pr.py`, buffered length,
+  all 3,098 cluster val crops, per image then averaged, t=0.95.
+
+  | checkpoint | 5 m | 10 m | 15 m |
+  |---|---|---|---|
+  | best_1.pt | .57/.39 F1 .466 | .75/.52 F1 .614 | .83/.59 F1 .688 |
+  | 1_150.pt | .54/.45 F1 .489 | .70/.59 F1 .640 | .78/.67 F1 .717 |
+
+  **1_150.pt wins at every buffer.** The eval loss turns at epoch 65 and the
+  detector keeps improving to 150, so do not early-stop on it.
+
+  1_150.pt at 10 m by GT line count. Precision flat, recall falls with density:
+
+  | GT lines | crops | share of GT lines | P | R | F1 |
+  |---|---|---|---|---|---|
+  | 1 | 1438 | 22% | .70 | .71 | .704 |
+  | 2-3 | 1220 | 43% | .71 | .51 | .596 |
+  | 4-6 | 363 | 25% | .68 | .42 | .520 |
+  | 7+ | 76 | 11% | .62 | .38 | .473 |
+
+  Threshold sweep, 1_150.pt at 10 m, from the t0.05 inference run:
+
+  | t | pred/img | P | R | F1 |
+  |---|---|---|---|---|
+  | 0.05 | 8.42 | .41 | .75 | .530 |
+  | 0.80 | 4.70 | .54 | .70 | .612 |
+  | 0.90 | 3.69 | .60 | .66 | .632 |
+  | 0.95 | 2.26 | .70 | .59 | **.640** |
+  | 0.98 | 0.83 | .86 | .35 | .494 |
+
+  0.95 is already the optimum, so no change. But recall is 0.75 at t=0.05:
+  the lines exist and the score cannot rank them. best_1.pt peaks at 0.90
+  (F1 .634), still under 1_150.pt.
+
+  Dead ends, all measured on the same predictions:
+
+  - Chamfer + Hungarian instead of buffered length: F1 .411 for 1_150.pt at
+    10 m against .640. Rejected, reason in docs/lesson_learned.md.
+  - Merging GT lines within 10 m: removes 0.8% of GT lines, F1 .640 -> .640.
+  - Excluding the 315 campsite crops (`exps/probe_recreation_crops.py`,
+    10.2% of val): F1 .640 -> .652. Campsite crops alone score .542. Real but
+    too small a share to be worth a dataset change.
+  - Straightness pred .893 against GT .909, median length 116 m against 120 m.
+    Predictions bend and stretch like the labels, so the "only straight lines"
+    impression from a 16-crop figure was a sampling artifact.
 
   By eye (screenshots detr_unet_polyline_{1_gt,best_1,1_150}_*cluster_t.95.png):
   both accurate on simple single-hedge crops; both predict one line where
@@ -152,6 +197,19 @@ bbox 3900/903.
   relaunched. At epoch 10, eval poly 0.075 below train poly 0.080: generalizing,
   not memorizing (unlike the 8-image runs). Use it to watch the curve, not for a
   final number.
+
+- inference at t=0.05 (2026-07-28, laptop): both exp 1 checkpoints re-inferred
+  over the 3,098 val_cluster crops so the threshold could be swept downward.
+  100 s per checkpoint, not the 30 min guessed from the training throughput:
+  inference has no backward pass. Sweeping needs a low-threshold run, since a
+  run saved at 0.95 can only be swept upward.
+
+- 2 (cluster, Phase C data A/B, 2026-07-28): full train split 26,902 instead of
+  the 5,000 subset, 45 epochs, save_every=10, everything else identical to
+  exp 1. Not warm started from exp 1: its 5,000 crops are a subset of these and
+  it had begun memorising them by epoch 65. Expect ~14 min/epoch, ~10.5 h.
+  Same val stems as exp 1, so the two are directly comparable under
+  `exps/probe_polyline_pr.py`.
 
 ## Phase A data conversion
 

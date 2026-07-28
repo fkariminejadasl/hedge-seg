@@ -40,7 +40,8 @@ Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of pol
 - **Polyline regression from embeddings** learns distribution well but struggles with precise coordinate prediction.
 - **High-resolution imagery** (PDOK aerial at 25 cm/px) significantly improves detection/segmentation over low-resolution LiDAR crops.
 - **Diffusion refinement** and **relative-coordinate heads** provide minimal improvement for location precision.
-- **Segmentation-based approaches** (YOLO-seg, UNet) outperform direct polyline regression, suggesting the task may be better framed as mask generation.
+- **Segmentation-based approaches** (YOLO-seg, UNet) outperform direct polyline regression, suggesting the task may be better framed as mask generation. This gap narrowed once the polyline runs were measured properly: `train_detr_unet_polyline` exp 1, trained on only 5,000 of 26,902 crops, scores 0.78 precision / 0.67 recall at a 15 m buffer on a geographically split val set. Not the same measurement as the YOLO-seg 80/70, so treat it as a placement rather than parity.
+- **Recall, not localisation, is now the limit**, and it is set by the classification head rather than by perception. Dropping the score threshold to 0.05 already puts a predicted line within 10 m of 75% of all ground-truth hedge length; those lines are then discarded because the scores are squashed near 1 and cannot rank them.
 
 
 
@@ -56,6 +57,7 @@ Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of pol
 - `hedge_seg/utils.py`: dataset inspection helpers (e.g. counting polylines/points per JSON label file) used ad hoc for dataset stats.
 - `hedge_seg/visualization.py`: plotting helpers for inspecting datasets and predictions, e.g. drawing YOLO boxes/segmentation and polylines on top of chip images.
 - `hedge_seg/training_utils.py`: small shared training helpers, currently `set_seed` for reproducibility across `random`/`numpy`/`torch`.
+- `hedge_seg/metrics.py`: detection metrics for polyline predictions. `buffered_length_pr` is the one to use: precision is the share of predicted line length within r of any ground-truth line, recall is the share of ground-truth line length within r of any prediction, computed per image and then averaged over images. Nothing is paired, so a prediction covering one leg of an L-shaped hedge counts as partly right and a hedge stored as several overlapping ground-truth lines is not penalised. `matched_pr` is the chamfer + Hungarian variant, kept only to reproduce why it was rejected (F1 0.41 against 0.64 on the same predictions). Also holds `densify`, `merge_close_polylines`, `straightness` and `meters_to_px` (PDOK crops are 0.25 m per pixel, so 10 m is 40 px).
 
 ### Scripts
 
@@ -92,5 +94,10 @@ All training scripts read datasets produced by the `scripts/data/*` workflows ab
 
 ### Experiments
 
+One-off probes are named `probe_*.py` and each one records what it found in its top docstring, so the answer does not have to be re-derived by running it.
+
+- `exps/probe_polyline_pr.py`: scores an inference run of `train_detr_unet_polyline.py` with `hedge_seg/metrics.py`. Reports buffered-length precision and recall at 5, 10 and 15 m, stratified by ground-truth line count, plus the score-threshold sweep, the rejected chamfer variant, the ground-truth merge test, the campsite exclusion and a straightness/length comparison against the labels. Only the run directories have to be listed, since each already contains its own ground truth. Baseline it produced on exp 1: `1_150.pt` 0.70 precision / 0.59 recall at 10 m, beating `best_1.pt` at every buffer despite having the worse eval loss.
+- `exps/probe_recreation_crops.py`: finds the crops that sit inside a campsite or holiday park, by querying the Top10NL `functioneel_gebied_vlak` layer (`typefunctioneelgebied`) over 20 km tiles and joining it against each crop's `bbox_world`. Writes a stem list so an exclusion can be tested at scoring time without touching the dataset. Result: 315 of 3,098 val crops, and excluding them moves F1 only from 0.640 to 0.652.
+- `exps/probe_batch_size.py`: finds the largest batch size that fits on the current GPU by running real training steps.
 - `exps/data.py`: raster/vector helpers (load GeoTIFF, clip/window a raster to a bbox, rasterize hedge polylines) shared by the training-data workflows.
 - `exps/pdok_wmts_training_data.py`: experimental WMTS workflow. It fetches PDOK WMTS tiles, caches them, builds a local GeoTIFF for a bbox, and can then generate training samples from that local cache.

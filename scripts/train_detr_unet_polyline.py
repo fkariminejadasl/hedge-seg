@@ -2192,7 +2192,7 @@ if __name__ == "__main__":
         # overrides: exp="<n>_laptop", num_workers=4, eval_every=10,
         # n_val_subset=1000 (its val split is leakier, so full val is not the
         # honest number anyway).
-        exp="1",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
+        exp="2",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
         save_path=EXP_ROOT / "detr_unet_polyline",
         # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
         # which writes geographically split polylines/{train,val} directories)
@@ -2201,7 +2201,13 @@ if __name__ == "__main__":
         val_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         pad_to=1024,  # images zero-padded 1000 -> 1024 (divisible by 32)
         augment=True,  # flip/rot90 of image + polylines (train split only)
-        n_train_subset=5000,  # None = full train split (24k)
+        # exp 2 is the data-scaling A/B against exp 1: full train split instead
+        # of a 5,000 subset, everything else identical, so any change in the
+        # buffered-length score is caused by data and nothing else. Not warm
+        # started from exp 1: those 5,000 crops are a subset of these 26,902 and
+        # exp 1 had begun memorising them by epoch 65, so its weights would bias
+        # the result.
+        n_train_subset=None,  # None = full train split (26,902 on the cluster)
         n_val_subset=None,  # None = full val split; subset only speeds up eval
         # backbone
         backbone_ckpt=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
@@ -2240,13 +2246,21 @@ if __name__ == "__main__":
         # the DETR batch size that max_lr=1e-4 is tuned for.
         # num_workers: train and eval loaders each keep their own persistent
         # workers, so 8 means 16 processes for the 18 CPUs of one A100.
-        n_epochs=150,
+        # n_epochs: exp 1 ran 5,000 crops for 150 epochs in 7 h, so about
+        # 0.031 s per train image, so 26,902 crops is about 14 min per epoch and
+        # 45 epochs is about 10.5 h. 45 epochs is also 1.2M image presentations
+        # against exp 1's 750k, comfortably past the point where exp 1 turned
+        # over by eval loss.
+        n_epochs=45,
         batch_size=16,  # images are 1024x1024; up3 gives 4096 tokens
         num_workers=8,  # 8 train + 8 eval = 16 procs for the 18 CPUs of an A100
         max_lr=1e-4,
         weight_decay=1e-2,
         disable_tqdm=True,
-        save_every=50,
+        # save_every=10, not 50: exps/probe_polyline_pr.py ranks checkpoints, and
+        # it disagrees with the eval loss (exp 1's "overfit" epoch 150 beat its
+        # best_1.pt). Keep enough checkpoints to score.
+        save_every=10,
         eval_every=5,  # evaluate every k epochs (best checkpoint only on eval epochs)
         seed=42,
         # checkpoints

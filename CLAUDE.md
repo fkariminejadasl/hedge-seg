@@ -77,8 +77,20 @@ Local:
   ```
 
   Dependencies belong in `pyproject.toml` and get installed into `hedge`.
-  (Claude's own shell calls use `conda run -n hedge ...` instead, because
-  `conda activate` does not survive between calls. Same env.)
+- Claude must call the interpreter by absolute path:
+
+  ```
+  /home/fatemeh/miniconda3/envs/hedge/bin/python <script>.py
+  ```
+
+  Not `conda run -n hedge`. If the editor was launched from a shell with
+  another env active, `VIRTUAL_ENV` and `PATH` are inherited by every tool
+  call and win over `conda run`, so `conda run -n hedge python` silently runs
+  the other env's interpreter. That happened once and produced a wrong claim
+  that geopandas was missing. The absolute path cannot be shadowed.
+- Scratch files go in `/home/fatemeh/Downloads/hedge/cluade/`, never `/tmp`,
+  which does not survive a reboot. Delete them once the result is in a
+  committed script or in the docs.
 - GPU is an RTX PRO 3000 with 12.3 GB, so it is only good for smoke tests and
   one image overfit runs.
 
