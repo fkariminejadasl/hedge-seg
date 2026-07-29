@@ -86,9 +86,17 @@ def main(cfg):
         if not (run_dir / "polylines").is_dir():
             raise FileNotFoundError(f"Not an inference run directory: {run_dir}")
 
+    # cfg.ids overrides the random pick, so a list from exps/probe_worst_crops.py
+    # can be pasted in and paged through.
+    chosen = list(cfg.ids) if cfg.ids else None
     page = 0
     while True:
-        ids = pick_ids(run_dirs[0], cfg.n, cfg.seed + page)
+        if chosen is None:
+            ids = pick_ids(run_dirs[0], cfg.n, cfg.seed + page)
+        else:
+            ids = chosen[page * cfg.n : (page + 1) * cfg.n]
+            if not ids:
+                return
         print(f"Showing {len(ids)} crops at score_thresh={cfg.score_thresh}: {ids}")
 
         # The ground truth is drawn once, from the first run, because every run
@@ -138,6 +146,9 @@ if __name__ == "__main__":
         n=16,  # crops per figure, drawn as a 4x4 grid
         seed=42,  # same seed gives the same crops, so figures stay comparable
         gt_only=False,  # skip the prediction figures
+        # None picks at random. Paste a list from exps/probe_worst_crops.py,
+        # e.g. [19018, 27324, 27068], to look at specific crops instead.
+        ids=None,
         save=False,
         save_dir=Path("/home/fatemeh/Downloads/hedge/screenshots"),
         model="detr_unet_polyline",  # figure name prefix, says which model it is

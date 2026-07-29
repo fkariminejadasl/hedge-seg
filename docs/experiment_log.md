@@ -255,6 +255,28 @@ bbox 3900/903.
   lines than the labels have, which is what L1 does under uncertainty about
   where a corner sits. Median length still matches, 120 m against 120 m.
 
+- exp 2 error analysis, 2026-07-29. `exps/probe_worst_crops.py` writes id lists
+  to `pdok_dataset3_polylines/`: `worst_fp_*.txt`, `worst_fn_*.txt`,
+  `missing_labels_*.txt`, ranked by unmatched length at 10 m, t=0.95.
+
+  Worst false positives are dominated by built-up and campsite crops:
+  pos_007788 (1412 m unmatched), 016359, 014293, 025317, 019018, 029463.
+  Worst false negatives are crops with ~1000 m of GT and almost nothing found:
+  pos_016471 (recall .14), 010771 (.09), 029904 (.17), 028417 (.10).
+
+  The missing-label rule (recall >= .8, precision <= .5, unmatched >= 100 m)
+  flags 40 crops. By eye on 16 of them, most are correct: pos_025224, 008752,
+  023818, 007358 and 025758 all show two or three clearly visible woody lines
+  where the labels have one. pos_019018 is the exception, a built-up crop the
+  model floods.
+
+  `exps/probe_treeline_overlap.py` then explains a quarter of it. On 300 random
+  val crops, 24.3% of unmatched predicted length is within 10 m of a Top10NL
+  tree row (`bomenrij`), against 1.2% near another hedge. Sanity check: 100% of
+  the training GT sits on the `heg` layer. On the 40 missing-label crops the
+  figure is 21.3%, so this is a general effect, not a property of the worst
+  crops.
+
 ## Phase A data conversion
 
 - local (2026-07-20): pdok_dataset3 (30k) -> pdok_dataset3_polylines.

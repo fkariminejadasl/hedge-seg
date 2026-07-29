@@ -364,14 +364,36 @@ Both are visible by eye in the run 1 figures, but only one survives measurement.
   Merging GT lines within 10 m of each other removes 0.8% of GT lines and moves
   F1 by 0.001. Buffered length is immune to it anyway, since it measures length
   covered rather than lines matched. Do not spend more time on it.
-- Hedges missing from the labels: **still open**. The model draws them and the
-  metric counts them as false positives, so the reported precision of 0.70 is a
-  lower bound. Nothing can be fixed in the labels; the useful work is to
-  quantify it by classing the unmatched predictions in the lowest-precision
-  crops, so the result can be stated honestly.
+- Woody lines missing from the labels: **measured, and a quarter of it is tree
+  rows**. See the next section. The reported precision is a lower bound.
 
 The general rule stands: measure the artifact before designing around it. The
 first one cost a paragraph of worry and was worth 0.001.
+
+## A quarter of the false positives are tree rows, not mistakes
+
+Top10NL splits linear woody features into two layers. Training uses only
+`inrichtingselementen_lijn_heg`. Tree rows are a separate layer,
+`inrichtingselementen_lijn_bomenrij`, with 266,783 features against 62,415
+hedges, and they are not in the labels at all. From above a tree row looks much
+like a hedgerow, so the model draws it and every metre counts as a false
+positive.
+
+`exps/probe_treeline_overlap.py` measures it. On 300 random val crops, **24.3%
+of the predicted length that matches no label is within 10 m of a tree line**,
+and only 1.2% is near another hedge, so this is not the crop clipping losing
+labels. The sanity check passes: 100% of the training GT sits on the heg layer.
+
+Exp 2 precision at 10 m is 0.783, so 0.217 of predicted length is unmatched and
+24.3% of that is 0.053. That is the measured size of the prize for adding tree
+lines as a second class, and it is why the reported precision is a lower bound
+on hedgerow performance rather than an honest error rate.
+
+This reverses an earlier call. Tree lines were ranked low because the worst
+crops looked like campsites rather than tree rows. The worst crops are not the
+typical crops: campsite exclusion moved F1 by 0.011, while tree rows account
+for a quarter of all unmatched length. Rank a fix by its share of the total,
+not by how bad the worst examples look.
 
 ## The worst crops were campsites, and filtering them out is not worth it
 
@@ -468,23 +490,34 @@ Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order
   epochs was short. Only worth spending after exp 3, since the score head is
   the larger effect.
 
+- Exp 5: tree lines as a second class, from
+  `Top10NL2023_inrichtingselementen_lijn_bomenrij.shp`. Now measured as worth
+  0.053 of predicted length, a quarter of all unmatched length. The crop world
+  extents already exist, so it is clip the layer to each crop, append with
+  `label=1`, set `num_classes=2`. Do it after exp 3 only because the score head
+  is simpler; if the data work is easier to schedule, swap the order.
+
 Then, results-driven:
 
-- Quantify the missing-label rate by classing unmatched predictions in the
-  lowest-precision crops. It sets how much of the 0.30 false-positive length is
-  real error, and it is needed before any precision number is published.
-- Tree lines as a second class, from
-  `Top10NL2023_inrichtingselementen_lijn_bomenrij.shp`. Worth doing for the
-  class itself, not for the hedgerow score: precision is already 0.70 to 0.83
-  and the worst false positives were campsites, not tree rows. The crop world
-  extents already exist, so it is clip to each crop, append with `label=1`, set
-  `num_classes=2`.
+- Bends. Exp 2 draws straighter lines than the labels (0.942 against 0.909) and
+  L-shaped hedges going round a field corner are the visible failure. Try the
+  ordered point loss weight, or more points per polyline, and check it with the
+  straightness numbers in `exps/probe_polyline_pr.py`.
+- Image resolution. Everything so far is 25 cm. Downsampling to 50 cm or 1 m
+  costs nothing to try and would say how much of the result depends on
+  resolution, which matters for applying this outside PDOK coverage. Not urgent.
+- Label date. Crops are 2016 imagery, and Top10NL carries `bronactual` and
+  `objectbegi` per feature, so a hedge mapped from a 2008 photo may no longer
+  exist. Filtering or weighting labels by date would clean part of the noise.
+  Worth checking the date spread first, since it may be small.
 - Backbone unfreezing with low lr, and MapTRv2 decoupled self-attention,
   regression-tested with the one-image overfit.
 - LiDAR height (`ahn4_10m_perc_95_normalized_height.tif`) last. At 10 m per
   pixel it cannot localise a 3 m hedge, only say that tall vegetation is
-  present, which helps the part that is least broken. If tried, fuse it as a
-  side branch so the semseg-pretrained RGB backbone stays untouched.
+  present, which helps the part that is least broken. It could help separate
+  hedges from tree rows, so revisit it if exp 5 shows the two classes are hard
+  to tell apart. If tried, fuse it as a side branch so the semseg-pretrained
+  RGB backbone stays untouched.
 
 Note: the spatial split makes val numbers look worse than a random split would.
 That is expected; they are the real baseline to improve from.
