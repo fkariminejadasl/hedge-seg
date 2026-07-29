@@ -510,6 +510,12 @@ Then, results-driven:
   `objectbegi` per feature, so a hedge mapped from a 2008 photo may no longer
   exist. Filtering or weighting labels by date would clean part of the noise.
   Worth checking the date spread first, since it may be small.
+- Border filtering. Polylines are clipped to the crop bounds, so a hedge
+  crossing the edge becomes a truncated line the model is asked to predict
+  exactly. Nothing drops or down-weights them. Carried over from the old
+  Phase D, where it was conditional on the error analysis pointing at it. The
+  error analysis has not been run for this specifically, so it is still
+  untested rather than dismissed.
 - Backbone unfreezing with low lr, and MapTRv2 decoupled self-attention,
   regression-tested with the one-image overfit.
 - LiDAR height (`ahn4_10m_perc_95_normalized_height.tif`) last. At 10 m per
