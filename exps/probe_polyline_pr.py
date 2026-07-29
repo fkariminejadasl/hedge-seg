@@ -12,12 +12,19 @@ run directories have to be listed. Edit the cfg at the bottom and run:
 
     /home/fatemeh/miniconda3/envs/hedge/bin/python exps/probe_polyline_pr.py
 
-Results on the run 1 cluster val split, 3,098 crops (2026-07-28). Full numbers
-in docs/experiment_log.md.
+Results on the cluster val split, 3,098 crops. Full numbers in
+docs/experiment_log.md.
 
-- Buffered length at 10 m: best_1.pt 0.75/0.52 (F1 0.614), 1_150.pt 0.70/0.59
-  (F1 0.640). 1_150.pt wins at every buffer, so the checkpoint the eval loss
-  calls overfit is the better detector. Rank by this metric, not by eval loss.
+- exp 2 (26,902 train crops) against exp 1 (5,000), both at t=0.95, at 10 m:
+  0.783/0.608 F1 0.685 against 0.702/0.589 F1 0.640. At 15 m 0.845/0.674
+  F1 0.750. The extra data bought precision (+0.08) far more than recall
+  (+0.02), and nothing at all on crowded crops.
+- exp 2's best threshold is 0.90, not 0.95: 0.701/0.696 F1 0.699 at 10 m. The
+  optimum moves with the model, so re-sweep after any change.
+- Buffered length at 10 m within exp 1: best_1.pt 0.75/0.52 (F1 0.614),
+  1_150.pt 0.70/0.59 (F1 0.640). 1_150.pt wins at every buffer, so the
+  checkpoint the eval loss calls overfit is the better detector. Rank by this
+  metric, not by eval loss.
 - The same predictions under chamfer + Hungarian: F1 0.41. It scores a
   prediction covering one leg of an L-shaped GT hedge as a total miss. The
   figures agree with 0.64, not with 0.41.
@@ -217,8 +224,8 @@ if __name__ == "__main__":
     root = DATA_ROOT / "pdok_dataset3_polylines"
     cfg = dict(
         run_dirs=[
-            root / "inference/best_1_val_cluster_t0.05",
-            root / "inference/1_150_val_cluster_t0.05",
+            root / "inference/1_150_val_cluster_t0.05",  # exp 1, 5,000 crops
+            root / "inference/best_2_val_cluster_t0.05",  # exp 2, 26,902 crops
         ],
         # Written by exps/probe_recreation_crops.py. Missing file just skips
         # the campsite rows.
@@ -227,8 +234,12 @@ if __name__ == "__main__":
         # sweep has something to sweep; 0.95 is the operating point run 1 uses.
         report_thresh=0.95,
         sweep=True,  # needs a run inferred at a low threshold
-        chamfer=True,  # slow, and only kept to document why it was rejected
-        merge_gt=True,  # slow
+        # chamfer and merge_gt validate the metric itself, not a run. They were
+        # settled on exp 1 (F1 0.41 against 0.64, and 0.001) and cost about
+        # 3 min per run directory, so leave them off unless the metric is being
+        # questioned again.
+        chamfer=False,
+        merge_gt=False,
         geometry=True,
     )
     main(cfg)

@@ -91,6 +91,9 @@ Local:
 - Scratch files go in `/home/fatemeh/Downloads/hedge/cluade/`, never `/tmp`,
   which does not survive a reboot. Delete them once the result is in a
   committed script or in the docs.
+- Claude's tool permissions belong in this project's own `.claude`, that is
+  `hedge-seg/.claude/settings.local.json`, not in whichever directory the
+  session happened to start in.
 - GPU is an RTX PRO 3000 with 12.3 GB, so it is only good for smoke tests and
   one image overfit runs.
 
@@ -126,12 +129,29 @@ Ask before submitting a job. Slurm jobs cost budget and run for hours.
 ## Bringing a cluster run back to the laptop
 
 - Copy the whole run directory, not the files inside it, so the local mirror
-  keeps the `<n>/` level and matches `~/exps/hedge`:
+  keeps the `<n>/` level and matches `~/exps/hedge`. The slurm script and the
+  log sit *beside* that directory on the cluster, so `scp -r` of the directory
+  alone silently leaves them behind. Take all three and put the two loose files
+  inside `<n>/` locally, so one directory holds the whole run:
 
   ```
-  scp -r me:~/exps/hedge/detr_unet_polyline/1 \
+  scp -r me:exps/hedge/detr_unet_polyline/2 \
       /home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/
+  scp me:exps/hedge/detr_unet_polyline/2.sh \
+      me:exps/hedge/detr_unet_polyline/2_<jobid>.out \
+      /home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/2/
   ```
+
+  The log is not optional. It records the git hash and the full text of the
+  training script, so it is the only proof of what actually ran.
+- Only the checkpoints being analysed are worth mirroring. `best_<n>.pt` and
+  `<n>.pt` are usually the same weights when the best epoch is the last one;
+  check before running inference twice. Delete the `<n>_<epoch>.pt` copies
+  locally once they are not needed, they are 80 MB each.
+- Inference at `infer_score_thresh=0.05` keeps everything, so the reporting
+  threshold can be swept in both directions afterwards. A run saved at 0.95 can
+  only be swept upward. The directory name records the *inference* cutoff, so
+  `best_2_val_cluster_t0.05` scored at 0.95 is normal and not a mistake.
 
 - Point checkpoint configs at `CLUSTER_EXP_ROOT`, never `EXP_ROOT`. It resolves
   to `~/exps/hedge` on the cluster and to the local mirror on the laptop, so

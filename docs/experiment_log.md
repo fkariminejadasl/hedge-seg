@@ -204,12 +204,56 @@ bbox 3900/903.
   inference has no backward pass. Sweeping needs a low-threshold run, since a
   run saved at 0.95 can only be swept upward.
 
-- 2 (cluster, Phase C data A/B, 2026-07-28): full train split 26,902 instead of
-  the 5,000 subset, 45 epochs, save_every=10, everything else identical to
-  exp 1. Not warm started from exp 1: its 5,000 crops are a subset of these and
-  it had begun memorising them by epoch 65. Expect ~14 min/epoch, ~10.5 h.
-  Same val stems as exp 1, so the two are directly comparable under
-  `exps/probe_polyline_pr.py`.
+- 2 (cluster, Phase C data A/B, 2026-07-28): job 25000671 on gpu_a100, git
+  601f93b. Full train split 26,902 instead of the 5,000 subset, 45 epochs,
+  save_every=10, everything else identical to exp 1. Not warm started from
+  exp 1. 14:26/epoch, 10:54:49 total. Same val stems as exp 1.
+
+  Losses: train 1.1756, eval 1.2076 at epoch 45. **Eval loss fell at every
+  single eval and best is the last epoch**. Exp 1 ended train 1.12 / eval 1.41, 
+  so the train-eval gap went from 0.29 to 0.03. 5.4x the data removed the 
+  overfitting completely, and the run was still improving when it stopped.
+
+  | epoch | 5 | 15 | 25 | 35 | 45 |
+  |---|---|---|---|---|---|
+  | train | 1.4495 | 1.3076 | 1.2407 | 1.1949 | 1.1756 |
+  | eval | 1.3990 | 1.2879 | 1.2455 | 1.2195 | 1.2076 |
+
+  Buffered length against exp 1, both at t=0.95 on the same 3,098 crops:
+
+  | buffer | exp 1 `1_150.pt` | exp 2 `best_2.pt` |
+  |---|---|---|
+  | 5 m | .535/.450 F1 .489 | .629/.484 F1 **.547** |
+  | 10 m | .702/.589 F1 .640 | .783/.608 F1 **.685** |
+  | 15 m | .778/.665 F1 .717 | .845/.674 F1 **.750** |
+
+  More data bought mostly precision, +0.08 at 10 m against +0.02 recall, and
+  the largest relative gain is at the tightest buffer (5 m F1 +0.058), so the
+  lines also sit more accurately.
+
+  **The optimal threshold moved from 0.95 to 0.90.** At 0.90 exp 2 gives
+  P 0.701 / R 0.696, F1 **0.699** at 10 m, against 0.685 at 0.95. Re-sweep the
+  threshold after any change to the model or the data; it is not a constant.
+  At t=0.05 recall is 0.840, up from 0.752, so the model now puts a line within
+  10 m of 84% of all GT hedge length.
+
+  By GT line count at 10 m, t=0.95 (exp 1 -> exp 2). Precision rose everywhere,
+  recall barely moved, so the dense-crop problem is not a data-volume problem:
+
+  | GT lines | P | R |
+  |---|---|---|
+  | 1 | .701 -> .788 | .707 -> .731 |
+  | 2-3 | .714 -> .786 | .512 -> .530 |
+  | 4-6 | .682 -> .774 | .420 -> .435 |
+  | 7+ | .619 -> .688 | .383 -> .372 |
+
+  Campsite crops excluded: F1 .685 -> .696, same small effect as exp 1.
+
+  Regression worth watching: predicted straightness rose to 0.942 against GT
+  0.909, and the strongly bent share fell to 0.101 against GT 0.220. Exp 1
+  matched the labels (0.893, 0.221). More data made the model draw straighter
+  lines than the labels have, which is what L1 does under uncertainty about
+  where a corner sits. Median length still matches, 120 m against 120 m.
 
 ## Phase A data conversion
 

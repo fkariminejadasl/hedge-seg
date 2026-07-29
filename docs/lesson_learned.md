@@ -286,8 +286,30 @@ about the 58 of 60 queries that must be labelled "no object" in every image.
 their scores down. Raising `eos_coef`, or replacing the softmax class head with
 a focal sigmoid head as Deformable-DETR and MapTRv2 do, is the change to try.
 
-The threshold itself is already at its optimum for `1_150.pt` at 0.95. Sweeping
-it further is not where the recall is.
+The threshold is not a constant. It was optimal at 0.95 for exp 1 and moved to
+0.90 for exp 2, worth F1 0.699 against 0.685. Re-sweep it after any change to
+the model or the data, and record the value with the run.
+
+## What 5.4x the data actually bought
+
+Exp 2 is exp 1 with the full 26,902 train crops instead of 5,000, nothing else
+changed. F1 at 10 m went 0.640 to 0.685, and at 5 m 0.489 to 0.547.
+
+The split of that gain is the useful part. Precision rose about 0.08 in every
+density bucket. Recall rose about 0.02 and did not move at all on the crowded
+crops, where it is worst (0.372 on crops with 7+ hedges). So more data makes
+the model surer about the lines it already draws, and does not make it find
+more lines in a busy crop. Do not expect a third dataset increase to fix
+recall; that is the score head's job.
+
+Overfitting did vanish. The train-eval gap went from 0.29 to 0.03 and eval loss
+was still falling at the last epoch, so 45 epochs was short rather than long.
+
+One regression came with it. Predicted straightness rose to 0.942 against 0.909
+in the labels, and the strongly bent share halved to 0.101 against 0.220. Exp 1
+matched the labels almost exactly. An L1 loss under uncertainty about where a
+corner sits is minimised by cutting the corner, and more data appears to have
+sharpened that bias rather than removed it. Watch it in the next run.
 
 ## A checkpoint has to be evaluated on the split it was trained against
 
@@ -433,17 +455,18 @@ Phase B — measurement half. All of it, and it needed no training run:
 
 ## TODO
 
-Phase C — the two runs the measurement points at, in order:
+Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
 
-- Exp 2, running: full 26,902 train crops, 45 epochs, everything else identical
-  to exp 1. A data-only A/B, so any score change is caused by data. Score every
-  saved checkpoint with `exps/probe_polyline_pr.py`, not with the eval loss.
 - Exp 3: the score head. Raise `eos_coef` from 0.05, or swap the softmax class
-  head for a focal sigmoid head. This is the biggest single lever the
-  measurement found, since recall at threshold 0.05 is already 0.75. Keep it a
-  separate run so it is not confounded with the data change. A cheap read first:
-  resume from `1_150.pt` with the new coefficient for a few epochs and watch
-  whether the score distribution spreads out.
+  head for a focal sigmoid head. This is now clearly the biggest lever. Exp 2
+  reaches recall 0.840 at threshold 0.05 and only 0.608 at 0.95, and the extra
+  data moved recall by 0.02 while moving precision by 0.08, so the lines are
+  being found and then thrown away by the ranking. Train on the full data so it
+  compares against exp 2. A cheap read first: resume from `best_2.pt` with the
+  new coefficient for a few epochs and watch whether the scores spread out.
+- Exp 4: longer. Exp 2's eval loss fell at every eval including the last, so 45
+  epochs was short. Only worth spending after exp 3, since the score head is
+  the larger effect.
 
 Then, results-driven:
 

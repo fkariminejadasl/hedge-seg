@@ -2181,8 +2181,15 @@ def main(cfg):
             torch.save(ckpt, cfg.save_path / f"{cfg.exp}_{epoch}.pt")
         scheduler.step()
 
+    # <exp>.pt is the last epoch, whatever its loss. save_every only fires on
+    # multiples, so with n_epochs=45 and save_every=10 there is no <exp>_45.pt
+    # and this is the only copy of the final weights.
     torch.save(ckpt, cfg.save_path / f"{cfg.exp}.pt")
-    print(f"Saved final model: {best_val:.4f} at epoch {epoch}")
+    final_loss = eval_losses["loss_total"] if eval_losses is not None else float("nan")
+    print(
+        f"Saved final model ({cfg.exp}.pt): epoch {epoch}, "
+        f"eval_total {final_loss:.4f} (best was {best_val:.4f})"
+    )
 
 
 if __name__ == "__main__":
@@ -2272,7 +2279,7 @@ if __name__ == "__main__":
         # CLUSTER_EXP_ROOT, not EXP_ROOT: cluster runs write here, and locally
         # it points at the scp'd mirror, so this path needs no editing when
         # running inference on a cluster checkpoint from either machine.
-        infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/1/best_1.pt",
+        infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/2/best_2.pt",
         infer_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val_cluster",
         infer_out_dir=DATA_ROOT / "pdok_dataset3_polylines/inference",
         infer_score_thresh=0.95,
