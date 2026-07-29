@@ -8,7 +8,7 @@ Lowres LiDAR height data: In 256 x 256 image the max number of polylines are 441
 
 There are 691,006 polylines and 4121 closed shape, which some are not originally closed but start and end are closeby, e.g. test_256_None.
 
-Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of polylines 50. 106,812 polylines in 30,000 images, e.g. pdok_dataset3. Crops are sampled per polyline, so 72.6% of crops overlap at least one other crop (up to 41 neighbors); a naive random 80/20 split would leak 68.5% of val crops into training. `scripts/data/convert_pdok_polylines_to_detr_polyline.py` fixes this with a geographic block split (verified zero overlap by construction), opens closed rings (0.45% of raw polylines, 302/67,430), and drops polylines under 10 m (3.16% of raw polylines, 3,378/106,812), giving 103,434 training polylines split train=24,253 / val=5,747.
+Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of polylines 50. 106,812 polylines in 30,000 images, e.g. pdok_dataset3. Crops are sampled per polyline, so 72.6% of crops overlap at least one other crop (up to 41 neighbors); a naive random 80/20 split would leak 68.5% of val crops into training. `scripts/data/convert_pdok_polylines_to_detr_polyline.py` fixes this with a geographic block split (verified zero overlap by construction), opens closed rings (0.45% of raw polylines, 302/67,430), and drops polylines under 10 m (3.16% of raw polylines, 3,378/106,812), giving 103,434 training polylines. The split depends on where the conversion runs, because `avoid_label_dirs` sees 10 pdok_dataset2 labels locally and 5,000 on the cluster: locally train=24,253 / val=5,747, on the cluster train=26,902 / val=3,098. The cluster split is the operative one, since it is what every cluster run trained against. A checkpoint must only be scored on the val stems of the conversion that produced it.
 
 ## Overview
 
@@ -30,8 +30,10 @@ Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of pol
 
 - **train_semseg_unet_resnet18**: Since integrating Ultralytics with polyline DETR was impractical, trained ResNet18-UNet for binary semantic segmentation (hedge mask + centerline) on high-resolution aerial data with 15 m polyline buffers. **Result: 60% precision, 40% recall numerically, but visual segmentation quality was reasonable**. Dataset: `scripts/data/{build_pdok_wms_dataset.py,convert_pdok_polylines_to_semseg.py}`.
 
-- **train_detr_unet_polyline.py**: Reimplemented polyline regression without diffusion, using MapTR hierarchical queries (per-polyline instance + per-point embeddings), iterative reference-point refinement, learned content queries, geometric losses off by default . Initialized backbone with pretrained ResNet18-UNet. Hypothesized hierarchical query design limited precision learning, but results similar to relative-coordinate approach. Note that, **train_detr_maptr_polyline** is similar to train_detr_unet_polyline but with DINOv3 backbone and different dataset and dataloader.
-    - LiDAR only (all 25 images), aerial only and combined​
+- **train_detr_unet_polyline**: Reimplemented polyline regression without diffusion, using MapTR hierarchical queries (per-polyline instance + per-point embeddings), iterative reference-point refinement, learned content queries, geometric losses off by default. Backbone initialized from the pretrained ResNet18-UNet of `train_semseg_unet_resnet18` and frozen. **Result: 0.70 precision / 0.70 recall at a 10 m buffer, 0.85 / 0.67 at 15 m** (exp 2, full 26,902 crops, geographic split, `exps/probe_polyline_pr.py`). This is the first polyline model that predicts locations rather than only the distribution, so the earlier hypothesis that the hierarchical query design limits precision is not supported. Dataset: `scripts/data/{build_pdok_wms_dataset.py,convert_pdok_polylines_to_detr_polyline.py}`. Note that **train_detr_maptr_polyline** is similar but with a DINOv3 backbone and a different dataset and dataloader.
+
+  Not tried yet:
+    - LiDAR only (all 25 images), aerial only and combined
     - Tree and hedgerow or only hedgerow
     - Different backbone/embeddings: DINOv3 sat, Google Satellite embeddings
 
@@ -58,6 +60,7 @@ Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of pol
 - `hedge_seg/utils.py`: dataset inspection helpers (e.g. counting polylines/points per JSON label file) used ad hoc for dataset stats.
 - `hedge_seg/visualization.py`: plotting helpers for inspecting datasets and predictions, e.g. drawing YOLO boxes/segmentation and polylines on top of chip images.
 - `hedge_seg/training_utils.py`: small shared training helpers, currently `set_seed` for reproducibility across `random`/`numpy`/`torch`.
+- `hedge_seg/paths.py`: resolves `DATA_ROOT`, `EXP_ROOT` and `CLUSTER_EXP_ROOT` from a filesystem marker, so the same script runs on the laptop and on Snellius with no path edits. `CLUSTER_EXP_ROOT` is `~/exps/hedge` on the cluster and the local mirror `~/Downloads/hedge/snellius` on the laptop, which is why checkpoint configs point at it rather than at `EXP_ROOT`.
 - `hedge_seg/metrics.py`: detection metrics for polyline predictions. `buffered_length_pr` is the one to use: precision is the share of predicted line length within r of any ground-truth line, recall is the share of ground-truth line length within r of any prediction, computed per image and then averaged over images. Nothing is paired, so a prediction covering one leg of an L-shaped hedge counts as partly right and a hedge stored as several overlapping ground-truth lines is not penalised. `matched_pr` is the chamfer + Hungarian variant, kept only to reproduce why it was rejected (F1 0.41 against 0.64 on the same predictions). Also holds `densify`, `merge_close_polylines`, `straightness` and `meters_to_px` (PDOK crops are 0.25 m per pixel, so 10 m is 40 px).
 
 ### Scripts
@@ -88,7 +91,7 @@ All training scripts read datasets produced by the `scripts/data/*` workflows ab
 
 #### Inference
 
-- `scripts/show_polyline_results.py`: views an inference run of `train_detr_unet_polyline.py`. List one or more run directories in its cfg block; it draws a GT figure plus one prediction figure per run, all over the same crops so panels can be compared directly. Needs only the run directories, since each already contains the matching ground truth.
+- `scripts/show_polyline_results.py`: views an inference run of `train_detr_unet_polyline.py`. List one or more run directories in its cfg block; it draws a GT figure plus one prediction figure per run, all over the same crops so panels can be compared directly. Needs only the run directories, since each already contains the matching ground truth. `score_thresh` filters the stored predictions by score, so a run inferred at 0.05 can be viewed at any higher threshold with no second inference pass; this was verified bit-identical to a real t=0.95 run on all 3,098 val crops. `save` writes the figures to `save_dir` as `<model>_<run>_<split>_t<thresh>.png`.
 - `scripts/infer_detr_dino_polyline.py`: loads a checkpoint from `train_detr_dino_polyline.py` (plain `model` or `model_with_diffusion`) and runs/visualizes polyline predictions on precomputed embeddings.
 - `scripts/infer_detr_dino_polyline_rel.py`: same as above for checkpoints from `train_detr_dino_polyline_rel.py` (box + relative-offset polyline head).
 
@@ -100,5 +103,15 @@ One-off probes are named `probe_*.py` and each one records what it found in its 
 - `exps/probe_polyline_pr.py`: scores an inference run of `train_detr_unet_polyline.py` with `hedge_seg/metrics.py`. Reports buffered-length precision and recall at 5, 10 and 15 m, stratified by ground-truth line count, plus the score-threshold sweep, the rejected chamfer variant, the ground-truth merge test, the campsite exclusion and a straightness/length comparison against the labels. Only the run directories have to be listed, since each already contains its own ground truth. Baseline it produced on exp 1: `1_150.pt` 0.70 precision / 0.59 recall at 10 m, beating `best_1.pt` at every buffer despite having the worse eval loss.
 - `exps/probe_recreation_crops.py`: finds the crops that sit inside a campsite or holiday park, by querying the Top10NL `functioneel_gebied_vlak` layer (`typefunctioneelgebied`) over 20 km tiles and joining it against each crop's `bbox_world`. Writes a stem list so an exclusion can be tested at scoring time without touching the dataset. Result: 315 of 3,098 val crops, and excluding them moves F1 only from 0.640 to 0.652.
 - `exps/probe_batch_size.py`: finds the largest batch size that fits on the current GPU by running real training steps.
+- `exps/dataset_stats.py`: per-dataset counts (crops, polylines, rings opened, short polylines dropped) used to fill the numbers in this file and in `docs/experiment_log.md`.
+- `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`: measures how much crops overlap geographically and how much a naive random split would leak, via `hedge_seg.utils.geographic_overlap_stats`. This is the evidence for the block split.
+- `exps/smoke_test_train_detr_unet_polyline.py`: fast end-to-end check of `train_detr_unet_polyline.py` (a few steps on a handful of crops) to catch breakage before a cluster job.
 - `exps/data.py`: raster/vector helpers (load GeoTIFF, clip/window a raster to a bbox, rasterize hedge polylines) shared by the training-data workflows.
+- `exps/basic_data.py`: early scratch helpers for loading and inspecting the raw hedge shapefile and rasters, superseded by `exps/data.py`.
 - `exps/pdok_wmts_training_data.py`: experimental WMTS workflow. It fetches PDOK WMTS tiles, caches them, builds a local GeoTIFF for a bbox, and can then generate training samples from that local cache.
+- `exps/download_pdok_aerial_images.py`, `exps/download_dutch_satellite_data.py`: one-off downloaders for PDOK aerial crops and for Dutch satellite imagery.
+- `exps/parametric_line.py`, `exps/pidinet_edge_detector.py`: from the initial investigation, before the DETR work. Parametric line fitting and the PiDiNet edge detector as conventional baselines for hedgerow delineation.
+
+### Cluster
+
+- `slurm/snellius_<model>.sh`: one submission script per model, copied to `~/exps/hedge/<model>/<n>.sh` and edited per run (see `CLAUDE.md`). Each prints the git hash, `hedge_seg/paths.py`, the data scripts and the whole training script before starting, so the `.out` log alone documents what ran.

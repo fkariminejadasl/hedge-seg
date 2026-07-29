@@ -166,7 +166,13 @@ def show_image_with_mask(image, mask, alpha=0.25):
     plt.show(block=False)
 
 
-def _read_polylines(polyline_path):
+def _read_polylines(polyline_path, score_thresh=None):
+    """
+    Read one polyline file. `score_thresh` keeps only predictions scoring at or
+    above it, so a run inferred at 0.05 can be viewed at any higher threshold
+    without running inference again. Ground truth has no scores and is returned
+    whole.
+    """
     polyline_path = Path(polyline_path)
 
     if polyline_path.suffix == ".json":
@@ -176,9 +182,10 @@ def _read_polylines(polyline_path):
         return np.asarray(data["polylines_px"], dtype=float)
 
     data = np.load(polyline_path)
-    if "polylines" in data:
-        return data["polylines"]
-    return data["polylines_px"]
+    polylines = data["polylines"] if "polylines" in data else data["polylines_px"]
+    if score_thresh is not None and "scores" in data:
+        polylines = polylines[data["scores"] >= score_thresh]
+    return polylines
 
 
 def _sample_id_from_path(path):
@@ -225,6 +232,8 @@ def show_polyline_grid(
     linewidth=1.5,
     seed=42,
     title="GT",
+    score_thresh=None,
+    save_path=None,
 ):
     image_dir = Path(image_dir)
     polyline_dir = Path(polyline_dir)
@@ -257,7 +266,7 @@ def show_polyline_grid(
 
         ax.imshow(image)
         if polyline_path.exists():
-            polylines = _read_polylines(polyline_path)
+            polylines = _read_polylines(polyline_path, score_thresh)
             for polyline in polylines:
                 polyline = np.asarray(polyline)
                 ax.plot(
@@ -273,6 +282,11 @@ def show_polyline_grid(
     fig.subplots_adjust(
         left=0.01, right=0.99, bottom=0.01, top=0.96, wspace=0.01, hspace=0.05
     )
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=110)
+        print(f"Saved {save_path}")
     plt.show(block=False)
 
 
