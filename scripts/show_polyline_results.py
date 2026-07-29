@@ -19,6 +19,9 @@ runs: the exp 1 optimum is 0.95 and the exp 2 optimum is 0.90.
 `detr_unet_polyline_best_2_val_cluster_t.95.png`, with the ground truth as
 `detr_unet_polyline_gt_val_cluster_t.95.png`.
 
+`gt_only` skips the prediction figures. Press `n` on a figure for a fresh set of
+crops, `q` or close the windows to stop.
+
 Edit the cfg at the bottom and run:
 
     /home/fatemeh/miniconda3/envs/hedge/bin/python scripts/show_polyline_results.py
@@ -42,6 +45,17 @@ def pick_ids(run_dir: Path, n: int, seed: int):
     rng = np.random.default_rng(seed)
     chosen = rng.choice(stems, size=min(n, len(stems)), replace=False)
     return [int(s.split("_")[-1]) for s in sorted(chosen)]
+
+
+def wait_for_key(figures):
+    """Block on the figures. "n" pages to new crops, anything else stops."""
+    pressed = []
+    for figure in figures:
+        figure.canvas.mpl_connect(
+            "key_press_event", lambda e: (pressed.append(e.key), plt.close("all"))
+        )
+    plt.show()
+    return pressed[0] if pressed else "q"
 
 
 def split_run_name(run_dir: Path):
@@ -72,32 +86,40 @@ def main(cfg):
         if not (run_dir / "polylines").is_dir():
             raise FileNotFoundError(f"Not an inference run directory: {run_dir}")
 
-    ids = pick_ids(run_dirs[0], cfg.n, cfg.seed)
-    print(f"Showing {len(ids)} crops at score_thresh={cfg.score_thresh}: {ids}")
+    page = 0
+    while True:
+        ids = pick_ids(run_dirs[0], cfg.n, cfg.seed + page)
+        print(f"Showing {len(ids)} crops at score_thresh={cfg.score_thresh}: {ids}")
 
-    # The ground truth is drawn once, from the first run, because every run of
-    # the same split has the same ground truth for these crops. It carries no
-    # scores, so score_thresh does not apply to it.
-    show_polyline_grid(
-        image_dir=cfg.image_dir,
-        polyline_dir=run_dirs[0] / "gt",
-        ids=ids,
-        n=cfg.n,
-        title="GT",
-        save_path=figure_path(cfg, run_dirs[0], "gt"),
-    )
-    for run_dir in run_dirs:
-        name, _ = split_run_name(run_dir)
-        show_polyline_grid(
-            image_dir=cfg.image_dir,
-            polyline_dir=run_dir / "polylines",
-            ids=ids,
-            n=cfg.n,
-            title=f"{name} t{cfg.score_thresh}",
-            score_thresh=cfg.score_thresh,
-            save_path=figure_path(cfg, run_dir, name),
-        )
-    plt.show()
+        # The ground truth is drawn once, from the first run, because every run
+        # of the same split has the same ground truth for these crops. It
+        # carries no scores, so score_thresh does not apply to it.
+        figures = [
+            show_polyline_grid(
+                image_dir=cfg.image_dir,
+                polyline_dir=run_dirs[0] / "gt",
+                ids=ids,
+                n=cfg.n,
+                title="GT",
+                save_path=figure_path(cfg, run_dirs[0], "gt"),
+            )
+        ]
+        for run_dir in [] if cfg.gt_only else run_dirs:
+            name, _ = split_run_name(run_dir)
+            figures.append(
+                show_polyline_grid(
+                    image_dir=cfg.image_dir,
+                    polyline_dir=run_dir / "polylines",
+                    ids=ids,
+                    n=cfg.n,
+                    title=f"{name} t{cfg.score_thresh}",
+                    score_thresh=cfg.score_thresh,
+                    save_path=figure_path(cfg, run_dir, name),
+                )
+            )
+        if wait_for_key(figures) != "n":
+            return
+        page += 1
 
 
 if __name__ == "__main__":
@@ -115,6 +137,7 @@ if __name__ == "__main__":
         score_thresh=0.95,  # exp 1 optimum 0.95, exp 2 optimum 0.90
         n=16,  # crops per figure, drawn as a 4x4 grid
         seed=42,  # same seed gives the same crops, so figures stay comparable
+        gt_only=False,  # skip the prediction figures
         save=False,
         save_dir=Path("/home/fatemeh/Downloads/hedge/screenshots"),
         model="detr_unet_polyline",  # figure name prefix, says which model it is

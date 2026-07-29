@@ -288,6 +288,7 @@ def show_polyline_grid(
         fig.savefig(save_path, dpi=110)
         print(f"Saved {save_path}")
     plt.show(block=False)
+    return fig
 
 
 def show_mask_grid(
