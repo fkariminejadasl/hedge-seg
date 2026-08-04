@@ -109,6 +109,19 @@ def main(cfg):
     ]
     missing = sorted(missing, key=lambda r: -r["fp_m"])[:n]
     write_ids(missing, out / f"missing_labels_{tag}.txt", "probably missing labels")
+
+    # The opposite end, for showing what the model does well. Sorted by how much
+    # hedge is in the crop, so these are busy crops that were found anyway, not
+    # single short lines that are easy by default.
+    best = [
+        r
+        for r in rows
+        if r["precision"] >= cfg["best_min_precision"]
+        and r["recall"] >= cfg["best_min_recall"]
+        and r["gt_m"] >= cfg["best_min_gt_m"]
+    ]
+    best = sorted(best, key=lambda r: -r["gt_m"])[:n]
+    write_ids(best, out / f"best_{tag}.txt", "best crops")
     print(
         f"\n{len(missing)} crops match the missing-label rule "
         f"(recall >= {cfg['missing_min_recall']}, "
@@ -128,5 +141,8 @@ if __name__ == "__main__":
         missing_min_recall=0.80,
         missing_max_precision=0.50,
         missing_min_fp_m=100.0,
+        best_min_precision=0.85,
+        best_min_recall=0.85,
+        best_min_gt_m=300.0,  # busy crops only, so "good" is not just an easy crop
     )
     main(cfg)

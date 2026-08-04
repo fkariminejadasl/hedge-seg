@@ -273,6 +273,8 @@ def show_polyline_grid(
                     polyline[:, 0],
                     polyline[:, 1],
                     "o-",
+                    alpha=0.65,
+                    markersize=2,
                     linewidth=linewidth,
                 )
 

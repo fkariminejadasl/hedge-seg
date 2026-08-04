@@ -77,7 +77,8 @@ def figure_path(cfg, run_dir: Path, what: str):
         return None
     _, split = split_run_name(run_dir)
     thresh = f"{cfg.score_thresh:.2f}".lstrip("0")
-    return Path(cfg.save_dir) / f"{cfg.model}_{what}_{split}_t{thresh}.png"
+    tag = f"{cfg.tag}_" if cfg.get("tag") else ""
+    return Path(cfg.save_dir) / f"{cfg.model}_{tag}{what}_{split}_t{thresh}.png"
 
 
 def main(cfg):
@@ -149,6 +150,7 @@ if __name__ == "__main__":
         # None picks at random. Paste a list from exps/probe_worst_crops.py,
         # e.g. [19018, 27324, 27068], to look at specific crops instead.
         ids=None,
+        tag="",  # goes into the figure name, e.g. "worst_fn" or "trees"
         save=False,
         save_dir=Path("/home/fatemeh/Downloads/hedge/screenshots"),
         model="detr_unet_polyline",  # figure name prefix, says which model it is

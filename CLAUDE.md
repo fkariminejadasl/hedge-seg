@@ -27,6 +27,11 @@
 - Never run `git commit` on your own. Make the change, run the formatter, say
   what changed and why, and propose the commit message. The user reviews it
   first and then says when to commit.
+- **Always end with a commit message, unprompted.** Every time the working tree
+  is left dirty, finish the reply with a ready-to-paste message covering
+  everything uncommitted, not only the last edit. Do not wait to be asked. If
+  the work splits into unrelated concerns, propose one message per commit and
+  say which files belong to each.
 - Never run `git push` unless the user says to push.
 - This holds even when the change was asked for and looks finished. Being asked
   to make a change is not permission to commit it.
@@ -57,6 +62,13 @@ pre-existing warnings alone and mention them instead.
   behind them. Has a Done and a TODO section for the phase plan.
 - `docs/experiment_log.md`: raw notebook of individual runs, in a terse style.
   Held to a lower bar than the other two.
+- `presentation/presentation.md`: the talk. Highlights only, short and
+  itemised, written for ecologists rather than for engineers. Where
+  `lesson_learned.md` gives the reasoning, this gives the conclusion in one
+  line. Keep a technical name in italic parentheses after the plain-language
+  version, so the audience follows and a specialist can still place it.
+- `presentation/README.md`: which figures the talk uses, what each set shows,
+  and the exact steps to remake them. No findings here, only mechanics.
 
 After a change, update the docs it affects, in the same commit:
 - New or changed behavior of a script: its top docstring and `descriptions.md`.
@@ -64,6 +76,9 @@ After a change, update the docs it affects, in the same commit:
   with the reason.
 - A finished or planned run: `experiment_log.md`, and move the phase plan's
   Done/TODO in `lesson_learned.md` if it changed.
+- A result that changes the headline numbers, the figures, or the next steps:
+  `presentation/presentation.md` too. It goes stale silently, because nothing
+  breaks when it is wrong.
 Do not leave a doc describing the old behavior.
 
 ## Environments

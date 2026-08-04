@@ -80,6 +80,7 @@ def main(cfg):
 
     n_unmatched = n_on_tree = n_on_heg = 0
     gt_on_layer = []
+    per_crop = []
     for stem in stems:
         bbox = json.loads(
             (DATA_ROOT / f"pdok_dataset3/labels/{stem}.json").read_text()
@@ -103,6 +104,7 @@ def main(cfg):
         n_unmatched += len(unmatched)
         if len(unmatched) == 0:
             continue
+        on_tree = 0
         for lines, counter in ((tree_lines, "tree"), (heg_lines, "heg")):
             if not lines:
                 continue
@@ -110,13 +112,24 @@ def main(cfg):
             hit = int((d <= radius).sum())
             if counter == "tree":
                 n_on_tree += hit
+                on_tree = hit
             else:
                 n_on_heg += hit
+        per_crop.append({"id": int(stem.split("_")[-1]), "on_tree_m": on_tree})
 
     print(f"\nsanity, GT on the heg layer: {np.mean(gt_on_layer):.1%} (want ~100%)")
     print(f"unmatched predicted length: {n_unmatched} sample points at 1 m spacing")
     print(f"  within {cfg['buffer_m']} m of a tree line: {n_on_tree / n_unmatched:.1%}")
     print(f"  within {cfg['buffer_m']} m of another heg: {n_on_heg / n_unmatched:.1%}")
+
+    # The crops where the model most clearly drew a tree row. Useful to show,
+    # because the prediction looks wrong against the labels and is right against
+    # the world.
+    top = sorted(per_crop, key=lambda r: -r["on_tree_m"])[: cfg["n_ids"]]
+    out = Path(cfg["out_path"])
+    out.write_text("\n".join(str(r["id"]) for r in top) + "\n")
+    print(f"\ntop tree-line crops -> {out}")
+    print(f"  ids: {', '.join(str(r['id']) for r in top[:20])}")
 
 
 if __name__ == "__main__":
@@ -130,5 +143,7 @@ if __name__ == "__main__":
         buffer_m=10,
         n_crops=300,  # random sample; the full 3,098 takes about 10x longer
         seed=0,
+        n_ids=40,
+        out_path=DATA_ROOT / "pdok_dataset3_polylines/treeline_crops.txt",
     )
     main(cfg)
