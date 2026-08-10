@@ -1,5 +1,11 @@
 # Working notes for Claude
 
+## Rules
+- At the start of a session, read `docs/description.md` (the Quick reference
+  section first), `docs/lesson_learned.md` and `docs/experiment_log.md` before
+  proposing or running anything. They are not loaded automatically, and they
+  hold what has already been tried, measured and ruled out.
+  
 ## How to write
 
 - Use simple language. Short sentences. No em dashes.
