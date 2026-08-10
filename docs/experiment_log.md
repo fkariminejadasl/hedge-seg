@@ -89,6 +89,40 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
+- 3 (cluster, planned, score-head A/B against exp 2): `cls_loss="focal"`, one
+  sigmoid per class with focal loss instead of softmax over {hedge, no-object},
+  focal_alpha=0.25, focal_gamma=2.0, class_cost and loss_ce raised 1.0 -> 2.0 to
+  match MapTR's recipe (focal is normalized by matched targets, not by query
+  count, so the weights are not on the old scale). Everything else identical to
+  exp 2: full 26,902 train crops, 45 epochs, same val stems. Not warm started,
+  the class head changed shape. ETA about 11 h on an A100, `--time=16:00:00`.
+
+  Why focal and not eos_coef: `exps/probe_score_quality.py` on exp 2 shows the
+  score ranks by straightness, not correctness. Correct bent lines have median
+  score 0.453, wrong straight ones 0.957, and t=0.95 keeps 9% of the former
+  against 74% of the latter. AUC for correct against wrong is 0.767 overall but
+  0.618 inside the bent group. eos_coef scales the no-object column uniformly,
+  so it moves all scores together and cannot fix a ranking problem.
+
+  Score at t=0.05 and re-sweep the threshold. A focal score is not on the same
+  scale as the softmax one, so exp 2's optimum of 0.90 carries no information.
+  Read it with `exps/probe_polyline_pr.py` and `exps/probe_score_quality.py`;
+  the second is the one that says whether the head did its job.
+
+  `loss_ce` and therefore `loss_total` are also on a new scale: focal is summed
+  and divided by the matched-target count, cross-entropy was a mean over all
+  queries. Do not compare exp 3's loss curve to exp 2's, only to itself.
+
+- probes, 2026-08-10, no training:
+  - `exps/probe_score_quality.py`: the score/straightness result above.
+  - `exps/probe_lidar_hedge_vs_tree.py`: AHN4 p95 height along 2,000 features
+    per layer. heg median 8.0 m, bomenrij 12.2 m, best single cut 9.0 m at
+    balanced accuracy 0.638. Height alone does not separate the two classes.
+  - Label dates: `pdok_dataset3` uses `Actueel_ortho25` downloaded 2026-04-29,
+    but 75.3% of the 62,415 hedge features have `bronactual` in 2014 or 2015.
+    About a ten year gap. PDOK serves `2016_ortho25` through `2025_ortho25`, so
+    a date-matched rebuild is possible. Not measured yet.
+
 - unet1 / detr_unet_polyline_1: overfit one image (val = same image), 2000 ep,
   4 enc / 4 dec (00:18:00). Validated frozen semseg features support polyline
   regression, sub-meter memorization. best_*.pt at epoch 1722.

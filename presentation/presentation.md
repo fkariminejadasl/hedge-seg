@@ -179,12 +179,13 @@ Rows of chalets, each plot ringed by a hedge. 10% of the test area.
 ## What is next
 
 1. **The confidence score.** At a low cut-off we already find 84%. The hedges
-   are found, then discarded by a score that cannot rank them
+   are found, then discarded by a score that cannot rank them. It also throws
+   away the bent ones, so this fixes corners too *(focal sigmoid class head)*
 2. **Tree rows as a second class**
-3. **Corners.** A hedge turning a field corner gets cut across
-4. **Longer training.** The model was still improving when we stopped
-5. **Lower resolution**, to see how much depends on 25 cm imagery
-6. **Label dates.** Photos are 2016, mapped hedges may be older
+3. **Longer training.** The model was still improving when we stopped
+4. **Lower resolution**, to see how much depends on 25 cm imagery
+5. **Label dates.** The photos are current, but three quarters of the mapped
+   hedges were drawn from 2014 or 2015 photos
 
 ---
 
@@ -196,6 +197,11 @@ Rows of chalets, each plot ringed by a hedge. 10% of the test area.
   bucket, recall +0.02, nothing on crowded crops
 - **Recall is limited by the confidence score.** 0.84 at a low cut-off, 0.61 at
   the operating point
+- **The score ranks lines by how straight they are, not by whether they are
+  right.** A correct bent hedge scores 0.45, a wrong straight one 0.96, so the
+  cut-off keeps 9% of the correct bent lines and 74% of the correct straight
+  ones. The "it only draws straight lines" impression is the cut-off, not the
+  model
 - **How you measure changes the answer by half.** Chamfer matching gives 0.41,
   buffered length 0.64, on identical predictions
 - **Validation loss cannot pick the best model.** It chose epoch 65; the metric

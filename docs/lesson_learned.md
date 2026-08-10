@@ -283,12 +283,46 @@ score. A calibrated score would fade gradually.
 This is not about images with no hedges; every crop has at least one. It is
 about the 58 of 60 queries that must be labelled "no object" in every image.
 `eos_coef=0.05` makes calling one of them a hedge cheap, so nothing pushes
-their scores down. Raising `eos_coef`, or replacing the softmax class head with
-a focal sigmoid head as Deformable-DETR and MapTRv2 do, is the change to try.
+their scores down.
 
 The threshold is not a constant. It was optimal at 0.95 for exp 1 and moved to
 0.90 for exp 2, worth F1 0.699 against 0.685. Re-sweep it after any change to
 the model or the data, and record the value with the run.
+
+## The score ranks lines by how straight they are, not by whether they are right
+
+Measured on exp 2 `best_2.pt`, all 3,098 val crops from the t=0.05 run. A
+prediction counts as correct if at least 80% of its length is within 10 m of a
+label. 7,956 of 39,104 predictions are correct.
+
+| straightness | median score, correct | median score, wrong |
+|---|---|---|
+| < 0.85 (bent) | **0.453** | 0.216 |
+| 0.85 to 0.95 | 0.883 | 0.690 |
+| 0.95 to 0.99 | 0.951 | 0.868 |
+| > 0.99 (straight) | 0.974 | **0.957** |
+
+A correct bent line scores 0.45 and a wrong straight one scores 0.96, so no
+single threshold can keep both. At t=0.95 only 9% of correct bent predictions
+survive against 74% of correct straight ones. The score's AUC for correct
+against wrong is 0.767 overall but only 0.618 inside the bent group, so most of
+its apparent skill is straightness acting as a proxy.
+
+Two earlier readings were wrong because of this, and both are corrected above:
+
+- "Exp 2 draws straighter lines than the labels" was a thresholding artifact.
+  The model draws bends. At t=0.80 predicted straightness is 0.908 against
+  0.909 in the labels, an almost exact match. Only the 0.95 cut makes it 0.942.
+- The bends problem and the recall problem are one problem, not two.
+
+This also rules out `eos_coef` as the fix. It scales the no-object column
+uniformly, so it moves every score together and cannot make the score track
+quality. The change that can is a focal sigmoid head as in Deformable-DETR and
+MapTRv2, which is exp 3. If focal alone does not separate correct from wrong
+inside the bent group, the next step is a quality-aware classification target
+(VarifocalNet style), where the target is the match quality rather than 1.
+
+Reproduce with `exps/probe_score_quality.py`.
 
 ## What 5.4x the data actually bought
 
@@ -305,11 +339,61 @@ recall; that is the score head's job.
 Overfitting did vanish. The train-eval gap went from 0.29 to 0.03 and eval loss
 was still falling at the last epoch, so 45 epochs was short rather than long.
 
-One regression came with it. Predicted straightness rose to 0.942 against 0.909
-in the labels, and the strongly bent share halved to 0.101 against 0.220. Exp 1
-matched the labels almost exactly. An L1 loss under uncertainty about where a
-corner sits is minimised by cutting the corner, and more data appears to have
-sharpened that bias rather than removed it. Watch it in the next run.
+The apparent straightness regression was not one. Predicted straightness at
+t=0.95 rose to 0.942 against 0.909 in the labels, but that is the threshold
+selecting straight lines, not the model losing bends. At t=0.80 it is 0.908.
+See "The score ranks lines by how straight they are" above.
+
+## The images are about ten years newer than the labels
+
+`pdok_dataset3` was built with `layer_name="Actueel_ortho25"` and downloaded on
+2026-04-29, so the crops are the current PDOK orthophoto, not 2016 imagery as
+an earlier note here claimed.
+
+The labels carry `bronactual`, the date of the photo each feature was drawn
+from. Over all 62,415 hedge features:
+
+| bronactual | features | share |
+|---|---|---|
+| 2014 to 2015 | 46,979 | 75.3% |
+| 2016 to 2022 | 15,180 | 24.3% |
+| 2004 to 2013 | 256 | 0.4% |
+
+So three quarters of the labels describe the landscape of 2014 or 2015 and the
+model sees 2025. A hedge removed since then is a false negative the model
+cannot avoid, and one planted since then is a false positive. Size unmeasured.
+
+This is fixable at the source. The same PDOK WMS serves yearly layers
+`2016_ortho25` through `2025_ortho25`, so a date-matched rebuild is one line in
+`scripts/data/build_pdok_wms_dataset.py` plus a re-download, which took about
+30 minutes for 30,000 crops. The cheap test first is to re-score an existing
+checkpoint on 2016 imagery of the val crops. A rise in recall is conclusive; a
+fall is not, because the model was trained on current imagery and would also
+pay a domain-shift cost.
+
+## LiDAR height does not separate hedges from tree rows
+
+The plan was to use `ahn4_10m_perc_95_normalized_height.tif` to tell the two
+Top10NL layers apart, on the assumption that tree rows are tall and hedges are
+short. Sampling the raster along 2,000 random features of each layer says
+otherwise:
+
+| layer | p25 | median | p75 |
+|---|---|---|---|
+| heg (hedge) | 4.0 m | 8.0 m | 12.3 m |
+| bomenrij (tree row) | 8.3 m | 12.2 m | 15.7 m |
+
+The best single height cut is 9.0 m at balanced accuracy 0.638. The reason is
+that Top10NL "heg, haag" includes tall hedgerows and houtwallen, not only
+clipped hedges, so the two classes genuinely overlap in height.
+
+Two caveats keep this a lower bound rather than a verdict: 10 m cells pick up
+neighbouring trees and buildings, and AHN4 is about 2020 while the labels come
+from 2014 photos. But height alone will not do it, so do not schedule the
+LiDAR branch as the way to separate the classes. RGB texture, meaning crown
+shape, gaps and shadow, is the more likely cue.
+
+Reproduce with `exps/probe_lidar_hedge_vs_tree.py`.
 
 ## A checkpoint has to be evaluated on the split it was trained against
 
@@ -479,13 +563,13 @@ Phase B — measurement half. All of it, and it needed no training run:
 
 Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
 
-- Exp 3: the score head. Raise `eos_coef` from 0.05, or swap the softmax class
-  head for a focal sigmoid head. This is now clearly the biggest lever. Exp 2
-  reaches recall 0.840 at threshold 0.05 and only 0.608 at 0.95, and the extra
-  data moved recall by 0.02 while moving precision by 0.08, so the lines are
-  being found and then thrown away by the ranking. Train on the full data so it
-  compares against exp 2. A cheap read first: resume from `best_2.pt` with the
-  new coefficient for a few epochs and watch whether the scores spread out.
+- Exp 3: the score head, ready to submit. Softmax over {hedge, no-object}
+  becomes one focal sigmoid, as in Deformable-DETR and MapTRv2
+  (`cls_loss="focal"`). Full data, 45 epochs, everything else as exp 2, so it
+  is a clean A/B. `eos_coef` was the other candidate and was rejected on
+  measurement, see the score section above. Score at t=0.05 and re-sweep: a
+  focal score is not on the same scale as the old softmax one, so exp 2's 0.90
+  means nothing here.
 - Exp 4: longer. Exp 2's eval loss fell at every eval including the last, so 45
   epochs was short. Only worth spending after exp 3, since the score head is
   the larger effect.
@@ -506,10 +590,9 @@ Then, results-driven:
 - Image resolution. Everything so far is 25 cm. Downsampling to 50 cm or 1 m
   costs nothing to try and would say how much of the result depends on
   resolution, which matters for applying this outside PDOK coverage. Not urgent.
-- Label date. Crops are 2016 imagery, and Top10NL carries `bronactual` and
-  `objectbegi` per feature, so a hedge mapped from a 2008 photo may no longer
-  exist. Filtering or weighting labels by date would clean part of the noise.
-  Worth checking the date spread first, since it may be small.
+- Label date. Checked, and the spread is not small. See "The images are about
+  ten years newer than the labels" above. Options are a date-matched rebuild on
+  `2016_ortho25`, or weighting labels by `bronactual`. Untested so far.
 - Border filtering. Polylines are clipped to the crop bounds, so a hedge
   crossing the edge becomes a truncated line the model is asked to predict
   exactly. Nothing drops or down-weights them. Carried over from the old

@@ -21,7 +21,9 @@ from pathlib import Path
 
 from omegaconf import OmegaConf
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# scripts/, not this file's own directory: the test moved to exps/ but the
+# training script it imports stayed in scripts/.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import train_detr_unet_polyline as t  # noqa: E402
 
@@ -64,8 +66,15 @@ def main():
         aux_loss=True,
         query_embed_mode="detr",
         with_refine=True,
+        # Mirrors the exp 3 config: focal sigmoid class head, MapTR weights.
+        # Set cls_loss="ce" (with class_cost=1.0, loss_ce=1.0) to exercise the
+        # exp 1 / exp 2 softmax head instead.
+        cls_loss="focal",
         eos_coef=0.05,
-        class_cost=1.0,
+        focal_alpha=0.25,
+        focal_gamma=2.0,
+        class_cost=2.0,
+        loss_ce=2.0,
         poly_cost=5.0,
         bbox_cost=0.0,
         loss_poly=5.0,
