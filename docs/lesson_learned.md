@@ -344,54 +344,90 @@ t=0.95 rose to 0.942 against 0.909 in the labels, but that is the threshold
 selecting straight lines, not the model losing bends. At t=0.80 it is 0.908.
 See "The score ranks lines by how straight they are" above.
 
-## The images are about ten years newer than the labels
+## The images are three years newer than the labels, not ten
 
-`pdok_dataset3` was built with `layer_name="Actueel_ortho25"` and downloaded on
-2026-04-29, so the crops are the current PDOK orthophoto, not 2016 imagery as
-an earlier note here claimed.
+Two facts, both checked:
 
-The labels carry `bronactual`, the date of the photo each feature was drawn
-from. Over all 62,415 hedge features:
+- `Actueel_ortho25` is bit-identical to `2025_ortho25` (0.00 mean pixel
+  difference on a test crop, against 26.15 for `2016_ortho25`). `pdok_dataset3`
+  was downloaded 2026-04-29, so the crops are **2025** imagery.
+- Top10NL2023 was "herzien op basis van luchtfoto 2022"
+  (`BRT_Actualiteitskaart_april_2023.pdf`), so the labels are **2022**.
 
-| bronactual | features | share |
+So the gap is about three years.
+
+An earlier note here called it ten years, from `bronactual` sitting in 2014 or
+2015 for 75.3% of the 62,415 hedge features. That read the field wrong.
+`bronactualiteit` is the currency of the source used for the last edit of that
+feature, not the last time the map was checked. Top10NL is revised for the
+whole country every year, and changes are trigger-based: two years of photos
+are compared and only a detected difference causes an edit. A hedge with
+`bronactual` 2015 was therefore re-confirmed as unchanged many times since. The
+residual worry is positional rather than existential: those geometries have not
+been redrawn in a decade, so they carry 2014 digitising accuracy.
+
+The cheap fix is not a re-download. Top10NL2025 was revised on 2024 and 2025
+photos, so taking the 2025 labels against the existing 2025 crops closes the
+gap to about zero and touches no imagery. Re-downloading crops at
+`2022_ortho25` to match the 2023 labels is the other direction and costs 47 GB.
+
+## Read the label definition before choosing a feature
+
+Top10NL does not separate hedges from tree rows by height. It separates them by
+whether the vegetation blocks the view at about eye level
+(https://kadaster.github.io/imbrt/):
+
+- bomenrij: at least 3 trees in a row, spaced so that "tot manshoogte geen
+  zichtbelemmering" (up to man-height it does **not** block the view).
+- heg, haag: a row of trees, with or without shrubs, spaced or under-grown so
+  that "tot minstens manshoogte het zicht belemmerd wordt" (up to at least
+  man-height it **does** block the view).
+
+So a tall row of trees is a heg when it has understory and a bomenrij when it
+does not. Height was never the criterion, and a first pass here that tested
+`perc_95` height alone concluded "lidar cannot separate them" at balanced
+accuracy 0.638. That conclusion was wrong, and it was wrong because the metric
+was chosen before the definition was read.
+
+## LiDAR structure does separate hedges from tree rows
+
+All 25 AHN4 metrics, 2,000 features per layer, split by 5 km geographic blocks
+so nearby features cannot straddle train and test:
+
+| features used | balanced accuracy | AUC |
 |---|---|---|
-| 2014 to 2015 | 46,979 | 75.3% |
-| 2016 to 2022 | 15,180 | 24.3% |
-| 2004 to 2013 | 256 | 0.4% |
+| height p95 only | 0.601 | 0.649 |
+| all 8 height metrics | 0.709 | 0.771 |
+| structure only, no height | **0.765** | **0.844** |
+| all 25, gradient boosting | **0.778** | **0.852** |
 
-So three quarters of the labels describe the landscape of 2014 or 2015 and the
-model sees 2025. A hedge removed since then is a false negative the model
-cannot avoid, and one planted since then is a false positive. Size unmeasured.
+Structure alone beats every height metric put together. The best single metric
+is the share of vegetation returns between 1 and 2 m, which is a literal
+measurement of the rule above:
 
-This is fixable at the source. The same PDOK WMS serves yearly layers
-`2016_ortho25` through `2025_ortho25`, so a date-matched rebuild is one line in
-`scripts/data/build_pdok_wms_dataset.py` plus a re-download, which took about
-30 minutes for 30,000 crops. The cheap test first is to re-score an existing
-checkpoint on 2016 imagery of the val crops. A rise in recall is conclusive; a
-fall is not, because the model was trained on current imagery and would also
-pay a domain-shift cost.
-
-## LiDAR height does not separate hedges from tree rows
-
-The plan was to use `ahn4_10m_perc_95_normalized_height.tif` to tell the two
-Top10NL layers apart, on the assumption that tree rows are tall and hedges are
-short. Sampling the raster along 2,000 random features of each layer says
-otherwise:
-
-| layer | p25 | median | p75 |
+| metric | heg | bomenrij | best single cut |
 |---|---|---|---|
-| heg (hedge) | 4.0 m | 8.0 m | 12.3 m |
-| bomenrij (tree row) | 8.3 m | 12.2 m | 15.7 m |
+| BR_1_2 (returns 1-2 m) | 0.079 | 0.008 | 0.739 |
+| BR_2_3 (returns 2-3 m) | 0.066 | 0.007 | 0.701 |
+| BR_above_3 | 0.686 | 0.933 | 0.696 |
+| height p95 | 8.0 m | 12.1 m | 0.635 |
 
-The best single height cut is 9.0 m at balanced accuracy 0.638. The reason is
-that Top10NL "heg, haag" includes tall hedgerows and houtwallen, not only
-clipped hedges, so the two classes genuinely overlap in height.
+A hedge puts ten times as much of its return profile in the 1-2 m layer as a
+tree row does. Two details worth keeping:
 
-Two caveats keep this a lower bound rather than a verdict: 10 m cells pick up
-neighbouring trees and buildings, and AHN4 is about 2020 while the labels come
-from 2014 photos. But height alone will not do it, so do not schedule the
-LiDAR branch as the way to separate the classes. RGB texture, meaning crown
-shape, gaps and shadow, is the more likely cue.
+- `pulse_penetration_ratio` is nearly useless here (0.526) despite measuring
+  openness, because it is ground returns over **all** returns in a 10 m cell,
+  and a linear feature covers only part of a cell, so the surrounding field
+  dominates. The band ratios use vegetation returns only, which normalizes that
+  away. Pick the metric whose denominator matches the thing being measured.
+- Each raster carries its own nodata value, and the band ratios use +3.4e38
+  while the height rasters use -3.4e38 or -99999. A single `value < -100` filter
+  silently keeps the positive sentinels.
+
+This is per-feature classification given that a line is already there, so it is
+an upper bound on what a 10 m grid can contribute, not a detector result. At
+10 m a 250 m crop is only 25x25 cells, so the right role is a side branch that
+informs the class, never the geometry.
 
 Reproduce with `exps/probe_lidar_hedge_vs_tree.py`.
 
@@ -453,6 +489,22 @@ Both are visible by eye in the run 1 figures, but only one survives measurement.
 
 The general rule stands: measure the artifact before designing around it. The
 first one cost a paragraph of worry and was worth 0.001.
+
+## Top10NL says itself that both layers are incomplete
+
+The specification (https://kadaster.github.io/imbrt/) marks heg and bomenrij
+"Volledigheid: Beperkt", limited completeness, and lists what is deliberately
+left out. For heg: not recorded inside built-up areas, not on a farmyard unless
+it continues past it, not on the outside of a wood or on a median strip under
+6 m, nominal minimum length 100 m. In practice 18.0% of heg features and 16.9%
+of bomenrij features are still under 100 m, because segments split at roads and
+water are exempt.
+
+This is the authoritative version of a thing already measured from the other
+side: reported precision is a lower bound, because the model is penalised for
+finding woody lines that the map excludes by rule. It also explains why the
+worst false-positive crops are built-up and campsite crops. Those hedges exist,
+and Top10NL is not supposed to contain them.
 
 ## A quarter of the false positives are tree rows, not mistakes
 
@@ -563,36 +615,36 @@ Phase B — measurement half. All of it, and it needed no training run:
 
 Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
 
-- Exp 3: the score head, ready to submit. Softmax over {hedge, no-object}
-  becomes one focal sigmoid, as in Deformable-DETR and MapTRv2
+- Exp 3: the score head, running as job 25396297. Softmax over {hedge,
+  no-object} becomes one focal sigmoid, as in Deformable-DETR and MapTRv2
   (`cls_loss="focal"`). Full data, 45 epochs, everything else as exp 2, so it
   is a clean A/B. `eos_coef` was the other candidate and was rejected on
   measurement, see the score section above. Score at t=0.05 and re-sweep: a
   focal score is not on the same scale as the old softmax one, so exp 2's 0.90
   means nothing here.
-- Exp 4: longer. Exp 2's eval loss fell at every eval including the last, so 45
-  epochs was short. Only worth spending after exp 3, since the score head is
-  the larger effect.
 
-- Exp 5: tree lines as a second class, from
-  `Top10NL2023_inrichtingselementen_lijn_bomenrij.shp`. Now measured as worth
-  0.053 of predicted length, a quarter of all unmatched length. The crop world
-  extents already exist, so it is clip the layer to each crop, append with
-  `label=1`, set `num_classes=2`. Do it after exp 3 only because the score head
-  is simpler; if the data work is easier to schedule, swap the order.
+- Exp 5, now the main data step, and it does two things in one conversion:
+  tree lines as a second class, and labels from Top10NL2025 instead of 2023.
+  The second closes the three-year image/label gap at no imagery cost, since
+  the crops are already 2025. Needs the 2025 heg and bomenrij shapefiles.
+  Tree lines are worth 0.053 of predicted length on their own.
+
+- LiDAR as a side branch, promoted from last place. Structure metrics separate
+  heg from bomenrij at balanced accuracy 0.778, so this is the natural partner
+  to the second class rather than an afterthought. Feed the band ratios
+  (BR_1_2, BR_2_3, BR_above_3, BR_below_5) and a couple of variability metrics,
+  not `perc_95` height and not all 25. Fuse as a side branch at 10 m so the
+  semseg-pretrained RGB backbone stays untouched, and use it only for the class
+  head, never for geometry.
+
+- Exp 4: longer. Exp 2's eval loss fell at every eval including the last, so 45
+  epochs was short. Cheap and safe, but it buys less than the two above.
 
 Then, results-driven:
 
-- Bends. Exp 2 draws straighter lines than the labels (0.942 against 0.909) and
-  L-shaped hedges going round a field corner are the visible failure. Try the
-  ordered point loss weight, or more points per polyline, and check it with the
-  straightness numbers in `exps/probe_polyline_pr.py`.
 - Image resolution. Everything so far is 25 cm. Downsampling to 50 cm or 1 m
   costs nothing to try and would say how much of the result depends on
   resolution, which matters for applying this outside PDOK coverage. Not urgent.
-- Label date. Checked, and the spread is not small. See "The images are about
-  ten years newer than the labels" above. Options are a date-matched rebuild on
-  `2016_ortho25`, or weighting labels by `bronactual`. Untested so far.
 - Border filtering. Polylines are clipped to the crop bounds, so a hedge
   crossing the edge becomes a truncated line the model is asked to predict
   exactly. Nothing drops or down-weights them. Carried over from the old
@@ -601,12 +653,13 @@ Then, results-driven:
   untested rather than dismissed.
 - Backbone unfreezing with low lr, and MapTRv2 decoupled self-attention,
   regression-tested with the one-image overfit.
-- LiDAR height (`ahn4_10m_perc_95_normalized_height.tif`) last. At 10 m per
-  pixel it cannot localise a 3 m hedge, only say that tall vegetation is
-  present, which helps the part that is least broken. It could help separate
-  hedges from tree rows, so revisit it if exp 5 shows the two classes are hard
-  to tell apart. If tried, fuse it as a side branch so the semseg-pretrained
-  RGB backbone stays untouched.
+
+Dropped, with the reason:
+
+- Bends as a separate work item. They are the score head's doing, not the
+  geometry's, so exp 3 covers them. See the score section above.
+- A date-matched rebuild on `2016_ortho25`. Wrong by three years in the wrong
+  direction, and 2016 imagery matches nothing in this dataset.
 
 Note: the spatial split makes val numbers look worse than a random split would.
 That is expected; they are the real baseline to improve from.

@@ -94,6 +94,41 @@ Adding tree rows as a second class is the obvious next data step.
 
 ---
 
+## What actually makes a hedge a hedge
+
+The reference map does not separate them by height. It separates them by
+whether you can **see through at eye level**.
+
+- **Tree row**: trees in a line, open underneath
+- **Hedge**: trees or shrubs, closed underneath by undergrowth
+
+So a tall line of trees is a hedge if it has undergrowth. We had assumed
+height, and height cannot tell them apart.
+
+---
+
+## Laser scanning can tell them apart, once you measure the right thing
+
+Airborne laser *(AHN4, 10 m grid)* counts how many returns come back from each
+height layer.
+
+| what we measure | hedge | tree row |
+|---|---:|---:|
+| returns between **1 and 2 m** | 7.9% | 0.8% |
+| height (95th percentile) | 8.0 m | 12.1 m |
+
+A hedge sends **ten times** as much back from eye level. Height barely
+separates them at all.
+
+Telling the two apart *(balanced accuracy, on held-out regions)*:
+
+- Height alone: **0.60**
+- Vegetation structure: **0.78**
+
+Adding laser height as a side input is now worth doing, and this is why.
+
+---
+
 ## Hedges the map is missing entirely (High R, low P)
 
 ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_missing_labels_gt_val_cluster_t.90.png) ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_missing_labels_best_2_val_cluster_t.90.png)

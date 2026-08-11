@@ -46,11 +46,15 @@ Ask before `sbatch`. It costs GPU budget and runs for hours.
 
    ```
    ssh me
-   cd ~/dev/hedge-seg && git pull --ff-only origin <branch> && git log --oneline -1
+   cd ~/dev/hedge-seg && git pull --ff-only origin <branch> \
+     && git log --oneline -1 && git status --porcelain
    ```
 
    Compare that hash against the local one. The cluster silently sits on an old
-   commit otherwise, and the run then documents the wrong code.
+   commit otherwise, and the run then documents the wrong code. `git status`
+   matters too: a modified tracked file on the cluster means the job runs code
+   that no commit describes, and the log's git hash then lies. Untracked junk
+   like `.vscode/` or downloaded `*.pt` weights is fine and can be ignored.
 
 5. Copy the slurm script and set `<n>` in three places so they match: the file
    name `<n>.sh`, the `-o` line, and `exp` in the training script cfg. Pick the
