@@ -46,8 +46,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 TOPO = Path("/home/fatemeh/Downloads/hedge/Topo10NL2023")
 LIDAR = Path("/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4")
 
-# Short names, from Table 3 of the metrics paper (essd.copernicus.org/articles/
-# 17/3641/2025). BR_x_y is the share of vegetation returns between x and y m.
+# The 25 AHN4 metrics, from Figure 3 and Table 3 of
+# https://essd.copernicus.org/articles/17/3641/2025 (data:
+# https://zenodo.org/records/15261042). Grouped as the paper groups them.
+# "Normalized height" is height above the ground surface. All 25 are computed
+# on a 10 m grid, and all except pulse_penetration_ratio use vegetation returns
+# only, which is why that one behaves differently (see the docstring).
+#
+# VEGETATION HEIGHT (7)
+#   max, mean, median, perc_25, perc_50, perc_75, perc_95 of vegetation height.
+#   median and perc_50 are the same quantity and the two rasters are identical.
+#
+# VEGETATION COVER AND DENSITY (11)
+#   pulse_penetration_ratio               ground returns / all returns
+#   density_absolute_mean_normalized_...  fraction above the mean height
+#   band_ratio_normalized_height_1        fraction below 1 m
+#   band_ratio_1_normalized_height_2      fraction between 1 and 2 m
+#   band_ratio_2_normalized_height_3      fraction between 2 and 3 m
+#   band_ratio_3_normalized_height        fraction above 3 m
+#   band_ratio_3_normalized_height_4      fraction between 3 and 4 m
+#   band_ratio_4_normalized_height_5      fraction between 4 and 5 m
+#   band_ratio_normalized_height_5        fraction below 5 m
+#   band_ratio_5_normalized_height_20     fraction between 5 and 20 m
+#   band_ratio_20_normalized_height       fraction above 20 m
+#
+# VEGETATION STRUCTURAL VARIABILITY (7)
+#   coeff_var   height standard deviation divided by mean height
+#   entropy     Shannon entropy over 0.5 m height bins
+#   kurto       kurtosis of vegetation height
+#   sigma_z     roughness, from residuals of a locally fitted plane
+#   skew        skewness of vegetation height
+#   std         standard deviation of vegetation height
+#   var         variance of vegetation height
 SHORT = {
     "ahn4_10m_band_ratio_normalized_height_1": "BR_below_1",
     "ahn4_10m_band_ratio_1_normalized_height_2": "BR_1_2",
@@ -205,30 +235,35 @@ def main(cfg):
         f"test {int(is_test.sum())} ({cfg['block_m'] / 1000:.0f} km blocks)"
     )
 
-    print("\nmultivariate, scored on the held-out blocks:")
+    n_h = sum(n.startswith("height_") for n in names)
+    n_s = len(names) - n_h
+    print(
+        f"\nmultivariate, scored on the held-out blocks "
+        f"({n_h} height metrics, {n_s} cover and variability):"
+    )
     for label, model, cols in [
         (
-            "height only (p95)",
+            "height only (p95), 1 metric",
             HistGradientBoostingClassifier(random_state=0),
             [names.index("height_p95")],
         ),
         (
-            "all height metrics",
+            f"all {n_h} height metrics",
             HistGradientBoostingClassifier(random_state=0),
             [j for j, n in enumerate(names) if n.startswith("height_")],
         ),
         (
-            "structure only (no height)",
+            f"the other {n_s}, no height at all",
             HistGradientBoostingClassifier(random_state=0),
             [j for j, n in enumerate(names) if not n.startswith("height_")],
         ),
         (
-            "all 25, logistic",
+            f"all {len(names)}, logistic",
             make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000)),
             list(range(len(names))),
         ),
         (
-            "all 25, gradient boosting",
+            f"all {len(names)}, gradient boosting",
             HistGradientBoostingClassifier(random_state=0),
             list(range(len(names))),
         ),

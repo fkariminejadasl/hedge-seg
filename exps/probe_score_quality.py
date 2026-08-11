@@ -6,8 +6,8 @@ actually ranks by. A prediction counts as correct when at least `min_cov` of
 its length lies within `buffer_m` of a label, which is the same buffered-length
 idea as hedge_seg/metrics.py, applied per prediction instead of per image.
 
-Result (2026-08-10, exp 2 `best_2.pt`, all 3,098 val crops from the t=0.05 run,
-10 m buffer): 7,956 of 39,104 predictions are correct.
+Result on exp 2 `best_2.pt` (2026-08-10, all 3,098 val crops from the t=0.05
+run, 10 m buffer): 7,956 of 39,104 predictions are correct.
 
     straightness      median score, correct   median score, wrong
     < 0.85 (bent)              0.453                  0.216
@@ -15,18 +15,26 @@ Result (2026-08-10, exp 2 `best_2.pt`, all 3,098 val crops from the t=0.05 run,
     0.95 to 0.99               0.951                  0.868
     > 0.99 (straight)          0.974                  0.957
 
-- A correct bent line scores 0.45, a wrong straight one scores 0.96, so no
-  single threshold keeps both. At t=0.95, 9% of correct bent predictions
-  survive against 74% of correct straight ones.
+- A correct bent line scores 0.45, a wrong straight one 0.96, so no single
+  threshold keeps both. At t=0.95, 9% of correct bent predictions survive
+  against 74% of correct straight ones.
 - AUC of the score for correct against wrong is 0.767 overall, but only 0.618
   inside the bent group. Most of its apparent skill is straightness as a proxy.
 - Predicted straightness at t=0.80 is 0.908 against 0.909 in the labels, so the
   "exp 2 draws straighter lines than the labels" regression was the 0.95 cut,
   not the model.
 
-This is the evidence for exp 3 being a focal sigmoid head rather than a change
-to eos_coef, which scales the no-object column uniformly and so cannot make the
-score track quality.
+Result on exp 3 `best_3.pt` (2026-08-11), the focal sigmoid head this probe
+motivated: the ranking did not improve. AUC 0.742 overall against exp 2's
+0.767, and 0.648 inside the bent group against 0.618, so a third of a point of
+the intended effect and a loss everywhere else. The scores collapsed into two
+clumps instead of spreading: a mass near 0.2 and a spike above 0.98, where
+correct and wrong straight lines sit together at 0.983 and 0.979. Changing the
+classification loss does not help, because the class head reads the mean of the
+20 point features and never sees how well those points fit the image.
+
+See `exps/probe_recall_null_model.py` for why this matters less than it looked:
+most of the recall below the operating threshold is clutter, not lost hedges.
 
     /home/fatemeh/miniconda3/envs/hedge/bin/python exps/probe_score_quality.py
 """
@@ -57,7 +65,12 @@ def auc(scores, positive):
 
 
 def main(cfg):
-    run_dir = Path(cfg["run_dir"])
+    for run_dir in cfg["run_dirs"]:
+        print(f"\n=== {Path(run_dir).name} ===")
+        one_run(Path(run_dir), cfg)
+
+
+def one_run(run_dir, cfg):
     radius = meters_to_px(cfg["buffer_m"])
 
     s_pred, scores, coverage, s_gt = [], [], [], []
@@ -120,11 +133,37 @@ def main(cfg):
         )
     print(f"  labels                {s_gt.mean():.3f}   {np.mean(s_gt < 0.90):.3f}")
 
+    # The four numbers the docs and the talk quote, spelled out, so a reader
+    # does not have to work out which cell of which table they came from.
+    bent, straight = s_pred < 0.85, s_pred > 0.99
+    t = 0.95
+    print(f"\nquoted elsewhere, all at t={t}:")
+    print(
+        f"  median score of a CORRECT BENT line (straightness < 0.85):  "
+        f"{np.median(scores[bent & ok]):.3f}"
+    )
+    print(
+        f"  median score of a WRONG STRAIGHT line (straightness > 0.99): "
+        f"{np.median(scores[straight & ~ok]):.3f}"
+    )
+    print(
+        f"  share of correct bent lines kept at t={t}:      "
+        f"{np.mean(scores[bent & ok] >= t):.3f}  "
+        f"(so {1 - np.mean(scores[bent & ok] >= t):.0%} are thrown away)"
+    )
+    print(
+        f"  share of correct straight lines kept at t={t}:  "
+        f"{np.mean(scores[straight & ok] >= t):.3f}"
+    )
+
 
 if __name__ == "__main__":
+    root = DATA_ROOT / "pdok_dataset3_polylines"
     cfg = dict(
-        run_dir=DATA_ROOT
-        / "pdok_dataset3_polylines/inference/best_2_val_cluster_t0.05",
+        run_dirs=[
+            root / "inference/best_2_val_cluster_t0.05",  # exp 2, softmax head
+            root / "inference/best_3_val_cluster_t0.05",  # exp 3, focal head
+        ],
         buffer_m=10,
         min_cov=0.8,  # share of a prediction's length that must sit on a label
         thresholds=[0.05, 0.50, 0.80, 0.90, 0.95, 0.98],

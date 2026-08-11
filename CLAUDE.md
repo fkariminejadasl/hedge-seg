@@ -57,8 +57,23 @@ pre-existing warnings alone and mention them instead.
 
 - No Claude Code attribution, no Co-Authored-By line, no tool names.
 - Explain why, not only what. Numbers are useful, for example
-  "0.354 GB per image, so 40 GB fits about 100".
+  0.354 GB per image, so 40 GB fits about 100.
 - Wrap at about 72 characters.
+- **The message must paste straight into `git commit -m "<message>"`.** So it
+  may not contain any of these four characters:
+
+  | character | why it breaks |
+  |---|---|
+  | `"` | closes the quote early |
+  | `'` | breaks the shell if the user quotes with it instead |
+  | `` ` `` | runs as a command inside double quotes |
+  | `$` | expands as a variable inside double quotes |
+
+  Write `cls_loss=focal`, not `` `cls_loss="focal"` ``. Say "the 0.05
+  threshold" as: the 0.05 threshold. Blank lines between paragraphs are fine
+  inside the quotes, so a multi-paragraph message still works with one `-m`.
+- Give it in a copyable block as the full command, `git commit -m "..."`, not
+  as bare text the user has to wrap themselves.
 
 ## Documentation layout
 

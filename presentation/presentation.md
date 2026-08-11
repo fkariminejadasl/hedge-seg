@@ -120,12 +120,20 @@ height layer.
 A hedge sends **ten times** as much back from eye level. Height barely
 separates them at all.
 
-Telling the two apart *(balanced accuracy, on held-out regions)*:
+Now train a classifier to say "hedge or tree row" from the laser data alone,
+and test it on **regions it never saw**. A score of 0.50 is a coin flip and
+1.00 is perfect:
 
-- Height alone: **0.60**
-- Vegetation structure: **0.78**
+| what it is allowed to use | score |
+|---|---:|
+| height only | 0.60 |
+| the 18 non-height measures | 0.77 |
+| all 25 measures | **0.78** |
 
-Adding laser height as a side input is now worth doing, and this is why.
+Height barely beats a coin flip. Structure gets most of the way there.
+
+So laser data is worth adding as a second input, and the useful part is the
+layer-by-layer density, not the height. *(`exps/probe_lidar_hedge_vs_tree.py`)*
 
 ---
 
@@ -176,6 +184,39 @@ Rows of chalets, each plot ringed by a hedge. 10% of the test area.
 
 ---
 
+## Know your reference map
+
+Our labels are the national topographic map *(Top10NL, Kadaster)*.
+
+**It is not a survey of every hedge.** It says so itself: completeness is
+*"Beperkt"*, limited. By rule it leaves out
+
+- hedges **inside built-up areas**
+- hedges **on a farmyard**, unless they carry on past the yard
+- anything under about **100 m** long
+
+So some of what we score as a false alarm is a real hedge the map is not meant
+to contain. **Our precision is a floor, not a true error rate.**
+
+---
+
+## Know your dates
+
+| | year |
+|---|---|
+| our aerial photos | **2025** |
+| the map we score against *(Top10NL 2023)* | drawn from **2022** photos |
+
+Three years apart. Hedges are planted and removed in three years.
+
+The map is redrawn every year for the whole country, so this is fixable: use
+the 2025 map instead. Both are downloaded.
+
+**The shape of the labels**, for reference: an average hedge runs 120 m, and
+one in four bends noticeably.
+
+---
+
 ## What we did: model
 
 - A **U-Net** first trained to colour hedge pixels, then **frozen** and reused
@@ -211,16 +252,27 @@ Rows of chalets, each plot ringed by a hedge. 10% of the test area.
 
 ---
 
+## One thing we tried, and it did not work
+
+We rebuilt the confidence score, believing the model already found the hedges
+and then threw them away *(focal sigmoid class head)*.
+
+**It got worse**, 0.70 to 0.66.
+
+Then we checked the belief and it was wrong: most of what we thought we had
+found was clutter. Eleven hours of computing to learn that, and worth it, since
+we were about to spend far more on the same idea.
+
+---
+
 ## What is next
 
-1. **The confidence score.** At a low cut-off we already find 84%. The hedges
-   are found, then discarded by a score that cannot rank them. It also throws
-   away the bent ones, so this fixes corners too *(focal sigmoid class head)*
-2. **Tree rows as a second class**
-3. **Longer training.** The model was still improving when we stopped
-4. **Lower resolution**, to see how much depends on 25 cm imagery
-5. **Label dates.** The photos are current, but three quarters of the mapped
-   hedges were drawn from 2014 or 2015 photos
+1. **Look at finer detail.** The model works on a grid where a 3 m hedge is
+   smaller than one cell. This is the real limit *(feature stride 16 to 8)*
+2. **Tree rows as a second class**, with laser structure to tell them apart
+3. **Use the 2025 map**, so photos and labels are the same year
+4. **Train the image backbone**, which is frozen today
+5. **Lower resolution**, to see how much depends on 25 cm imagery
 
 ---
 
@@ -230,13 +282,13 @@ Rows of chalets, each plot ringed by a hedge. 10% of the test area.
 - F1 0.685 at 10 m, 0.750 at 15 m
 - **More data buys precision, not recall.** Precision +0.08 in every crowding
   bucket, recall +0.02, nothing on crowded crops
-- **Recall is limited by the confidence score.** 0.84 at a low cut-off, 0.61 at
-  the operating point
-- **The score ranks lines by how straight they are, not by whether they are
-  right.** A correct bent hedge scores 0.45, a wrong straight one 0.96, so the
-  cut-off keeps 9% of the correct bent lines and 74% of the correct straight
-  ones. The "it only draws straight lines" impression is the cut-off, not the
-  model
+- **Half of the "hedges we found but discarded" were never found.** At the low
+  cut-off the model draws 13 lines per picture where 2 hedges exist. Score one
+  picture's lines against a *different* picture's map and you still score 0.38
+  of the 0.84. *(`exps/probe_recall_null_model.py`)*
+- **The confidence score ranks lines by how straight they are.** A correct bent
+  hedge scores 0.45, a wrong straight one 0.96
+  *(`exps/probe_score_quality.py`)*
 - **How you measure changes the answer by half.** Chamfer matching gives 0.41,
   buffered length 0.64, on identical predictions
 - **Validation loss cannot pick the best model.** It chose epoch 65; the metric

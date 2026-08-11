@@ -267,27 +267,39 @@ within r of a real hedge, and how much of the real hedge length has something
 drawn within r of it. Both cases then score honestly. Use `buffered_length_pr`
 in `hedge_seg/metrics.py`; `matched_pr` is kept there only to reproduce this.
 
-## Recall is limited by the score head, not by perception
+## Most of the recall at a low threshold is clutter, not lost hedges
 
-Sweeping `infer_score_thresh` down to 0.05 on run 1 gives recall 0.75 at 10 m,
-with precision falling to 0.41 and 8.4 predictions per image against 2.1 GT
-lines. So the model already draws a line within 10 m of three quarters of all
-GT hedge length. Those lines exist and are then discarded.
+This corrects the central claim of the last two months of work. "Recall is 0.84
+at t=0.05, so the model finds the hedges and the score throws them away" was
+wrong, and it cost an 11 hour run (exp 3) to find out.
 
-They are discarded because the scores cannot rank them. Deciles on 400 crops
-are 0.775, 0.909, 0.961, 0.983, 0.990, 0.997, so nearly every prediction scores
-above 0.9 and good and bad lines look alike. F1 goes 0.632 at 0.90, 0.640 at
-0.95, 0.494 at 0.98: a knife edge, where 0.03 of threshold costs a third of the
-score. A calibrated score would fade gradually.
+The hole in it: at t=0.05 the model draws about 13 lines per image against 2.1
+labelled lines. Buffered recall asks how much labelled length has *any*
+prediction within 10 m, and with 13 lines on a 250 m crop a lot of that happens
+by luck. `exps/probe_recall_null_model.py` measures the luck by scoring each
+crop's predictions against a *different* crop's labels, so the number, length
+and orientation of the lines are unchanged and only the link to the image is
+broken:
 
-This is not about images with no hedges; every crop has at least one. It is
-about the 58 of 60 queries that must be labelled "no object" in every image.
-`eos_coef=0.05` makes calling one of them a hedge cheap, so nothing pushes
-their scores down.
+| threshold | pred/img | real recall | null recall | skill |
+|---|---|---|---|---|
+| 0.05 | 12.6 | 0.840 | 0.379 | 0.461 |
+| 0.40 | 7.9 | 0.805 | 0.334 | 0.471 |
+| 0.90 | 3.2 | 0.696 | 0.266 | **0.431** |
+| 0.95 | 1.9 | 0.608 | 0.228 | 0.380 |
 
-The threshold is not a constant. It was optimal at 0.95 for exp 1 and moved to
-0.90 for exp 2, worth F1 0.699 against 0.685. Re-sweep it after any change to
-the model or the data, and record the value with the run.
+Nearly half of the celebrated 0.84 is what another crop's predictions would
+score. Skill peaks at 0.471 and is already 0.431 at the operating point, so a
+perfect score head is worth about 0.04 of recall, not the 0.23 the naive
+reading suggested. Exp 2's t=0.90 is close to the best the current predictions
+can support.
+
+Two rules. Any metric that rewards drawing more lines needs a null model before
+it is used to justify a run. And a threshold sweep is not evidence of headroom:
+falling precision as the threshold drops is the same fact as rising recall.
+
+The threshold is still not a constant. It was 0.95 for exp 1, 0.90 for exp 2
+and 0.40 for exp 3. Re-sweep after any change and record the value.
 
 ## The score ranks lines by how straight they are, not by whether they are right
 
@@ -315,14 +327,21 @@ Two earlier readings were wrong because of this, and both are corrected above:
   0.909 in the labels, an almost exact match. Only the 0.95 cut makes it 0.942.
 - The bends problem and the recall problem are one problem, not two.
 
-This also rules out `eos_coef` as the fix. It scales the no-object column
-uniformly, so it moves every score together and cannot make the score track
-quality. The change that can is a focal sigmoid head as in Deformable-DETR and
-MapTRv2, which is exp 3. If focal alone does not separate correct from wrong
-inside the bent group, the next step is a quality-aware classification target
-(VarifocalNet style), where the target is the match quality rather than 1.
+Exp 3 tried to fix this with a focal sigmoid head and failed. The ranking did
+not improve: AUC 0.742 against exp 2's 0.767 overall, and 0.648 against 0.618
+inside the bent group. The scores did not spread, they clumped: a mass near 0.2
+and a spike above 0.98 where correct and wrong straight lines sit together at
+0.983 and 0.979.
 
-Reproduce with `exps/probe_score_quality.py`.
+So the classification *loss* is not the problem. The class head reads the mean
+of the 20 point features (`class_embed(hs_poly.mean(dim=3))`) and never sees how
+well those points fit the image, so no reweighting of that head's loss can make
+its output track geometric quality. Changing what the head is told, rather than
+how it is scored, is the only version of this idea left, and after the null
+model above it is worth much less than it looked.
+
+Reproduce with `exps/probe_score_quality.py`, which prints exp 2 and exp 3 side
+by side.
 
 ## What 5.4x the data actually bought
 
@@ -348,9 +367,10 @@ See "The score ranks lines by how straight they are" above.
 
 Two facts, both checked:
 
-- `Actueel_ortho25` is bit-identical to `2025_ortho25` (0.00 mean pixel
-  difference on a test crop, against 26.15 for `2016_ortho25`). `pdok_dataset3`
-  was downloaded 2026-04-29, so the crops are **2025** imagery.
+- `Actueel_ortho25` is bit-identical to `2025_ortho25`: 0.00 mean pixel
+  difference on a test crop, against 29.51 for `2022_ortho25`, the year the
+  labels come from. `pdok_dataset3` was downloaded 2026-04-29, so the crops are
+  **2025** imagery.
 - Top10NL2023 was "herzien op basis van luchtfoto 2022"
   (`BRT_Actualiteitskaart_april_2023.pdf`), so the labels are **2022**.
 
@@ -396,10 +416,15 @@ so nearby features cannot straddle train and test:
 
 | features used | balanced accuracy | AUC |
 |---|---|---|
-| height p95 only | 0.601 | 0.649 |
-| all 8 height metrics | 0.709 | 0.771 |
-| structure only, no height | **0.765** | **0.844** |
+| height p95 only, 1 metric | 0.601 | 0.649 |
+| all **7** height metrics | 0.709 | 0.771 |
+| the other **18**, no height at all | **0.765** | **0.844** |
 | all 25, gradient boosting | **0.778** | **0.852** |
+
+(7 height metrics, not 8, as an earlier version of this table said. The paper
+lists max, mean, median and the 25th, 50th, 75th and 95th percentiles, and
+median and perc_50 are the same quantity in two identical rasters, so there are
+really only 6 distinct ones.)
 
 Structure alone beats every height metric put together. The best single metric
 is the share of vegetation returns between 1 and 2 m, which is a literal
@@ -430,6 +455,41 @@ an upper bound on what a 10 m grid can contribute, not a detector result. At
 informs the class, never the geometry.
 
 Reproduce with `exps/probe_lidar_hedge_vs_tree.py`.
+
+## Exp 3: the focal head made it worse, and that was informative
+
+Exp 2 with the softmax class head swapped for a focal sigmoid, MapTR weights,
+nothing else changed. Best F1 at 10 m fell from **0.699 to 0.664**.
+
+Each run at its own best threshold, so neither is handicapped. Exp 3's better
+checkpoint is the last epoch (`3.pt`, F1 0.664); `best_3.pt` gives 0.660.
+
+| | exp 2 `best_2.pt` | exp 3 `3.pt` |
+|---|---|---|
+| best F1 at 10 m | **0.699** at t=0.90 | 0.664 at t=0.40 |
+| P / R there | 0.701 / 0.696 | 0.779 / 0.578 |
+| pred per image there | 3.2 | 1.6 |
+| recall at t=0.05 | 0.840 | 0.845 |
+| score AUC, correct vs wrong | 0.767 | 0.739 |
+| same, inside the bent group | 0.618 | 0.642 |
+
+(The AUC rows are `3.pt`. For `best_3.pt` they are 0.742 and 0.648.)
+
+Perception did not change: recall at t=0.05 is the same to three decimals, so
+the model draws the same lines. The head just became more decisive about the
+wrong thing. Precision rose to 0.84 and recall collapsed to 0.51, and the score
+went bimodal rather than calibrated.
+
+Three things to take from it:
+
+- A more expressive loss on a head that cannot see the evidence does not make
+  it better informed. The class head averages the 20 point features and never
+  compares them to the image.
+- Focal's prior at p=0.01 plus normalisation by matched-target count makes the
+  head very reluctant. With 60 queries and 2.1 real lines, "predict almost
+  nothing" is a good place to sit.
+- The A/B was worth running even though it lost, because it is what forced the
+  null model above, and that overturned a bigger and older claim.
 
 ## A checkpoint has to be evaluated on the split it was trained against
 
@@ -492,13 +552,24 @@ first one cost a paragraph of worry and was worth 0.001.
 
 ## Top10NL says itself that both layers are incomplete
 
-The specification (https://kadaster.github.io/imbrt/) marks heg and bomenrij
-"Volledigheid: Beperkt", limited completeness, and lists what is deliberately
-left out. For heg: not recorded inside built-up areas, not on a farmyard unless
-it continues past it, not on the outside of a wood or on a median strip under
-6 m, nominal minimum length 100 m. In practice 18.0% of heg features and 16.9%
-of bomenrij features are still under 100 m, because segments split at roads and
-water are exempt.
+The specification (https://kadaster.github.io/imbrt/, extracted into
+`/home/fatemeh/Downloads/hedge/Top10NL/Top10NL Metadata.docx`) marks both heg
+and bomenrij "Volledigheid: Beperkt", limited completeness, and says in the heg
+collection criteria:
+
+> "Wordt niet opgenomen binnen bebouwd gebied en tussen tennisbanen. Een heg,
+> haag op of rondom een erf wordt niet ingewonnen, tenzij deze zich voortzet
+> voorbij het erf."
+
+Plainly: a hedge is not recorded inside a built-up area, or between tennis
+courts, and a hedge on or around a farmyard is not recorded unless it continues
+past the yard.
+
+The nominal minimum length is 100 m for both classes, but 18.0% of heg features
+(11,208 of 62,415) and 16.9% of bomenrij features (45,028 of 266,783) are
+shorter, because segments split at a road or a watercourse are exempt. Measured
+with `geometry.length` on the shapefiles in EPSG:28992, where the unit is
+metres.
 
 This is the authoritative version of a thing already measured from the other
 side: reported precision is a lower bound, because the model is penalised for
@@ -607,59 +678,72 @@ Phase B — measurement half. All of it, and it needed no training run:
   placement and not a parity claim.
 - Chamfer plus Hungarian rejected, with the reason recorded.
 - GT merging measured and dropped. Campsite exclusion measured and dropped.
-- Straightness and length checked: predictions match the labels, so the
-  "the model only draws straight lines" worry from the figures was wrong.
-- Recall traced to the score head rather than to perception.
+- Straightness and length checked: predictions match the labels below the
+  reporting threshold, so the "the model only draws straight lines" worry from
+  the figures is the threshold, not the model.
+
+Phase C — the score head, closed:
+
+- Recall was traced to the score head rather than to perception. **That was
+  wrong.** Exp 3's focal head lost (F1 0.699 -> 0.664), and the null model then
+  showed that half of the recall it was chasing is clutter. Both sections
+  above. Perception, not ranking, is the limit.
 
 ## TODO
 
 Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
 
-- Exp 3: the score head, running as job 25396297. Softmax over {hedge,
-  no-object} becomes one focal sigmoid, as in Deformable-DETR and MapTRv2
-  (`cls_loss="focal"`). Full data, 45 epochs, everything else as exp 2, so it
-  is a clean A/B. `eos_coef` was the other candidate and was rejected on
-  measurement, see the score section above. Score at t=0.05 and re-sweep: a
-  focal score is not on the same scale as the old softmax one, so exp 2's 0.90
-  means nothing here.
+Exp 3 is done and lost (0.699 -> 0.664). Exp 2 `best_2.pt` at t=0.90 remains
+the baseline. The score head is closed as a line of work: the null model says
+there is about 0.04 of recall behind it, not 0.23.
 
-- Exp 5, now the main data step, and it does two things in one conversion:
-  tree lines as a second class, and labels from Top10NL2025 instead of 2023.
-  The second closes the three-year image/label gap at no imagery cost, since
-  the crops are already 2025. Needs the 2025 heg and bomenrij shapefiles.
-  Tree lines are worth 0.053 of predicted length on their own.
+The bottleneck is that the model does not draw enough correct lines, worst
+where crops are crowded (exp 2 recall 0.372 on crops with 7+ labelled lines
+against 0.731 on crops with one). So the next runs should target perception.
 
-- LiDAR as a side branch, promoted from last place. Structure metrics separate
-  heg from bomenrij at balanced accuracy 0.778, so this is the natural partner
-  to the second class rather than an afterthought. Feed the band ratios
-  (BR_1_2, BR_2_3, BR_above_3, BR_below_5) and a couple of variability metrics,
-  not `perc_95` height and not all 25. Fuse as a side branch at 10 m so the
-  semseg-pretrained RGB backbone stays untouched, and use it only for the class
-  head, never for geometry.
+- Exp 4: finer features. `feature_stage="up3"` is stride 16, so a 1024 px crop
+  becomes a 64x64 grid and a 3 m hedge is 12 px, under one feature cell. Thin
+  structures cannot survive that. `FEATURE_STAGES` only has `enc4` (stride 32)
+  and `up3` (stride 16) today, so this means adding the next UNet decoder
+  stage at stride 8. Memory is available: batch 16 uses 5.8 of 40 GB, and
+  stride 8 is 4x the tokens. This is the most direct attack on the real limit.
 
-- Exp 4: longer. Exp 2's eval loss fell at every eval including the last, so 45
-  epochs was short. Cheap and safe, but it buys less than the two above.
+- Exp 5, the data step, two things in one conversion: tree lines as a second
+  class, and labels from Top10NL2025 instead of 2023. The second closes the
+  three-year image/label gap at no imagery cost, since the crops are already
+  2025. Both shapefiles are downloaded, in
+  `/home/fatemeh/Downloads/hedge/Top10NL2025`. Tree lines are worth 0.053 of
+  predicted length on their own.
+
+- LiDAR as a side branch, once the second class exists. Structure metrics
+  separate heg from bomenrij at balanced accuracy 0.778, so this is the partner
+  to exp 5. Feed the band ratios (BR_1_2, BR_2_3, BR_above_3, BR_below_5) and a
+  couple of variability metrics, not `perc_95` height and not all 25. Fuse at
+  10 m so the semseg-pretrained RGB backbone stays untouched, and use it only
+  for the class head, never for geometry.
+
+- Backbone unfreezing with low lr. Only 5.8 M of the network trains today. Pair
+  it with exp 4 rather than running it alone.
 
 Then, results-driven:
 
+- Longer training. Exp 2's eval loss fell at every eval including the last, so
+  45 epochs was short. Cheap, but it buys less than the above.
 - Image resolution. Everything so far is 25 cm. Downsampling to 50 cm or 1 m
   costs nothing to try and would say how much of the result depends on
   resolution, which matters for applying this outside PDOK coverage. Not urgent.
 - Border filtering. Polylines are clipped to the crop bounds, so a hedge
   crossing the edge becomes a truncated line the model is asked to predict
-  exactly. Nothing drops or down-weights them. Carried over from the old
-  Phase D, where it was conditional on the error analysis pointing at it. The
-  error analysis has not been run for this specifically, so it is still
-  untested rather than dismissed.
-- Backbone unfreezing with low lr, and MapTRv2 decoupled self-attention,
-  regression-tested with the one-image overfit.
+  exactly. Nothing drops or down-weights them. Still untested rather than
+  dismissed.
 
 Dropped, with the reason:
 
-- Bends as a separate work item. They are the score head's doing, not the
-  geometry's, so exp 3 covers them. See the score section above.
-- A date-matched rebuild on `2016_ortho25`. Wrong by three years in the wrong
-  direction, and 2016 imagery matches nothing in this dataset.
+- The score head, after exp 3. See above.
+- Bends as a separate work item. They are the threshold's doing, not the
+  geometry's.
+- A date-matched rebuild on `2016_ortho25`. 2016 imagery matches nothing here;
+  the labels are 2022 and the crops are 2025.
 
 Note: the spatial split makes val numbers look worse than a random split would.
 That is expected; they are the real baseline to improve from.

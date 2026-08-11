@@ -224,8 +224,8 @@ if __name__ == "__main__":
     root = DATA_ROOT / "pdok_dataset3_polylines"
     cfg = dict(
         run_dirs=[
-            root / "inference/1_150_val_cluster_t0.05",  # exp 1, 5,000 crops
-            root / "inference/best_2_val_cluster_t0.05",  # exp 2, 26,902 crops
+            root / "inference/best_2_val_cluster_t0.05",  # exp 2, softmax head
+            root / "inference/best_3_val_cluster_t0.05",  # exp 3, focal head
         ],
         # Written by exps/probe_recreation_crops.py. Missing file just skips
         # the campsite rows.

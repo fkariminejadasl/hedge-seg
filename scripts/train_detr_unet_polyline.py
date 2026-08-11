@@ -2330,29 +2330,35 @@ if __name__ == "__main__":
         aux_loss=True,
         query_embed_mode="detr",  # "detr" or "legacy"
         with_refine=True,  # per-layer reference-point refinement (MapTR-style)
-        # exp 3 is the score-head A/B against exp 2. Only the class head
-        # changes: softmax over {hedge, no-object} becomes one independent
-        # sigmoid trained with focal loss, as in Deformable-DETR and MapTRv2.
-        # Reason: with the softmax head the score tracks how straight a line is,
-        # not whether it is right. On exp 2 a correct bent prediction has median
-        # score 0.45 while a wrong straight one has 0.96, so no single threshold
-        # can keep both, and t=0.95 drops 91% of the correct bent lines. That is
-        # the same defect as the recall ceiling (recall 0.84 at t=0.05 against
-        # 0.61 at t=0.95). eos_coef was the other candidate and was rejected: it
-        # scales the no-object column uniformly, which moves all scores together
-        # and cannot make the score track quality.
-        cls_loss="focal",  # "focal" or "ce"; "ce" reproduces exp 1 and 2
+        # cls_loss picks the class head. "ce" is softmax over
+        # {hedge, no-object} with an eos_coef-weighted background column, used
+        # by exps 1 and 2. "focal" is one independent sigmoid per class with
+        # focal loss and no background column, as in Deformable-DETR and
+        # MapTRv2, used by exp 3.
+        #
+        # Exp 3 lost: best F1 at 10 m 0.664 against exp 2's 0.699. Perception
+        # was unchanged (recall 0.842 at t=0.05 against 0.840) but the head
+        # became far more reluctant, drawing 1.6 lines per image at its optimum
+        # against exp 2's 3.2, with 2.14 real lines. The ranking it was meant to
+        # fix barely moved: AUC for correct against wrong 0.742 against 0.767,
+        # and 0.648 against 0.618 inside the bent group. All numbers from
+        # exps/probe_polyline_pr.py and exps/probe_score_quality.py; run both to
+        # reproduce, they print exp 2 and exp 3 side by side.
+        #
+        # So "ce" is the setting to use. Left switchable because the comparison
+        # is worth being able to redo, not because focal is recommended.
+        cls_loss="ce",  # "ce" (exps 1, 2, best) or "focal" (exp 3, worse)
         eos_coef=0.05,  # unused when cls_loss="focal" (no no-object column)
         focal_alpha=0.25,
         focal_gamma=2.0,
         # criterion and matcher
-        # class_cost and loss_ce are 2.0 for focal, matching MapTR's recipe
-        # (cls 2.0, pts 5.0). They were 1.0 with the softmax head; focal loss is
-        # normalized by the number of matched targets, not by the query count,
-        # so the two are not on the same scale and the weight has to move with
-        # the head.
-        class_cost=2.0,
-        loss_ce=2.0,
+        # class_cost and loss_ce belong to the head and must move with it. 1.0
+        # is the exp 1 and 2 setting for "ce". For "focal" use 2.0 for both,
+        # matching MapTR's recipe (cls 2.0, pts 5.0), because focal is
+        # normalized by the number of matched targets rather than by the query
+        # count and so is not on the same scale.
+        class_cost=1.0,
+        loss_ce=1.0,
         poly_cost=5.0,
         bbox_cost=0.0,
         loss_poly=5.0,
@@ -2396,6 +2402,10 @@ if __name__ == "__main__":
         # CLUSTER_EXP_ROOT, not EXP_ROOT: cluster runs write here, and locally
         # it points at the scp'd mirror, so this path needs no editing when
         # running inference on a cluster checkpoint from either machine.
+        # exp 2 is the best run, and it is a "ce" checkpoint, so it matches the
+        # cls_loss above. To infer an exp 3 checkpoint (3/best_3.pt or 3/3.pt)
+        # set cls_loss="focal" as well, or the head is the wrong width and the
+        # load fails.
         infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/2/best_2.pt",
         infer_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val_cluster",
         infer_out_dir=DATA_ROOT / "pdok_dataset3_polylines/inference",

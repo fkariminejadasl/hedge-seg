@@ -66,15 +66,16 @@ def main():
         aux_loss=True,
         query_embed_mode="detr",
         with_refine=True,
-        # Mirrors the exp 3 config: focal sigmoid class head, MapTR weights.
-        # Set cls_loss="ce" (with class_cost=1.0, loss_ce=1.0) to exercise the
-        # exp 1 / exp 2 softmax head instead.
-        cls_loss="focal",
+        # Mirrors the committed training config: softmax head, the exp 1 and 2
+        # setting, which exp 3 failed to beat. To exercise the focal head
+        # instead set cls_loss="focal" with class_cost=2.0 and loss_ce=2.0;
+        # both paths are worth smoke testing after touching the class head.
+        cls_loss="ce",
         eos_coef=0.05,
         focal_alpha=0.25,
         focal_gamma=2.0,
-        class_cost=2.0,
-        loss_ce=2.0,
+        class_cost=1.0,
+        loss_ce=1.0,
         poly_cost=5.0,
         bbox_cost=0.0,
         loss_poly=5.0,

@@ -89,7 +89,50 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 3 (cluster, planned, score-head A/B against exp 2): `cls_loss="focal"`, one
+- 3 scored, 2026-08-11. **Lost.** Best F1 at 10 m 0.664 against exp 2's 0.699.
+  Both checkpoints, all 3,098 val crops, `exps/probe_polyline_pr.py`:
+
+  | run | best t | P | R | F1 @10m |
+  |---|---|---|---|---|
+  | exp 2 `best_2.pt` | 0.90 | .701 | .696 | **.699** |
+  | exp 3 `best_3.pt` | 0.40 | .781 | .572 | .660 |
+  | exp 3 `3.pt` (ep 45) | 0.40 | .779 | .578 | .664 |
+
+  The last epoch beats the best-eval-loss checkpoint again, by 0.004. Small,
+  but the third time the eval loss has ranked wrong.
+
+  Perception unchanged: recall at t=0.05 is 0.842 against exp 2's 0.840. The
+  head just got more reluctant. At its own optimum exp 3 draws 1.6 lines per
+  image against exp 2's 3.2, with GT at 2.14. Precision rose to 0.78 and recall
+  fell to 0.57.
+
+  `exps/probe_score_quality.py`: AUC for correct against wrong 0.742 (exp 2
+  0.767), inside the bent group 0.648 (exp 2 0.618). So the intended effect
+  appeared at a third of the size and cost more elsewhere. Scores clumped near
+  0.2 and above 0.98 rather than spreading; at >0.99 straightness, correct and
+  wrong sit at 0.983 and 0.979.
+
+  Geometry unchanged: predicted straightness 0.946 with bent<0.85 at 0.110,
+  against exp 2's 0.942 / 0.101 and GT 0.909 / 0.220.
+
+  Job 25396297, gpu_a100, git 34ea159, 11:28:40 for 45 epochs (15:05/epoch).
+  Train 1.4102 / eval 1.5658 at epoch 45, best eval 1.5624 at epoch 40. These
+  losses are not comparable to exp 2's, different normalisation.
+
+- recall null model, 2026-08-11, `exps/probe_recall_null_model.py`. The reason
+  exp 3 was worth running and the reason not to run a fourth score-head variant.
+  Scoring each crop's predictions against a different crop's labels:
+
+  | t | pred/img | real R | null R | skill |
+  |---|---|---|---|---|
+  | 0.05 | 12.6 | .840 | .379 | .461 |
+  | 0.90 | 3.2 | .696 | .266 | .431 |
+
+  Half of "recall 0.84 at t=0.05" is luck from drawing 13 lines per image.
+  Skill peaks at 0.471 (t=0.40) and is 0.431 at the operating point, so a
+  perfect score head is worth about 0.04 of recall. The score head is closed.
+
+- 3 (cluster, run 2026-08-10, score-head A/B against exp 2): `cls_loss="focal"`, one
   sigmoid per class with focal loss instead of softmax over {hedge, no-object},
   focal_alpha=0.25, focal_gamma=2.0, class_cost and loss_ce raised 1.0 -> 2.0 to
   match MapTR's recipe (focal is normalized by matched targets, not by query
@@ -118,10 +161,12 @@ bbox 3900/903.
   - `exps/probe_lidar_hedge_vs_tree.py`: AHN4 p95 height along 2,000 features
     per layer. heg median 8.0 m, bomenrij 12.2 m, best single cut 9.0 m at
     balanced accuracy 0.638. Height alone does not separate the two classes.
-  - Label dates: `pdok_dataset3` uses `Actueel_ortho25` downloaded 2026-04-29,
-    but 75.3% of the 62,415 hedge features have `bronactual` in 2014 or 2015.
-    About a ten year gap. PDOK serves `2016_ortho25` through `2025_ortho25`, so
-    a date-matched rebuild is possible. Not measured yet.
+  - Label dates, corrected 2026-08-11: the gap is three years, not ten.
+    `Actueel_ortho25` is bit-identical to `2025_ortho25` (0.00 mean pixel
+    difference, against 29.51 for `2022_ortho25`), and Top10NL2023 was revised
+    on 2022 photos. `bronactual` sitting in 2014-2015 for 75.3% of features
+    records the source of each feature's last edit, not the last check. Fix by
+    using Top10NL2025 labels on the existing crops.
 
 - unet1 / detr_unet_polyline_1: overfit one image (val = same image), 2000 ep,
   4 enc / 4 dec (00:18:00). Validated frozen semseg features support polyline
