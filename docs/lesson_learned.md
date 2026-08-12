@@ -363,6 +363,36 @@ t=0.95 rose to 0.942 against 0.909 in the labels, but that is the threshold
 selecting straight lines, not the model losing bends. At t=0.80 it is 0.908.
 See "The score ranks lines by how straight they are" above.
 
+## Check an overlay with a shift test, not with your eyes
+
+Before lidar can be an input, the crop-to-raster maths has to be right, and a
+one-cell error is 10 m. Looking at the overlay is not enough: the first crops
+tried were the ones with the most labelled hedge, which are so cluttered that
+something bright sits near every line whether the maths is right or wrong.
+
+Two changes made it decisive.
+
+- **Pick uncluttered crops to look at.** One long hedge across an empty field
+  shows a shift immediately. `pick_ids(..., max_lines=2)`.
+- **Measure it.** Sample the metric in the cells the hedges pass through, minus
+  the cells they do not, then repeat at whole-cell offsets. On `perc_95` over
+  40 crops the peak is at offset (0, 0) at 1.35 m, with every neighbour lower
+  (0.89 to 1.00). So the maths is right, and this now regression-tests itself.
+
+`exps/probe_lidar_crop_alignment.py`. It also writes `crop_footprints.geojson`
+so the same crops can be checked in QGIS against the uncropped layers.
+
+Two things this turned up in passing. Drawing the patch with nearest-neighbour
+interpolation matters, because smoothing hides exactly the half-cell shift being
+looked for. And in some crops the bright band follows the woody line visible in
+the photo while the label sits a little to one side of it, which is the 2014
+digitising accuracy showing up directly.
+
+Still unchecked: the dataset flips and rotates the image and polylines together
+*before* padding, so a lidar array added there has to be flipped and rotated
+too. That cannot show up in this probe, only in `mode="preview"` with
+`augment=True`.
+
 ## The images are three years newer than the labels, not ten
 
 Two facts, both checked:

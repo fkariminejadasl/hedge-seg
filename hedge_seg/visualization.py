@@ -293,6 +293,83 @@ def show_polyline_grid(
     return fig
 
 
+def show_polyline_single(
+    image_path,
+    polylines=None,
+    overlay=None,
+    alpha=0.5,
+    cmap="viridis",
+    clip_percentiles=(2, 98),
+    linewidth=1.5,
+    title=None,
+    save_path=None,
+):
+    """
+    One crop, full size, with optional polylines and an optional raster overlay.
+
+    The grid view is for comparing many crops; this is for looking hard at one,
+    which is what checking an overlay lines up needs.
+
+    overlay is any 2D array covering exactly the same ground as the image, at
+    any resolution. It is stretched to the image with `extent`, so a 25x25
+    lidar patch over a 1000x1000 crop needs no resampling here.
+    `interpolation="nearest"` keeps the cell edges visible, which is the point:
+    a half-cell shift is obvious, a smoothed one is not.
+    """
+    image = cv2.imread(str(image_path))
+    if image is None:
+        raise FileNotFoundError(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    h, w = image.shape[:2]
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.imshow(image)
+
+    if overlay is not None:
+        overlay = np.asarray(overlay, dtype=float)
+        # Clip the colour range, or one building sends everything else to the
+        # bottom of the colormap and the pattern under the lines disappears.
+        finite = overlay[np.isfinite(overlay)]
+        vmin, vmax = (
+            np.percentile(finite, clip_percentiles) if finite.size else (None, None)
+        )
+        ax.imshow(
+            overlay,
+            extent=[0, w, h, 0],
+            alpha=alpha,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            interpolation="nearest",
+        )
+
+    for polyline in np.asarray(polylines) if polylines is not None else []:
+        polyline = np.asarray(polyline)
+        ax.plot(
+            polyline[:, 0],
+            polyline[:, 1],
+            "o-",
+            color="red",
+            markersize=2,
+            linewidth=linewidth,
+        )
+
+    ax.set_xlim(0, w)
+    ax.set_ylim(h, 0)
+    ax.axis("off")
+    if title:
+        ax.set_title(title, fontsize=9)
+    fig.tight_layout(pad=0.2)
+
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=110, bbox_inches="tight")
+        print(f"Saved {save_path}")
+    plt.close(fig)
+    return fig
+
+
 def show_mask_grid(
     image_dir,
     mask_dir,
