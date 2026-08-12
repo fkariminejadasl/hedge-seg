@@ -82,7 +82,12 @@ pre-existing warnings alone and mention them instead.
 - `docs/lesson_learned.md`: curated lessons that generalize, with the reason
   behind them. Has a Done and a TODO section for the phase plan.
 - `docs/experiment_log.md`: raw notebook of individual runs, in a terse style.
-  Held to a lower bar than the other two.
+  Held to a lower bar than the other two. It opens with a **"How each dataset
+  was made"** table: which script built which directory, from what input, and
+  anything about rebuilding it that the script docstring does not say. Add a
+  row whenever a dataset is created, and edit the row whenever the script that
+  builds it changes. This is the one part of that file held to the same bar as
+  the other docs, because a deleted dataset can only be rebuilt from it.
 - `presentation/presentation.md`: the talk. Highlights only, short and
   itemised, written for ecologists rather than for engineers. Where
   `lesson_learned.md` gives the reasoning, this gives the conclusion in one
@@ -90,6 +95,18 @@ pre-existing warnings alone and mention them instead.
   version, so the audience follows and a specialist can still place it.
 - `presentation/README.md`: which figures the talk uses, what each set shows,
   and the exact steps to remake them. No findings here, only mechanics.
+
+Two rules for `presentation.md` specifically:
+
+- **Every number, claim or finding names where it came from**, as an experiment
+  number or the script that produced it, in italic parentheses at the end of
+  the line, for example `*(exp 2, exps/probe_polyline_pr.py)*`.
+- **A slide must fit one page.** Marp does not warn, it silently cuts off the
+  bottom. Budget for the default 16:9 theme: about 13 lines of body text, or
+  about 5 lines plus one `h:420` image, and no body line over about 95
+  characters. Marp runs as a VS Code extension here, not on the command line,
+  so Claude cannot render to check. Keep to the budget, do not change a tested
+  image height blind, and say when a slide should be exported and looked at.
 
 After a change, update the docs it affects, in the same commit:
 - New or changed behavior of a script: its top docstring and `descriptions.md`.
@@ -141,8 +158,16 @@ Cluster (Snellius, `ssh me`):
   CLUSTER_EXP_ROOT from a filesystem marker, so the same script runs on both
   machines with no edits. CLUSTER_EXP_ROOT locally points at
   `/home/fatemeh/Downloads/hedge/snellius`, which mirrors `~/exps/hedge`.
-- Limits are fine so far but worth checking: `myquota prjs1025` for disk and
-  inodes, `accinfo` for the GPU budget.
+- Check `myquota prjs1025` before generating a dataset and `accinfo` before
+  submitting a job, because either can run out. Watch inodes as well as bytes:
+  a dataset is two files per crop, so a 30,000-crop dataset is 60,000 inodes.
+  Report what the commands say; do not copy the numbers into the docs, they
+  change constantly.
+- To free space, delete intermediate checkpoints first: the `<n>_<epoch>.pt`
+  snapshots, once a run has been scored. Keep `best_<n>.pt` and `<n>.pt`,
+  because the last epoch has beaten the best-eval one three times. Do not
+  delete `pdok_dataset3` or any other dataset unless there is no alternative
+  and the user has agreed; regenerating one is slow and changes the split.
 - A100 gives 18 CPUs per GPU, H100 gives 16. A100 has a shorter queue, H100 is
   faster.
 

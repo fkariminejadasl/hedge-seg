@@ -562,8 +562,10 @@ collection criteria:
 > voorbij het erf."
 
 Plainly: a hedge is not recorded inside a built-up area, or between tennis
-courts, and a hedge on or around a farmyard is not recorded unless it continues
-past the yard.
+courts, and a hedge on or around an *erf* is not recorded unless it continues
+past it. An *erf* is the plot or grounds belonging to a house or farm, not a
+farmyard specifically, so this excludes ordinary garden and property
+boundaries as well as agricultural ones.
 
 The nominal minimum length is 100 m for both classes, but 18.0% of heg features
 (11,208 of 62,415) and 16.9% of bomenrij features (45,028 of 266,783) are
@@ -573,9 +575,17 @@ metres.
 
 This is the authoritative version of a thing already measured from the other
 side: reported precision is a lower bound, because the model is penalised for
-finding woody lines that the map excludes by rule. It also explains why the
-worst false-positive crops are built-up and campsite crops. Those hedges exist,
-and Top10NL is not supposed to contain them.
+finding woody lines that the map excludes by rule.
+
+It is tempting to go one step further and say this is *why* built-up and
+campsite crops top the false-positive ranking. Do not. Two things are known
+separately, that the rules exclude those areas and that those crops score
+worst, and nothing yet connects them. Sparser labels there could equally come
+from the mapper skipping cluttered scenes, or from those crops being genuinely
+harder. Testing it means checking whether the unmatched predictions in those
+crops sit on woody lines the rules exclude, the way
+`exps/probe_treeline_overlap.py` did for tree rows. Until then this is
+consistent, not shown.
 
 ## A quarter of the false positives are tree rows, not mistakes
 

@@ -6,10 +6,13 @@ size: 16:9
 ---
 
 <!-- Slides. See README.md for where the figures come from and how to remake
-them. Render with Marp: see "How to present this" at the end of README.md.
+them, including which probe script writes each crop list (probe_worst_crops.py
+for worst_fn / worst_fp / missing_labels, probe_recreation_crops.py for
+recreation). Captions cite the source of the number, not of the crops.
+Render with Marp: see "How to present this" at the end of README.md.
 Figures are at threshold 0.90, the operating point the reported numbers use.
 Keep image height at 420 on the paired slides; taller pushes the caption off
-the bottom of the slide. -->
+the bottom of the slide, and so does a second caption line. -->
 
 # Mapping hedgerows from aerial photos
 
@@ -45,9 +48,8 @@ hedges tend to be*, but never *where a particular hedge was*.
 
 ## How good is it
 
-Precision: of what we draw, how much is really a hedge.
-Recall: of the hedges that exist, how many we find.
-Both at a 10 m tolerance.
+Precision: of what we draw, how much is really a hedge. Recall: of the hedges
+that exist, how many we find. Both at a 10 m tolerance.
 
 | method | output | precision | recall |
 |---|---|---|---|
@@ -57,6 +59,10 @@ Both at a 10 m tolerance.
 | **this model** | **lines** | **0.70** | **0.70** |
 
 Other numbers came from a different measurement on an easier split.
+
+*(this model: exp 2 at cut-off 0.90, `exps/probe_polyline_pr.py`. Others: see
+`docs/experiment_log.md`, detect_ultralytics 3 / seg_ultralytics 1 /
+semseg_unet 4)*
 
 ---
 
@@ -82,6 +88,8 @@ score counts every metre as an error.
 
 **24.3%** of the length we are penalised for lands on a mapped tree row.
 
+*(`exps/probe_treeline_overlap.py`, exp 2, 300 random test crops)*
+
 ---
 
 ## Tree rows: right model, incomplete labels
@@ -90,7 +98,7 @@ score counts every metre as an error.
 |:---:|:---:|
 | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_trees_gt_val_cluster_t.90.png) | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_trees_best_2_val_cluster_t.90.png) |
 
-Adding tree rows as a second class is the obvious next data step.
+Adding tree rows as a second class is the obvious next data step. *(exp 2)*
 
 ---
 
@@ -105,9 +113,11 @@ whether you can **see through at eye level**.
 So a tall line of trees is a hedge if it has undergrowth. We had assumed
 height, and height cannot tell them apart.
 
+*(Top10NL object definitions, https://kadaster.github.io/imbrt/)*
+
 ---
 
-## Laser scanning can tell them apart, once you measure the right thing
+## Laser scanning measures exactly that
 
 Airborne laser *(AHN4, 10 m grid)* counts how many returns come back from each
 height layer.
@@ -117,12 +127,17 @@ height layer.
 | returns between **1 and 2 m** | 7.9% | 0.8% |
 | height (95th percentile) | 8.0 m | 12.1 m |
 
-A hedge sends **ten times** as much back from eye level. Height barely
+A hedge sends **ten times** as much back from eye level. Height hardly
 separates them at all.
 
-Now train a classifier to say "hedge or tree row" from the laser data alone,
-and test it on **regions it never saw**. A score of 0.50 is a coin flip and
-1.00 is perfect:
+*(`exps/probe_lidar_hedge_vs_tree.py`)*
+
+---
+
+## So laser data is worth adding
+
+Train a classifier to say hedge or tree row from the laser data alone, and test
+it on **regions it never saw**. 0.50 is a coin flip, 1.00 is perfect:
 
 | what it is allowed to use | score |
 |---|---:|
@@ -130,10 +145,10 @@ and test it on **regions it never saw**. A score of 0.50 is a coin flip and
 | the 18 non-height measures | 0.77 |
 | all 25 measures | **0.78** |
 
-Height barely beats a coin flip. Structure gets most of the way there.
+The useful part is the layer-by-layer density, not the height.
 
-So laser data is worth adding as a second input, and the useful part is the
-layer-by-layer density, not the height. *(`exps/probe_lidar_hedge_vs_tree.py`)*
+*(`exps/probe_lidar_hedge_vs_tree.py`, balanced accuracy on held-out 5 km
+blocks)*
 
 ---
 
@@ -141,7 +156,7 @@ layer-by-layer density, not the height. *(`exps/probe_lidar_hedge_vs_tree.py`)*
 
 ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_missing_labels_gt_val_cluster_t.90.png) ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_missing_labels_best_2_val_cluster_t.90.png)
 
-Found automatically: **The map is incomplete, so true precision is above the 0.70 we report.**
+**The map is incomplete, so our 0.70 precision is a floor.** *(exp 2)*
 
 ---
 
@@ -151,7 +166,7 @@ Found automatically: **The map is incomplete, so true precision is above the 0.7
 |:---:|:---:|
 | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_worst_fn_gt_val_cluster_t.90.png) | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_worst_fn_best_2_val_cluster_t.90.png) |
 
-Crowded scenes. One hedge in a crop: we find 73%. Seven or more: 37%.
+Crowded scenes. One hedge per crop: we find 73%, seven or more: 37%. *(`probe_polyline_pr.py`)*
 
 ---
 
@@ -161,7 +176,7 @@ Crowded scenes. One hedge in a crop: we find 73%. Seven or more: 37%.
 |:---:|:---:|
 | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_worst_fp_gt_val_cluster_t.90.png) | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_worst_fp_best_2_val_cluster_t.90.png) |
 
-Built-up areas and holiday parks, where every small plot has a clipped hedge.
+Built-up areas and holiday parks, where every plot has a clipped hedge. *(exp 2)*
 
 ---
 
@@ -171,7 +186,7 @@ Built-up areas and holiday parks, where every small plot has a clipped hedge.
 |:---:|:---:|
 | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_recreation_gt_val_cluster_t.90.png) | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_recreation_best_2_val_cluster_t.90.png) |
 
-Rows of chalets, each plot ringed by a hedge. 10% of the test area.
+Rows of chalets, each ringed by a hedge, 315 of 3,098 crops. *(`probe_recreation_crops.py`)*
 
 ---
 
@@ -179,8 +194,11 @@ Rows of chalets, each plot ringed by a hedge. 10% of the test area.
 
 - Aerial photos, 25 cm per pixel, 30,000 crops, about 103,000 hedgerows
 - Train and test split **by geography**, never at random
-  - the crops overlap, so a random split would have let the model see 68.5% of its own test area during training
+  - the crops overlap, so a random split would have shown the model 68.5%
+    of its own test area during training
 - Cleaned labels: closed loops opened into lines, hedges under 10 m dropped
+
+*(`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`)*
 
 ---
 
@@ -192,11 +210,15 @@ Our labels are the national topographic map *(Top10NL, Kadaster)*.
 *"Beperkt"*, limited. By rule it leaves out
 
 - hedges **inside built-up areas**
-- hedges **on a farmyard**, unless they carry on past the yard
+- hedges **on or around a property**, unless they carry on past it
 - anything under about **100 m** long
 
 So some of what we score as a false alarm is a real hedge the map is not meant
 to contain. **Our precision is a floor, not a true error rate.**
+
+How much of our false alarm rate this explains is not yet measured.
+
+*(Top10NL collection criteria, https://kadaster.github.io/imbrt/)*
 
 ---
 
@@ -248,6 +270,7 @@ one in four bends noticeably.
 - **The MapTR pieces.** *Hierarchical queries, learned content queries,
   per-layer reference-point refinement*
 - **More data.** 5,000 to 27,000 crops removed overfitting completely
+  *(exp 1 to exp 2)*
 - **Cleaner labels.** Loops opened, short lines dropped
 
 ---
@@ -276,20 +299,30 @@ we were about to spend far more on the same idea.
 
 ---
 
-## Backup: numbers
+## Backup: the runs
 
-- Exp 2: 26,902 training crops, 45 epochs, 11 h on one A100
-- F1 0.685 at 10 m, 0.750 at 15 m
+| exp | what changed | best F1 at 10 m |
+|---|---|---|
+| 1 | 5,000 crops, 150 epochs | 0.640 |
+| 2 | all 26,902 crops, 45 epochs | **0.699** |
+| 3 | focal sigmoid score head | 0.664 |
+
+Exp 2 is 11 h on one A100. All scored on the same 3,098 held-out crops with
+`exps/probe_polyline_pr.py`.
+
 - **More data buys precision, not recall.** Precision +0.08 in every crowding
-  bucket, recall +0.02, nothing on crowded crops
-- **Half of the "hedges we found but discarded" were never found.** At the low
+  bucket, recall +0.02, nothing on crowded crops *(exp 1 to exp 2)*
+
+---
+
+## Backup: measurement traps we hit
+
+- **Half of the hedges we thought we found were never found.** At the low
   cut-off the model draws 13 lines per picture where 2 hedges exist. Score one
-  picture's lines against a *different* picture's map and you still score 0.38
-  of the 0.84. *(`exps/probe_recall_null_model.py`)*
-- **The confidence score ranks lines by how straight they are.** A correct bent
-  hedge scores 0.45, a wrong straight one 0.96
-  *(`exps/probe_score_quality.py`)*
+  picture's lines against a *different* picture's map and 0.38 of the 0.84
+  survives *(`exps/probe_recall_null_model.py`)*
 - **How you measure changes the answer by half.** Chamfer matching gives 0.41,
   buffered length 0.64, on identical predictions
+  *(`hedge_seg/metrics.py`, `exps/probe_polyline_pr.py`)*
 - **Validation loss cannot pick the best model.** It chose epoch 65; the metric
-  and the pictures both prefer epoch 150
+  and the pictures both prefer epoch 150 *(exp 1)*

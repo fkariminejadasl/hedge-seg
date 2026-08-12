@@ -8,6 +8,35 @@ Config shorthand for detr_polyline rows:
 epochs, n_polyline (num_queries), n_points (num_points), eos_coef,
 dino grid (14 or 16), then extras. grid size (14,14) or (16,16).
 
+## How each dataset was made
+
+Which script built which directory, and from what. Kept here rather than only
+in the script docstrings, because datasets get deleted to free inodes and then
+have to be rebuilt from nothing but this table. Sizes are on the cluster.
+
+| dataset | built by | from | size |
+|---|---|---|---|
+| `pdok_dataset3` (30,000 crops, 46 GB) | `scripts/data/build_pdok_wms_dataset.py` | PDOK WMS layer `Actueel_ortho25` plus `Top10NL2023_..._heg.shp`, 250 m crops at 1000 px, sampled one per polyline | 46 GB, 60,000 files |
+| `pdok_dataset3_polylines` | `scripts/data/convert_pdok_polylines_to_detr_polyline.py` | `pdok_dataset3/labels/*.json` | small |
+| `pdok_dataset_semseg3` | `scripts/data/convert_pdok_polylines_to_semseg.py` | `pdok_dataset3` | 511 MB |
+| `pdok_dataset_yolo` | `scripts/data/convert_pdok_polylines_to_yolo_{bbox,seg}.py` | `pdok_dataset` | 1.6 GB |
+
+Two things that are not in the script docstrings and cost a day each when
+forgotten:
+
+- `Actueel_ortho25` is not a fixed layer. It is bit-identical to
+  `2025_ortho25` today and will silently become 2026 imagery later. **Rebuilding
+  `pdok_dataset3` from `Actueel_ortho25` will not reproduce it.** Use
+  `2025_ortho25` to reproduce, `Actueel_ortho25` only for a deliberately new
+  dataset.
+- The train/val split depends on where the conversion runs, because
+  `avoid_label_dirs` sees 10 pdok_dataset2 labels locally and 5,000 on the
+  cluster. The cluster split (26,902 / 3,098) is the operative one. Keep the
+  val stem list with the checkpoint.
+
+Check `myquota prjs1025` before building any of these. One 30,000-crop dataset
+is 60,000 inodes.
+
 ## Reference
 
 Timing: 2 min per epoch for 17,381 images on an A100 40GB.
