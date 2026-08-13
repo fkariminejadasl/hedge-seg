@@ -82,7 +82,8 @@ Two more lessons, both confirmed in the code:
   every matched line. Points are normalized to [0,1] by the padded image size
   (pad_to - 1 = 1023), so multiplying the loss by 1023 turns it back into pixels.
   A loss of 0.004 is therefore about 4 pixels of error per coordinate, which at
-  25 cm per pixel is about 1 meter on the ground. Note this is per coordinate, with
+  25 cm per pixel is about 1 meter on the ground (`meters_to_px` in
+  `hedge_seg/metrics.py`). Note this is per coordinate, with
   x and y averaged separately, so the real distance from a predicted point to its
   target is somewhat larger, up to about 1.4 times.
 
@@ -108,7 +109,7 @@ does not care about point order is strong enough to keep it.
 
 ## Why ordered L1 is preferable to a tolerance loss
 
-With approximately 100,000 polylines whose ground-truth noise is mostly unbiased, L1 regression learns the conditional median. Random annotation errors therefore tend to average out, and the model may predict the true visible hedge location more accurately than some individual labels.
+With approximately 100,000 polylines (`exps/dataset_stats.py`) whose ground-truth noise is mostly unbiased, L1 regression learns the conditional median. Random annotation errors therefore tend to average out, and the model may predict the true visible hedge location more accurately than some individual labels.
 
 A tolerance band, where the loss becomes zero within ±ε, does not correct a systematic offset in the ground truth. It only declares a range of positions acceptable. It also removes the gradient near the target, exactly where the model is refining point placement and point ordering. Since ordered point loss is the main signal that teaches each predicted point its correct position in the sequence, weakening it may leave small zigzags, swapped points, or imprecise geometry.
 
@@ -135,7 +136,8 @@ The block size only has to satisfy two things: much larger than the 250 m
 crop, so blocks and overlap groups do not fight each other, and small enough
 that there are many blocks to hash, so the achieved val fraction lands near
 the target. At 30k crops spread over the Netherlands, 5 km blocks give 19.1%
-val against a 20% target, which is close enough. There is no optimum here; if
+val against a 20% target, which is close enough
+(`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`). There is no optimum here; if
 the exact fraction ever matters, the fix is to retry seeds until the achieved
 fraction is within a tolerance, not to tune the block size.
 
@@ -148,7 +150,7 @@ hair below it (39.9997 px) after resampling. Two polylines in pdok_dataset3
 did exactly this and were stored despite being under the threshold.
 
 Fix: re-check the length after resampling, since the resampled polyline is
-what training actually sees. Border clipping was verified not to change
+what training actually sees (`scripts/data/convert_pdok_polylines_to_detr_polyline.py`). Border clipping was verified not to change
 lengths (0 of 13,416 polylines), so the check after resampling is enough.
 
 ## Regenerating a split must delete the old outputs
@@ -238,8 +240,8 @@ mean lines per image picked `1_150.pt`, mean error per image picked `best_1.pt`
 again. The mean count is the trap: per image `1_150.pt` predicts nothing on two
 crops that have hedges and 16 lines on a crop that has 3, and those cancel.
 
-Buffered length over all 3,098 val crops settled it. `1_150.pt` wins at every
-buffer, F1 0.640 against 0.614 at 10 m. So the checkpoint the eval loss calls
+Buffered length over all 3,098 val crops settled it (`exps/probe_polyline_pr.py`).
+`1_150.pt` wins at every buffer, F1 0.640 against 0.614 at 10 m. So the checkpoint the eval loss calls
 overfit is the better detector, and its advantage is recall.
 
 Two rules follow. Do not report eval loss as a result, and do not early-stop on
@@ -388,6 +390,33 @@ looked for. And in some crops the bright band follows the woody line visible in
 the photo while the label sits a little to one side of it, which is the 2014
 digitising accuracy showing up directly.
 
+## Why the lidar is not upsampled to the image size
+
+The obvious way to add lidar is to blow the 25x25 patch up to 1000x1000, then
+flip, rotate and pad it exactly like the image. Same code, nothing new to think
+about. It was not done that way, for one reason:
+
+| how the lidar is carried | size per crop | per batch of 16 |
+|---|---|---|
+| upsampled to the padded image, 1024x1024 | 28.7 MB | **470 MB** |
+| on the token grid, 64x64 | 112 KB | 1.8 MB |
+
+470 MB per batch would go through the DataLoader, which sends every batch
+between worker processes, and it buys nothing. Upsampling adds no information:
+one lidar cell is 40x40 image pixels, so each value would simply be stored
+1,600 times. The model then reduces it to the token grid anyway, so the whole
+round trip is up and straight back down.
+
+The cost of not doing it is one function, `_lidar_on_padded_grid`. It samples
+each output cell by where its centre falls rather than resizing, which is what
+keeps the mapping exact: 1024/16 is 64 output cells over a 25 cell patch that
+covers only 1000 of the 1024 pixels, so no whole-number scale factor exists.
+
+One simpler option does exist and was rejected: pad the patch to 26x26, since
+26 cells of 40 pixels covers 1040 and the canvas is 1024. That is exact too and
+needs no sampling, but it leaves the model to work out that the last cell is
+mostly padding. Doing it in the dataset keeps that knowledge in one place.
+
 ## Test an augmentation by making two code paths agree
 
 The second half of the lidar check was the dangerous one. The dataset flips and
@@ -407,24 +436,33 @@ elsewhere, whether or not augmentation is on.
 | augment off | 0.920 | 0.456 | +0.463 |
 | augment on | 0.917 | 0.456 | **+0.461** |
 
-The gap survives, so both paths agree. And the control matters more than the
-result: deliberately skipping the lidar rotation drops the gap to **+0.187**,
-which is what shows the test can fail. A passing test nobody has seen fail is
-not evidence.
+The gap survives, so both paths agree.
+
+Then break it on purpose. Take out the lidar rotation and the gap falls to
+**+0.187**. That is the important step. Without it, the test might be passing
+because it cannot fail.
 
 `augmentation_test` in `exps/probe_lidar_crop_alignment.py`.
 
 ## Nodata in the AHN4 metrics means no vegetation, not missing data
 
 24 of the 25 metrics are computed from vegetation returns only, so a cell with
-nothing woody in it has no value at all. That is 48.4% of all cells, but only
-7.2% of the cells a hedge passes through, against 51.8% elsewhere.
+nothing woody in it has no value at all.
 
-Two consequences. Filling the metrics with 0 is right rather than a fudge: no
-vegetation is zero density and ground-level height. And the validity channel is
-not bookkeeping, it is the single most informative channel of the six, since
-"is anything growing here" is
-most of what a 10 m grid can say about a 3 m hedge.
+| | nodata share |
+|---|---|
+| all cells | 48.4% |
+| cells a hedge passes through | **7.2%** |
+| every other cell | 51.8% |
+
+So an empty cell is telling you something, not hiding something. Two things
+follow. Filling the metrics with 0 is right rather than a fudge, because no
+vegetation is zero density and ground-level height. And the presence channel is
+not bookkeeping. It is probably the most useful of the seven channels, since
+"is anything growing here" is most of what a 10 m grid can say about a 3 m
+hedge.
+
+`exps/probe_lidar_nodata_vs_hedge.py`.
 
 ## The images are three years newer than the labels, not ten
 
@@ -436,6 +474,8 @@ Two facts, both checked:
   **2025** imagery.
 - Top10NL2023 was "herzien op basis van luchtfoto 2022"
   (`BRT_Actualiteitskaart_april_2023.pdf`), so the labels are **2022**.
+
+Both numbers from `exps/probe_image_label_dates.py`.
 
 So the gap is about three years.
 
@@ -558,7 +598,9 @@ Three things to take from it:
 
 Run 1 trained on the cluster conversion of pdok_dataset3 (26,902 / 3,098). The
 local conversion is 24,257 / 5,743, because `avoid_label_dirs` sees 10
-pdok_dataset2 labels locally and 5,000 on the cluster. Same seed and blocks, so
+pdok_dataset2 labels locally and 5,000 on the cluster
+(`scripts/data/convert_pdok_polylines_to_detr_polyline.py`, counts from
+`exps/dataset_stats.py`). Same seed and blocks, so
 the cluster val set is a subset: all 3,098 stems were found locally. About 46%
 of the local val crops were cluster training images, so scoring a cluster
 checkpoint on the local val directory shows training images half the time.
@@ -581,7 +623,7 @@ documented job, so those empty tensors stayed on the GPU.
 Ours, not PyTorch's. PyTorch never moves data between GPU and CPU by itself; a
 hidden copy would be slow and would hide exactly this kind of mistake.
 
-At threshold 0.5 every crop had a prediction, so the branch never ran. When a
+At threshold 0.5 every crop had a prediction, so the branch never ran. The empty branch is exercised by running `mode="infer"` at a threshold above every score. When a
 change makes empty results possible, look there first.
 
 ## Output directories should name themselves after what produced them
@@ -605,7 +647,7 @@ Both are visible by eye in the run 1 figures, but only one survives measurement.
 
 - One hedge split into several overlapping polylines: **not a problem**.
   Merging GT lines within 10 m of each other removes 0.8% of GT lines and moves
-  F1 by 0.001. Buffered length is immune to it anyway, since it measures length
+  F1 by 0.001 (the `merge_gt` option of `exps/probe_polyline_pr.py`). Buffered length is immune to it anyway, since it measures length
   covered rather than lines matched. Do not spend more time on it.
 - Woody lines missing from the labels: **measured, and a quarter of it is tree
   rows**. See the next section. The reported precision is a lower bound.

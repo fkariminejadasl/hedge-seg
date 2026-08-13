@@ -96,11 +96,26 @@ pre-existing warnings alone and mention them instead.
 - `presentation/README.md`: which figures the talk uses, what each set shows,
   and the exact steps to remake them. No findings here, only mechanics.
 
-Two rules for `presentation.md` specifically:
+## Every number needs code in the repository
 
-- **Every number, claim or finding names where it came from**, as an experiment
-  number or the script that produced it, in italic parentheses at the end of
-  the line, for example `*(exp 2, exps/probe_polyline_pr.py)*`.
+This applies to all four documents, not only the talk.
+
+- **If a number, table or finding is worth writing down, the code that produced
+  it is worth committing.** Put it in `exps/` as `probe_<what it asks>.py`, with
+  the result in its top docstring so nobody has to run it to learn the answer.
+- **Name that script wherever the number appears.** In `lesson_learned.md` and
+  `descriptions.md` write the path in the sentence; in `presentation.md` put it
+  in italic parentheses at the end of the line, for example
+  `*(exp 2, exps/probe_polyline_pr.py)*`.
+- **This includes the quick check done in a scratch file.** If its answer ends
+  up in a document, the file moves to `exps/` and gets a docstring. A number
+  whose code was thrown away cannot be rechecked when the data changes, and
+  every number here has to survive the next dataset.
+- A probe that only confirmed something and changed no document can be deleted.
+  The test is whether a document depends on it.
+
+One rule for `presentation.md` specifically:
+
 - **A slide must fit one page.** Marp does not warn, it silently cuts off the
   bottom. Budget for the default 16:9 theme: about 13 lines of body text, or
   about 5 lines plus one `h:420` image, and no body line over about 95
@@ -142,8 +157,10 @@ Local:
   the other env's interpreter. That happened once and produced a wrong claim
   that geopandas was missing. The absolute path cannot be shadowed.
 - Scratch files go in `/home/fatemeh/Downloads/hedge/cluade/`, never `/tmp`,
-  which does not survive a reboot. Delete them once the result is in a
-  committed script or in the docs.
+  which does not survive a reboot. A scratch file may only be deleted, never
+  merely abandoned: either its answer went into a document, in which case it
+  moves to `exps/` first (see "Every number needs code in the repository"), or
+  it answered nothing and goes in the bin.
 - Claude's tool permissions belong in this project's own `.claude`, that is
   `hedge-seg/.claude/settings.local.json`, not in whichever directory the
   session happened to start in.

@@ -1745,6 +1745,12 @@ class DetrPolylineImageDataset(Dataset):
         divide the patch size (it does not: 1024/16 is 64 cells over a 25 cell
         patch covering only 1000 of the 1024 pixels).
 
+        The patch is kept at its own resolution rather than upsampled to the
+        image and treated exactly like it, because that would be 28.7 MB per
+        crop and 470 MB per batch of 16 through the DataLoader, to store each
+        lidar value 1,600 times and then reduce it again. See "Why the lidar is
+        not upsampled to the image size" in docs/lesson_learned.md.
+
         Returns (C+1, S, S): the metrics with NaN as 0, plus a presence channel
         that is 0 in the padding and wherever the raster had no data.
 
@@ -2406,9 +2412,16 @@ if __name__ == "__main__":
         val_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         pad_to=1024,  # images zero-padded 1000 -> 1024 (divisible by 32)
         # Lidar is loaded and augmented with the image but nothing consumes it
-        # yet: no model branch reads target["lidar"]. Set lidar_path to the
-        # .npy from scripts/data/build_lidar_patches.py to see it in
-        # mode="preview"; None keeps it out of the way.
+        # yet: no model branch reads target["lidar"]. None keeps it out of the
+        # way.
+        #
+        # To look at it, set lidar_path to the .npy from
+        # scripts/data/build_lidar_patches.py, mode="preview" and augment=True.
+        # If the .npy covers only part of the dataset the run stops, because a
+        # crop with no patch is an error during training. Point
+        # train_polyline_dir at polylines/lidar_check, which
+        # exps/probe_lidar_crop_alignment.py fills with exactly the crops that
+        # do have a patch.
         lidar_path=None,
         lidar_stride=16,  # matches the up3 stride, so 1024 -> a 64x64 grid
         augment=True,  # flip/rot90 of image + polylines (train split only)
