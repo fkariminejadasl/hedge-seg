@@ -21,11 +21,16 @@ It also writes `crop_footprints.geojson` so the same crops can be found in
 QGIS (/home/fatemeh/Downloads/hedge/hedge.qgz), where the rasters and Top10NL
 layers are already loaded and nothing is cropped.
 
-This deliberately does not touch the training script. It checks the maths only.
-The second half of the check is augmentation: the dataset flips and rotates the
-image and polylines together before padding, so a lidar array added there must
-be flipped and rotated too. That only shows up in `mode="preview"` with
-`augment=True`.
+The second half is augmentation. The dataset flips and rotates the image and the
+polylines together before padding, so a lidar array added there has to go
+through the same steps, and if it misses one nothing raises: the shapes stay
+right and only the content is wrong. `augmentation_test` catches that by
+checking that the lidar and the polylines still agree afterwards. Both halves
+pass as of 2026-08-11: best shift (0, 0), and the hedge/background gap is
++0.463 without augmentation against +0.461 with.
+
+Needs `scripts/data/build_lidar_patches.py` to have been run. Set
+`cfg["lidar_path"]` to None to skip the augmentation half.
 
     /home/fatemeh/miniconda3/envs/hedge/bin/python exps/probe_lidar_crop_alignment.py
 """
@@ -112,6 +117,87 @@ def shift_test(cfg, stems, metric):
         print(f"  {dr:>3d} |{row}")
     print(f"  (row shift)\n  best shift {best}, want (0, 0)")
     return best
+
+
+def augmentation_test(cfg):
+    """
+    Does the lidar still describe the same ground after augmentation?
+
+    The dataset flips and rotates the image and the polylines before padding.
+    A lidar array added there has to go through the same steps, and if it misses
+    one nothing raises: the shapes stay right and only the content is wrong.
+
+    The polylines and the lidar are augmented by separate lines of code, so if
+    both still agree afterwards, both are right. The measure is the presence
+    channel, which is 1 where the laser found vegetation: it should be high in
+    the cells the hedges pass through and low elsewhere, with or without
+    augmentation. Skipping the lidar rotation drops the gap from 0.455 to 0.187,
+    so this notices.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import train_detr_unet_polyline as t
+
+    # The dataset refuses to run with crops that have no lidar patch, which is
+    # right for training and awkward here when only a subset was built. Link the
+    # crops that do have one into their own directory.
+    check_dir = Path(cfg["aug_polyline_dir"])
+    if not check_dir.exists():
+        meta_path = Path(cfg["lidar_path"])
+        stems = set(
+            json.loads(meta_path.with_name(meta_path.stem + "_stems.json").read_text())[
+                "stems"
+            ]
+        )
+        check_dir.mkdir(parents=True)
+        for split in ("train", "val"):
+            for f in sorted((check_dir.parent / split).glob("*.npz")):
+                if f.stem in stems and not (check_dir / f.name).exists():
+                    (check_dir / f.name).symlink_to(f.resolve())
+        print(f"linked {len(list(check_dir.glob('*.npz')))} crops into {check_dir}")
+
+    def gap(augment, trials):
+        rng = np.random.default_rng(cfg["seed"])
+        np.random.seed(cfg["seed"])  # the dataset augments with np.random
+        ds = t.DetrPolylineImageDataset(
+            image_dir=cfg["image_dir"],
+            polyline_dir=cfg["aug_polyline_dir"],
+            num_points=20,
+            pad_to=cfg["pad_to"],
+            augment=augment,
+            lidar_path=cfg["lidar_path"],
+            lidar_stride=cfg["lidar_stride"],
+        )
+        on, off = [], []
+        for i in rng.integers(0, len(ds), trials):
+            _, target = ds[int(i)]
+            presence = target["lidar"].numpy()[-1]
+            size = presence.shape[0]
+            polylines = target["polylines"].numpy() * (cfg["pad_to"] - 1)
+            if len(polylines) == 0:
+                continue
+            mask = np.zeros((size, size), bool)
+            for p in polylines:
+                for a, b in zip(p[:-1], p[1:]):
+                    pts = a + np.linspace(0, 1, 100)[:, None] * (b - a)
+                    c = np.clip(
+                        (pts[:, 0] / cfg["lidar_stride"]).astype(int), 0, size - 1
+                    )
+                    r = np.clip(
+                        (pts[:, 1] / cfg["lidar_stride"]).astype(int), 0, size - 1
+                    )
+                    mask[r, c] = True
+            on.append(presence[mask].mean())
+            off.append(presence[~mask].mean())
+        return float(np.mean(on)), float(np.mean(off))
+
+    print("\naugmentation test, vegetation present under hedges against elsewhere")
+    for augment in (False, True):
+        under, elsewhere = gap(augment, cfg["aug_trials"])
+        print(
+            f"  augment={str(augment):5s}  under {under:.3f}  elsewhere "
+            f"{elsewhere:.3f}  gap {under - elsewhere:+.3f}"
+        )
+    print("  the two gaps must match; a collapse means the lidar missed a flip")
 
 
 def pick_ids(polyline_dir, n, max_lines=None):
@@ -208,6 +294,9 @@ def main(cfg):
     print(f"\nImages: {out_dir}")
     print(f"QGIS footprints: {geojson}")
 
+    if cfg["lidar_path"] is not None:
+        augmentation_test(cfg)
+
     if cfg["n_shift_crops"]:
         shift_test(
             cfg,
@@ -236,5 +325,14 @@ if __name__ == "__main__":
         alpha=0.5,
         crop_px=1000,  # crop side in pixels, 250 m at 0.25 m
         n_shift_crops=40,  # crops for the shift test; 0 skips it
+        # The augmentation half of the check. Needs the patches from
+        # scripts/data/build_lidar_patches.py, and aug_polyline_dir must only
+        # contain crops that are in them. None skips it.
+        lidar_path=DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy",
+        aug_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/lidar_check",
+        lidar_stride=16,
+        pad_to=1024,
+        aug_trials=400,
+        seed=0,
     )
     main(cfg)

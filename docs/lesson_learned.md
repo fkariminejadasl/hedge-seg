@@ -388,10 +388,43 @@ looked for. And in some crops the bright band follows the woody line visible in
 the photo while the label sits a little to one side of it, which is the 2014
 digitising accuracy showing up directly.
 
-Still unchecked: the dataset flips and rotates the image and polylines together
-*before* padding, so a lidar array added there has to be flipped and rotated
-too. That cannot show up in this probe, only in `mode="preview"` with
-`augment=True`.
+## Test an augmentation by making two code paths agree
+
+The second half of the lidar check was the dangerous one. The dataset flips and
+rotates the image and the polylines before padding, so a lidar array added
+there has to go through the same steps, and if it misses one **nothing raises**:
+the shapes stay right and only the content is wrong. It would have shown up as
+a slightly worse run, months later, with no obvious cause.
+
+What makes it testable is that the polylines and the lidar are augmented by
+separate lines of code. So instead of checking either against the truth, check
+them against each other: the presence channel says where the laser found
+vegetation, and it should be high in the cells the hedges pass through and low
+elsewhere, whether or not augmentation is on.
+
+| | under hedges | elsewhere | gap |
+|---|---|---|---|
+| augment off | 0.920 | 0.456 | +0.463 |
+| augment on | 0.917 | 0.456 | **+0.461** |
+
+The gap survives, so both paths agree. And the control matters more than the
+result: deliberately skipping the lidar rotation drops the gap to **+0.187**,
+which is what shows the test can fail. A passing test nobody has seen fail is
+not evidence.
+
+`augmentation_test` in `exps/probe_lidar_crop_alignment.py`.
+
+## Nodata in the AHN4 metrics means no vegetation, not missing data
+
+24 of the 25 metrics are computed from vegetation returns only, so a cell with
+nothing woody in it has no value at all. That is 48.4% of all cells, but only
+7.2% of the cells a hedge passes through, against 51.8% elsewhere.
+
+Two consequences. Filling the metrics with 0 is right rather than a fudge: no
+vegetation is zero density and ground-level height. And the validity channel is
+not bookkeeping, it is the single most informative channel of the six, since
+"is anything growing here" is
+most of what a 10 m grid can say about a 3 m hedge.
 
 ## The images are three years newer than the labels, not ten
 

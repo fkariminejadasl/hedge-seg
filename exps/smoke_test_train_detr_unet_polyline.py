@@ -51,6 +51,11 @@ def main():
         val_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         pad_to=1024,
         augment=True,
+        # Lidar off: the patches only exist for part of the dataset and no
+        # model branch reads them yet. exps/probe_lidar_crop_alignment.py is
+        # what exercises the lidar path.
+        lidar_path=None,
+        lidar_stride=16,
         backbone_ckpt=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
         feature_stage="up3",
         freeze_backbone=True,
