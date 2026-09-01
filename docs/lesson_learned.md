@@ -291,10 +291,22 @@ broken:
 | 0.95 | 1.9 | 0.608 | 0.228 | 0.380 |
 
 Nearly half of the celebrated 0.84 is what another crop's predictions would
-score. Skill peaks at 0.471 and is already 0.431 at the operating point, so a
-perfect score head is worth about 0.04 of recall, not the 0.23 the naive
-reading suggested. Exp 2's t=0.90 is close to the best the current predictions
-can support.
+score.
+
+How to read the table. Exp 2 runs at t=0.90. The score head cannot draw a new
+line, it only keeps or drops lines the model already drew, so the best it could
+ever do is move exp 2 to another row of this table. Judged by real recall,
+going from t=0.90 to t=0.05 gains 0.840 - 0.696 = 0.14. Judged by skill, going
+from t=0.90 to t=0.40 gains 0.471 - 0.431 = 0.04. The 0.04 is the real gain.
+The 0.14 counts luck as a gain.
+
+What this means. The model did learn to find hedges. Shuffle the picture and
+the same lines score 0.379 instead of 0.840, and that gap can only come from
+having seen the image. What it did not do is find as many as it appeared to.
+The hedges it misses are missing because it never drew a line there, not
+because the score buried the line. So the score head is closed as a line of
+work, worth 0.04, and everything after this targets perception: draw more of
+the right lines in the first place.
 
 Two rules. Any metric that rewards drawing more lines needs a null model before
 it is used to justify a run. And a threshold sweep is not evidence of headroom:
@@ -809,8 +821,7 @@ Phase C — the score head, closed:
 Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
 
 Exp 3 is done and lost (0.699 -> 0.664). Exp 2 `best_2.pt` at t=0.90 remains
-the baseline. The score head is closed as a line of work: the null model says
-there is about 0.04 of recall behind it, not 0.23.
+the baseline.
 
 The bottleneck is that the model does not draw enough correct lines, worst
 where crops are crowded (exp 2 recall 0.372 on crops with 7+ labelled lines

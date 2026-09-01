@@ -290,8 +290,9 @@ we were about to spend far more on the same idea.
 
 ## What is next
 
-1. **Look at finer detail.** The model works on a grid where a 3 m hedge is
-   smaller than one cell. This is the real limit *(feature stride 16 to 8)*
+1. **Look at finer detail.** A hedge is about 3 m wide, 12 pixels. One grid
+   cell is 4 m, 16 pixels. The hedge is thinner than a single cell, so its
+   shape is gone before the head sees it *(feature stride 16 to 8)*
 2. **Tree rows as a second class**, with laser structure to tell them apart
 3. **Use the 2025 map**, so photos and labels are the same year
 4. **Train the image backbone**, which is frozen today
@@ -319,8 +320,8 @@ Exp 2 is 11 h on one A100. All scored on the same 3,098 held-out crops with
 
 - **Half of the hedges we thought we found were never found.** At the low
   cut-off the model draws 13 lines per picture where 2 hedges exist. Score one
-  picture's lines against a *different* picture's map and 0.38 of the 0.84
-  survives *(`exps/probe_recall_null_model.py`)*
+  picture's lines against a *different* picture's map and it still gets 0.38 of
+  the 0.84. Only 0.46 is real *(`exps/probe_recall_null_model.py`)*
 - **How you measure changes the answer by half.** Chamfer matching gives 0.41,
   buffered length 0.64, on identical predictions
   *(`hedge_seg/metrics.py`, `exps/probe_polyline_pr.py`)*
