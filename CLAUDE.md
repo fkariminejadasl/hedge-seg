@@ -93,12 +93,16 @@ pre-existing warnings alone and mention them instead.
   `lesson_learned.md` gives the reasoning, this gives the conclusion in one
   line. Keep a technical name in italic parentheses after the plain-language
   version, so the audience follows and a specialist can still place it.
+- `presentation/update.md`: the meeting updates, a second Marp deck. One
+  slide per meeting, newest first, in short bullets: what was
+  done, what is next. Where `presentation.md` builds one
+  coherent story, this is the running progress report and may be rough.
 - `presentation/README.md`: which figures the talk uses, what each set shows,
   and the exact steps to remake them. No findings here, only mechanics.
 
 ## Every number needs code in the repository
 
-This applies to all four documents, not only the talk.
+This applies to every document listed above, not only the talk.
 
 - **If a number, table or finding is worth writing down, the code that produced
   it is worth committing.** Put it in `exps/` as `probe_<what it asks>.py`, with
@@ -114,7 +118,7 @@ This applies to all four documents, not only the talk.
 - A probe that only confirmed something and changed no document can be deleted.
   The test is whether a document depends on it.
 
-One rule for `presentation.md` specifically:
+One rule for both Marp decks, `presentation.md` and `update.md`:
 
 - **A slide must fit one page.** Marp does not warn, it silently cuts off the
   bottom. Budget for the default 16:9 theme: about 13 lines of body text, or
@@ -132,6 +136,9 @@ After a change, update the docs it affects, in the same commit:
 - A result that changes the headline numbers, the figures, or the next steps:
   `presentation/presentation.md` too. It goes stale silently, because nothing
   breaks when it is wrong.
+- Anything finished, started or dropped since the last meeting:
+  `presentation/update.md`, as a bullet on the newest slide. Add a new slide
+  at the top when the meeting it belongs to has passed.
 Do not leave a doc describing the old behavior.
 
 ## Environments
