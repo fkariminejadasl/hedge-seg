@@ -13,7 +13,7 @@ run directories have to be listed. Edit the cfg at the bottom and run:
     /home/fatemeh/miniconda3/envs/hedge/bin/python exps/probe_polyline_pr.py
 
 Results on the cluster val split, 3,098 crops. Full numbers in
-docs/experiment_log.md.
+docs/experiments_log.md.
 
 - exp 2 (26,902 train crops) against exp 1 (5,000), both at t=0.95, at 10 m:
   0.783/0.608 F1 0.685 against 0.702/0.589 F1 0.640. At 15 m 0.845/0.674

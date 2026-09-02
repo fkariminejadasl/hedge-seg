@@ -772,7 +772,7 @@ Phase A — data + split:
   local dry-run (only 10 pdok_dataset2 labels available) was 24,257 / 5,743.
   Stats reproducible with `exps/dataset_stats.py` and
   `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`; per-run numbers in
-  `docs/experiment_log.md`.
+  `docs/experiments_log.md`.
 - `hedge_seg/paths.py` resolves DATA_ROOT / EXP_ROOT / CLUSTER_EXP_ROOT from
   a filesystem marker, so scripts no longer need path edits when moving
   between the local machine and the cluster.
@@ -784,7 +784,7 @@ Phase B — training half:
   on, eval_every=5. First run whose predictions sit on real hedgerows in
   images the model never saw.
 - Inference re-run on the cluster val split only, using `polylines/val_cluster`
-  (commands in `docs/experiment_log.md`). The local val directory is a
+  (commands in `docs/experiments_log.md`). The local val directory is a
   different split, about 46% of it was in the cluster's training set, so
   figures taken from it were not the baseline.
 - `infer_score_thresh` raised from 0.5 to 0.95 on line count, then confirmed by

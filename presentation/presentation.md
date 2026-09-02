@@ -61,7 +61,7 @@ that exist, how many we find. Both at a 10 m tolerance.
 Other numbers came from a different measurement on an easier split.
 
 *(this model: exp 2 at cut-off 0.90, `exps/probe_polyline_pr.py`. Others: see
-`docs/experiment_log.md`, detect_ultralytics 3 / seg_ultralytics 1 /
+`docs/experiments_log.md`, detect_ultralytics 3 / seg_ultralytics 1 /
 semseg_unet 4)*
 
 ---

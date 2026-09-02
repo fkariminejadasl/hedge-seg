@@ -1,8 +1,8 @@
 # Working notes for Claude
 
 ## Rules
-- At the start of a session, read `docs/description.md` (the Quick reference
-  section first), `docs/lesson_learned.md` and `docs/experiment_log.md` before
+- At the start of a session, read `docs/descriptions.md` (the Quick reference
+  section first), `docs/lesson_learned.md` and `docs/experiments_log.md` before
   proposing or running anything. They are not loaded automatically, and they
   hold what has already been tried, measured and ruled out.
   
@@ -81,7 +81,7 @@ pre-existing warnings alone and mention them instead.
   polished and current.
 - `docs/lesson_learned.md`: curated lessons that generalize, with the reason
   behind them. Has a Done and a TODO section for the phase plan.
-- `docs/experiment_log.md`: raw notebook of individual runs, in a terse style.
+- `docs/experiments_log.md`: raw notebook of individual runs, in a terse style.
   Held to a lower bar than the other two. It opens with a **"How each dataset
   was made"** table: which script built which directory, from what input, and
   anything about rebuilding it that the script docstring does not say. Add a
@@ -127,7 +127,7 @@ After a change, update the docs it affects, in the same commit:
 - New or changed behavior of a script: its top docstring and `descriptions.md`.
 - A bug or surprise worth remembering, or a design decision: `lesson_learned.md`,
   with the reason.
-- A finished or planned run: `experiment_log.md`, and move the phase plan's
+- A finished or planned run: `experiments_log.md`, and move the phase plan's
   Done/TODO in `lesson_learned.md` if it changed.
 - A result that changes the headline numbers, the figures, or the next steps:
   `presentation/presentation.md` too. It goes stale silently, because nothing
