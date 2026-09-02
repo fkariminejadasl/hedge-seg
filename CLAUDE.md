@@ -1,11 +1,12 @@
 # Working notes for Claude
 
-## Rules
-- At the start of a session, read `docs/descriptions.md` (the Quick reference
-  section first), `docs/lesson_learned.md` and `docs/experiments_log.md` before
-  proposing or running anything. They are not loaded automatically, and they
-  hold what has already been tried, measured and ruled out.
-  
+## Start of a session
+
+- Read `docs/descriptions.md`, `docs/lesson_learned.md` and
+  `docs/experiments_log.md` before proposing or running anything. They are
+  not loaded automatically, and they hold what has already been tried,
+  measured and ruled out.
+
 ## How to write
 
 - Use simple language. Short sentences. No em dashes.
@@ -47,7 +48,7 @@
 Run the formatter and linter:
 
 ```
-for i in hedge_seg exps scripts; do echo $i; black $i -l 88; isort $i --profile black; pyflakes $i; done
+for i in hedge_seg exps scripts tests; do echo $i; black $i -l 88; isort $i --profile black; pyflakes $i; done
 ```
 
 Fix what pyflakes reports in the code being committed. Leave unrelated
@@ -94,9 +95,10 @@ pre-existing warnings alone and mention them instead.
   line. Keep a technical name in italic parentheses after the plain-language
   version, so the audience follows and a specialist can still place it.
 - `presentation/update.md`: the meeting updates, a second Marp deck. One
-  slide per meeting, newest first, in short bullets: what was
-  done, what is next. Where `presentation.md` builds one
-  coherent story, this is the running progress report and may be rough.
+  slide per meeting, newest first, in short bullets. Where `presentation.md`
+  builds one coherent story, this is the running progress report. The user
+  writes it. Do not add to it, reorder it or fill it in; only correct
+  the wording and nothing else.
 - `presentation/README.md`: which figures the talk uses, what each set shows,
   and the exact steps to remake them. No findings here, only mechanics.
 
@@ -105,8 +107,10 @@ pre-existing warnings alone and mention them instead.
 This applies to every document listed above, not only the talk.
 
 - **If a number, table or finding is worth writing down, the code that produced
-  it is worth committing.** Put it in `exps/` as `probe_<what it asks>.py`, with
-  the result in its top docstring so nobody has to run it to learn the answer.
+  it is worth committing.** Put it in `exps/`, with the result in its top
+  docstring so nobody has to run it to learn the answer. Name a one-off probe
+  `probe_<what it asks>.py`; a standing tool keeps its own name, like
+  `exps/dataset_stats.py`.
 - **Name that script wherever the number appears.** In `lesson_learned.md` and
   `descriptions.md` write the path in the sentence; in `presentation.md` put it
   in italic parentheses at the end of the line, for example
@@ -123,9 +127,10 @@ One rule for both Marp decks, `presentation.md` and `update.md`:
 - **A slide must fit one page.** Marp does not warn, it silently cuts off the
   bottom. Budget for the default 16:9 theme: about 13 lines of body text, or
   about 5 lines plus one `h:420` image, and no body line over about 95
-  characters. Marp runs as a VS Code extension here, not on the command line,
-  so Claude cannot render to check. Keep to the budget, do not change a tested
-  image height blind, and say when a slide should be exported and looked at.
+  characters. `update.md` sets 22px type and carries no figures, so more fits.
+  Marp runs as a VS Code extension here, not on the command line, so Claude
+  cannot render to check. Keep to the budget, do not change a tested image
+  height blind, and say when a slide should be exported and looked at.
 
 After a change, update the docs it affects, in the same commit:
 - New or changed behavior of a script: its top docstring and `descriptions.md`.
@@ -136,9 +141,6 @@ After a change, update the docs it affects, in the same commit:
 - A result that changes the headline numbers, the figures, or the next steps:
   `presentation/presentation.md` too. It goes stale silently, because nothing
   breaks when it is wrong.
-- Anything finished, started or dropped since the last meeting:
-  `presentation/update.md`, as a bullet on the newest slide. Add a new slide
-  at the top when the meeting it belongs to has passed.
 Do not leave a doc describing the old behavior.
 
 ## Environments
@@ -163,7 +165,7 @@ Local:
   call and win over `conda run`, so `conda run -n hedge python` silently runs
   the other env's interpreter. That happened once and produced a wrong claim
   that geopandas was missing. The absolute path cannot be shadowed.
-- Scratch files go in `/home/fatemeh/Downloads/hedge/cluade/`, never `/tmp`,
+- Scratch files go in `/home/fatemeh/Downloads/hedge/claude/`, never `/tmp`,
   which does not survive a reboot. A scratch file may only be deleted, never
   merely abandoned: either its answer went into a document, in which case it
   moves to `exps/` first (see "Every number needs code in the repository"), or
@@ -284,6 +286,10 @@ They exist because both are multi-step and easy to get half right. The config
 overrides they list are edits to make in the script, not hidden settings, so
 the committed script always shows the values that actually ran.
 
+Use only this repository's skills. Other repositories in this VS Code
+workspace, bird-behavior among them, have skills with the same two names;
+never run theirs.
+
 ## Stopping a local training run
 
 - Stop it gently first: `pkill -TERM -f <script>` (or Ctrl-C if foreground) so
@@ -342,7 +348,7 @@ the committed script always shows the values that actually ran.
   the final checkpoint as well as `best_*.pt`. See "No cheap measure can rank
   two checkpoints" in `docs/lesson_learned.md`.
 - `infer_score_thresh` is a real knob, not a formality. Scores sit near 1, so
-  0.5 keeps almost everything. Cluster run 1 uses 0.95.
+  0.5 keeps almost everything. exp 2 uses 0.90, exp 1 used 0.95.
 - The local and cluster conversions of pdok_dataset3 do NOT produce the same
   train/val split, because `avoid_label_dirs` sees 10 labels locally and 5,000
   on the cluster. About 46% of the local val crops were cluster training
