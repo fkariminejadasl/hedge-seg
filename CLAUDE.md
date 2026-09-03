@@ -1,4 +1,4 @@
-# Working notes for Claude
+# Working notes
 
 ## Start of a session
 
@@ -6,6 +6,8 @@
   `docs/experiments_log.md` before proposing or running anything. They are
   not loaded automatically, and they hold what has already been tried,
   measured and ruled out.
+- Answer from this repository only. The other repos in this VS Code workspace
+  (bird-behavior, ...) are not context unless I say so.
 
 ## How to write
 
@@ -25,7 +27,8 @@
 - A commit message is a few lines plus the numbers that matter. Not a report.
 - Do not add formatting flourishes to documentation. Plain text, plain lists.
 - Give full paths so they can be clicked, for example
-  `scripts/train_detr_unet_polyline.py`, not "the training script".
+  `scripts/train_detr_unet_polyline.py`, not "the training script". Name the
+  exact function or class too.
 - When asked to diagnose, diagnose first and do not change code until asked.
 - Say which files were inspected before answering a question about the repo.
 
@@ -128,7 +131,7 @@ One rule for both Marp decks, `presentation.md` and `update.md`:
   bottom. Budget for the default 16:9 theme: about 13 lines of body text, or
   about 5 lines plus one `h:420` image, and no body line over about 95
   characters. `update.md` sets 22px type and carries no figures, so more fits.
-  Marp runs as a VS Code extension here, not on the command line, so Claude
+  Marp runs as a VS Code extension here, not on the command line, so you
   cannot render to check. Keep to the budget, do not change a tested image
   height blind, and say when a slide should be exported and looked at.
 
@@ -154,7 +157,7 @@ Local:
   ```
 
   Dependencies belong in `pyproject.toml` and get installed into `hedge`.
-- Claude must call the interpreter by absolute path:
+- Call the interpreter by absolute path:
 
   ```
   /home/fatemeh/miniconda3/envs/hedge/bin/python <script>.py
@@ -170,7 +173,7 @@ Local:
   merely abandoned: either its answer went into a document, in which case it
   moves to `exps/` first (see "Every number needs code in the repository"), or
   it answered nothing and goes in the bin.
-- Claude's tool permissions belong in this project's own `.claude`, that is
+- Tool permissions belong in this project's own `.claude`, that is
   `hedge-seg/.claude/settings.local.json`, not in whichever directory the
   session happened to start in.
 - GPU is an RTX PRO 3000 with 12.3 GB, so it is only good for smoke tests and
@@ -286,9 +289,8 @@ They exist because both are multi-step and easy to get half right. The config
 overrides they list are edits to make in the script, not hidden settings, so
 the committed script always shows the values that actually ran.
 
-Use only this repository's skills. Other repositories in this VS Code
-workspace, bird-behavior among them, have skills with the same two names;
-never run theirs.
+Use only this repository's skills. bird-behavior has skills with the same two
+names; never run theirs.
 
 ## Stopping a local training run
 
@@ -316,7 +318,7 @@ never run theirs.
 - A log that stops updating is usually stdout buffering, not a hung job. Use
   `python -u` in the slurm script. Check the checkpoint mtime and `squeue`
   before concluding anything is wrong.
-- Claude's background monitoring dies when this session ends. For a
+- Background monitoring by the agent dies when the session ends. For a
   notification that survives a laptop shutdown, enable the `--mail-type` lines
   in the slurm script.
 - Tensorboard on a cluster run, over a forwarded port. `--logdir_spec <name>:<dir>`
