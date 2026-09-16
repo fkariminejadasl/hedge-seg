@@ -124,7 +124,9 @@ def check_lidar_branch(n_lidar_channels=7, grid=8, num_polylines=4, num_points=2
 
 def main():
     check_lidar_branch()
-    scratch = Path("/tmp") / "smoke_detr_unet_polyline"
+    # Not /tmp: it is wiped on shutdown, and a scratch file that cannot be
+    # looked at the next morning is no use when a smoke test fails overnight.
+    scratch = Path("/home/fatemeh/Downloads/hedge/claude/smoke_detr_unet_polyline")
     cfg = dict(
         mode="train",
         exp="smoke",

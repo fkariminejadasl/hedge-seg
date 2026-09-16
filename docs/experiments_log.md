@@ -150,6 +150,23 @@ bbox 3900/903.
   10 m and 0.547 at 5 m. loss_ce is on a new scale with two classes, so the loss
   curve is comparable only with itself.
 
+  When it finishes, in order:
+
+  ```
+  ssh me "squeue -j 26798493; sacct -j 26798493"
+  scp -r me:exps/hedge/detr_unet_polyline/4 \
+      /home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/
+  scp me:exps/hedge/detr_unet_polyline/4.sh \
+      me:exps/hedge/detr_unet_polyline/4_26798493.out \
+      /home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/4/
+  ```
+
+  Then `mode="infer"` in the training script with `infer_ckpt` at `4/best_4.pt`
+  and again at `4/4.pt` (the last epoch has won three times), `num_classes=2`,
+  `lidar_path` set and `infer_polyline_dir` at
+  `pdok_dataset3_tree_polylines/polylines/val`, at `infer_score_thresh=0.05` so
+  the threshold can be swept both ways afterwards.
+
 - 3 scored, 2026-08-11. **Lost.** Best F1 at 10 m 0.664 against exp 2's 0.699.
   Both checkpoints, all 3,098 val crops, `exps/probe_polyline_pr.py`:
 

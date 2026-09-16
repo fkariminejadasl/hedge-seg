@@ -768,6 +768,9 @@ What that gives, over the whole dataset:
 | **max lines per crop** | **49** | **49** |
 | crops with a tree row | 0 | 18,061 (60.2%) |
 
+All of it from `exps/probe_tree_dataset_stats.py`, which compares the two
+datasets crop by crop.
+
 Three things worth keeping:
 
 - **The query budget does not change.** The crowded crop already had 49 lines,
@@ -775,7 +778,7 @@ Three things worth keeping:
   checking before anything else, since a second class competing for queries
   would have been a real cost.
 - **The hedge half is untouched.** The stored class 0 arrays are bit-identical
-  to `pdok_dataset3_polylines` on 1,000 random crops, so any change in the hedge
+  to `pdok_dataset3_polylines` on all 30,000 crops, so any change in the hedge
   score comes from the model, not from the data.
 - **The classes blur at 10 m.** 12.2% of tree length is within 10 m of the heg
   layer and 11.0% of hedge length within 10 m of bomenrij, against 2.4% and 1.7%
@@ -828,15 +831,17 @@ every crop, but coordinates up to 0.19 px different from the run stored in July,
 which is 4.7 cm on the ground. That looks like a regression and is not one.
 
 The code is equivalent. With lidar off, the new model produces bitwise identical
-logits, polylines and boxes to the committed version on CPU, with the real
-best_2.pt weights. The GPU is deterministic within a session, two runs came out
-bitwise equal, but GPU and CPU differ by 0.58 px on the same weights and input,
-because cuDNN TF32 is on. A driver or library change since July is enough to
-move the last bits.
+logits, polylines and boxes to the version at the previous commit, on CPU, with
+the real best_2.pt weights. The GPU is deterministic within a session, two runs
+came out bitwise equal, but GPU and CPU differ by 0.64 px on the same weights
+and input, because cuDNN TF32 is on. A driver or library change since July is
+enough to move the last bits.
 
 So to check that a refactor left a model alone, run the two code paths on CPU
-with the same weights and compare the tensors. Comparing NPZs from two GPU runs
-on different days answers a different question.
+with the same weights and compare the tensors
+(`exps/probe_refactor_equivalence.py`, which imports the old script straight
+from a git revision). Comparing NPZs from two GPU runs on different days
+answers a different question.
 
 ## A split can be pinned to a stem list
 
