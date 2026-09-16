@@ -18,6 +18,8 @@ have to be rebuilt from nothing but this table. Sizes are on the cluster.
 |---|---|---|---|
 | `pdok_dataset3` (30,000 crops, 46 GB) | `scripts/data/build_pdok_wms_dataset.py` | PDOK WMS layer `Actueel_ortho25` plus `Top10NL2023_..._heg.shp`, 250 m crops at 1000 px, sampled one per polyline | 46 GB, 60,000 files |
 | `pdok_dataset3_polylines` | `scripts/data/convert_pdok_polylines_to_detr_polyline.py` | `pdok_dataset3/labels/*.json` | small |
+| `pdok_dataset3_polylines/lidar_patches.npy` | `scripts/data/build_lidar_patches.py` | the 6 AHN4 metric GeoTIFFs in `/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4`, 16 GB, laptop only | 450 MB, 2 files |
+| `pdok_dataset3_tree_polylines` (2026-09-16) | same converter, with `treeline_shp` and `val_stems_file` set | `pdok_dataset3/labels/*.json` plus `Top10NL2023_..._bomenrij.shp` | 144 MB, 30,000 files |
 | `pdok_dataset_semseg3` | `scripts/data/convert_pdok_polylines_to_semseg.py` | `pdok_dataset3` | 511 MB |
 | `pdok_dataset_yolo` | `scripts/data/convert_pdok_polylines_to_yolo_{bbox,seg}.py` | `pdok_dataset` | 1.6 GB |
 
@@ -32,7 +34,13 @@ forgotten:
 - The train/val split depends on where the conversion runs, because
   `avoid_label_dirs` sees 10 pdok_dataset2 labels locally and 5,000 on the
   cluster. The cluster split (26,902 / 3,098) is the operative one. Keep the
-  val stem list with the checkpoint.
+  val stem list with the checkpoint. `pdok_dataset3_tree_polylines` avoids this
+  by setting `val_stems_file` to that stem list
+  (`/home/fatemeh/Downloads/hedge/cluster_val_stems.txt`), so it was built on
+  the laptop and still came out at 26,902 / 3,098.
+- The lidar patch file has to be built on the laptop, because the 16 GB of AHN4
+  rasters are only there. It is keyed by stem, so one file serves any dataset
+  and any split. Copy the `.npy` and its `_stems.json` to the cluster together.
 
 Check `myquota prjs1025` before building any of these. One 30,000-crop dataset
 is 60,000 inodes.
@@ -117,6 +125,29 @@ bbox 3900/903.
 - 5: 30000 img (24000/6000), centerline_weight=0, threshold=.1, 50 ep, batch=32, pdok_dataset_semseg3 (0:08:27/ep). checked only 1 epoch.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
+
+- 4 (planned, 2026-09-16): tree rows and lidar together, everything else the
+  exp 2 recipe (frozen up3, cls_loss=ce, 45 epochs, batch 16, same 3,098 val
+  stems). Config changes are four lines: the tree polyline directory,
+  num_classes=2, lidar_path set, and exp=4.
+
+  Data built and checked before submitting, all local:
+  - `pdok_dataset3_tree_polylines`: 30,000 crops, 103,432 hedge lines and
+    44,435 tree lines, 5,331 dropped under 40 px, 339 rings opened, 1 crop left
+    with nothing. 60.2% of crops have a tree row. Max lines per crop 49, the
+    same as the hedges-only dataset, so num_polylines stays 60. Split pinned to
+    the cluster run 2 val stems: train 26,902 / val 3,098.
+  - Class 0 arrays bit-identical to `pdok_dataset3_polylines` on 1,000 random
+    crops, so only the added class differs.
+  - `exps/probe_tree_class_labels.py`: 100% of class 0 on the heg layer and
+    100% of class 1 on bomenrij; cross 11.0% and 12.2% at 10 m, 1.7% and 2.4%
+    at 5 m.
+  - `lidar_patches.npy` rebuilt for all 30,000 crops (was 300).
+
+  Score with `exps/probe_polyline_pr.py` and `classes={0: "hedge", 1: "tree
+  row"}`, hedge against hedge, sweeping the threshold. Beat exp 2's F1 0.699 at
+  10 m and 0.547 at 5 m. loss_ce is on a new scale with two classes, so the loss
+  curve is comparable only with itself.
 
 - 3 scored, 2026-08-11. **Lost.** Best F1 at 10 m 0.664 against exp 2's 0.699.
   Both checkpoints, all 3,098 val crops, `exps/probe_polyline_pr.py`:

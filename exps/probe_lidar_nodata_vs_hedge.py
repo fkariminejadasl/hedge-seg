@@ -7,11 +7,14 @@ returns only, so a cell with nothing woody in it has nothing to compute from.
 This checks that reading by comparing the cells a hedge passes through with the
 rest.
 
-Result (2026-08-11, 300 crops, `lidar_patches.npy`):
+Result (2026-09-16, all 30,000 crops, `lidar_patches.npy`):
 
-    nodata share, all six metrics          about 48.4%
-    nodata in cells a hedge passes through       7.2%
-    nodata in every other cell                  51.8%
+    nodata share, all six metrics          46.2% (coeff_var 46.9%)
+    nodata in cells a hedge passes through       6.7%
+    nodata in every other cell                  49.6%
+
+(The first version of this, on the 300-crop patch file, gave 48.4 / 7.2 / 51.8.
+Same picture, and the numbers above are the ones over the whole dataset.)
 
 So nodata means "nothing growing here", not "measurement missing". Two things
 follow, both used in `DetrPolylineImageDataset._lidar_on_padded_grid`:

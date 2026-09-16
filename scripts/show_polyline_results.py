@@ -111,6 +111,7 @@ def main(cfg):
                 n=cfg.n,
                 title="GT",
                 save_path=figure_path(cfg, run_dirs[0], "gt"),
+                class_id=cfg.class_id,
             )
         ]
         for run_dir in [] if cfg.gt_only else run_dirs:
@@ -124,6 +125,7 @@ def main(cfg):
                     title=f"{name} t{cfg.score_thresh}",
                     score_thresh=cfg.score_thresh,
                     save_path=figure_path(cfg, run_dir, name),
+                    class_id=cfg.class_id,
                 )
             )
         if wait_for_key(figures) != "n":
@@ -147,6 +149,9 @@ if __name__ == "__main__":
         n=16,  # crops per figure, drawn as a 4x4 grid
         seed=42,  # same seed gives the same crops, so figures stay comparable
         gt_only=False,  # skip the prediction figures
+        # One class of a two-class run, 0 hedge or 1 tree row. None draws both.
+        # Use 0 to put a two-class run next to a hedge-only one.
+        class_id=None,
         # None picks at random. Paste a list from exps/probe_worst_crops.py,
         # e.g. [19018, 27324, 27068], to look at specific crops instead.
         ids=None,

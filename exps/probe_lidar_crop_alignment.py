@@ -26,8 +26,9 @@ polylines together before padding, so a lidar array added there has to go
 through the same steps, and if it misses one nothing raises: the shapes stay
 right and only the content is wrong. `augmentation_test` catches that by
 checking that the lidar and the polylines still agree afterwards. Both halves
-pass as of 2026-08-11: best shift (0, 0), and the hedge/background gap is
-+0.463 without augmentation against +0.461 with.
+pass as of 2026-09-16, over all 3,098 val crops now that the patch file
+covers every crop: best shift (0, 0), and the hedge/background gap is +0.457
+without augmentation against +0.453 with.
 
 Needs `scripts/data/build_lidar_patches.py` to have been run. Set
 `cfg["lidar_path"]` to None to skip the augmentation half.
@@ -131,8 +132,8 @@ def augmentation_test(cfg):
     both still agree afterwards, both are right. The measure is the presence
     channel, which is 1 where the laser found vegetation: it should be high in
     the cells the hedges pass through and low elsewhere, with or without
-    augmentation. Skipping the lidar rotation drops the gap from 0.455 to 0.187,
-    so this notices.
+    augmentation. Skipping the lidar rotation dropped the gap to 0.187 when that
+    was tried on purpose, so this notices.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
     import train_detr_unet_polyline as t
@@ -327,9 +328,12 @@ if __name__ == "__main__":
         n_shift_crops=40,  # crops for the shift test; 0 skips it
         # The augmentation half of the check. Needs the patches from
         # scripts/data/build_lidar_patches.py, and aug_polyline_dir must only
-        # contain crops that are in them. None skips it.
+        # contain crops that are in them. None skips it. The patch file now
+        # covers all 30,000 crops, so this points at the real val split; with a
+        # partial file, point it at polylines/lidar_check, which the code below
+        # fills with exactly the crops that do have a patch.
         lidar_path=DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy",
-        aug_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/lidar_check",
+        aug_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val_cluster",
         lidar_stride=16,
         pad_to=1024,
         aug_trials=400,

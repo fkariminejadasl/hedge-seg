@@ -84,22 +84,37 @@ def load_run(run_dir):
                 "stem": path.stem,
                 "pred": pred["polylines"].astype(np.float64),
                 "scores": pred["scores"] if "scores" in pred else None,
+                "pred_labels": pred["labels"] if "labels" in pred else None,
                 "gt": gt["polylines"].astype(np.float64),
+                "gt_labels": gt["labels"] if "labels" in gt else None,
             }
         )
     return items
 
 
-def score(items, score_thresh=None, exclude=frozenset(), merge_m=None):
-    """Per-image rows. Aggregate them with macro_average, never as a total."""
+def score(items, score_thresh=None, exclude=frozenset(), merge_m=None, class_id=None):
+    """
+    Per-image rows. Aggregate them with macro_average, never as a total.
+
+    class_id scores one class against itself, which is how a two-class run is
+    compared with a hedge-only run: hedge predictions against hedge labels, with
+    the tree rows out of both sides. None scores every line whatever its class.
+    """
     rows = []
     for item in items:
         if item["stem"] in exclude:
             continue
         pred = item["pred"]
+        keep = np.ones(len(pred), dtype=bool)
         if score_thresh is not None and item["scores"] is not None:
-            pred = pred[item["scores"] >= score_thresh]
-        gt = list(item["gt"])
+            keep &= item["scores"] >= score_thresh
+        if class_id is not None and item["pred_labels"] is not None:
+            keep &= item["pred_labels"] == class_id
+        pred = pred[keep]
+        gt = item["gt"]
+        if class_id is not None and item["gt_labels"] is not None:
+            gt = gt[item["gt_labels"] == class_id]
+        gt = list(gt)
         if merge_m:
             gt = merge_close_polylines(gt, meters_to_px(merge_m))
         row = {"stem": item["stem"], "n_pred": len(pred), "n_gt": len(gt)}
@@ -141,18 +156,24 @@ def report(rows, label, buffers=BUFFERS_M):
         )
 
 
-def report_geometry(items, score_thresh=None):
+def report_geometry(items, score_thresh=None, class_id=None):
     """Do predictions bend and stretch the way the labels do?"""
     for key, name in (("gt", "GT"), ("pred", "pred")):
         straight, lengths = [], []
         for item in items:
             lines = item[key]
+            labels = item[f"{key}_labels"]
+            if class_id is not None and labels is not None:
+                lines = lines[labels == class_id]
             if (
                 key == "pred"
                 and score_thresh is not None
                 and item["scores"] is not None
             ):
-                lines = lines[item["scores"] >= score_thresh]
+                scores = item["scores"]
+                if class_id is not None and labels is not None:
+                    scores = scores[labels == class_id]
+                lines = lines[scores >= score_thresh]
             for line in lines:
                 straight.append(straightness(line))
                 lengths.append(polyline_length(line) * PDOK_PIXEL_SIZE_M)
@@ -174,15 +195,40 @@ def main(cfg):
         )
 
     thresh = cfg["report_thresh"]
+    # A two-class run is compared with a hedge-only run class by class: hedge
+    # predictions against hedge labels. None means score every line, which is
+    # what a one-class run needs.
+    classes = cfg["classes"] or {None: "all lines"}
+    main_class = next(iter(classes))
+
     for run_dir in cfg["run_dirs"]:
         run_dir = Path(run_dir)
         items = load_run(run_dir)
-        rows = score(items, score_thresh=thresh)
         print(f"=== {run_dir.name}  ({len(items)} crops, reported at t={thresh}) ===")
 
-        print(" buffered length, all crops")
-        report(rows, "buffered")
+        for class_id, name in classes.items():
+            class_rows = score(items, score_thresh=thresh, class_id=class_id)
+            n_pred = np.mean([r["n_pred"] for r in class_rows])
+            n_gt = np.mean([r["n_gt"] for r in class_rows])
+            print(
+                f" buffered length, {name} ({n_pred:.2f} pred/img, {n_gt:.2f} gt/img)"
+            )
+            report(class_rows, "buffered")
 
+            if cfg["sweep"] and items[0]["scores"] is not None:
+                print(f" score threshold sweep, 10 m, {name}")
+                for swept_thresh in SWEEP:
+                    swept = score(items, score_thresh=swept_thresh, class_id=class_id)
+                    swept_pred = np.mean([r["n_pred"] for r in swept])
+                    report(
+                        swept,
+                        f"t={swept_thresh:<5} {swept_pred:.2f} pred/img",
+                        (10,),
+                    )
+
+        # The detail sections below are about the first class only, which is the
+        # one the headline number comes from.
+        rows = score(items, score_thresh=thresh, class_id=main_class)
         print(" by GT line count, 10 m")
         for lo, hi in GT_BUCKETS:
             sub = [r for r in rows if lo <= r["n_gt"] <= hi]
@@ -193,15 +239,11 @@ def main(cfg):
 
         if exclude:
             print(" campsite crops excluded")
-            report(score(items, score_thresh=thresh, exclude=exclude), "rural only")
+            report(
+                score(items, score_thresh=thresh, exclude=exclude, class_id=main_class),
+                "rural only",
+            )
             report([r for r in rows if r["stem"] in exclude], "campsites only")
-
-        if cfg["sweep"] and items[0]["scores"] is not None:
-            print(" score threshold sweep, 10 m")
-            for swept_thresh in SWEEP:
-                swept = score(items, score_thresh=swept_thresh)
-                n_pred = np.mean([r["n_pred"] for r in swept])
-                report(swept, f"t={swept_thresh:<5} {n_pred:.2f} pred/img", (10,))
 
         if cfg["chamfer"]:
             print(" rejected chamfer + Hungarian variant, same predictions")
@@ -209,14 +251,14 @@ def main(cfg):
 
         if cfg["merge_gt"]:
             print(" GT polylines within 10 m merged")
-            merged = score(items, score_thresh=thresh, merge_m=10)
+            merged = score(items, score_thresh=thresh, merge_m=10, class_id=main_class)
             dropped = 1 - sum(r["n_gt"] for r in merged) / sum(r["n_gt"] for r in rows)
             print(f"  {dropped:.1%} of GT lines removed by merging")
             report(merged, "merged GT")
 
         if cfg["geometry"]:
             print(" polyline geometry")
-            report_geometry(items, score_thresh=thresh)
+            report_geometry(items, score_thresh=thresh, class_id=main_class)
         print()
 
 
@@ -227,6 +269,12 @@ if __name__ == "__main__":
             root / "inference/best_2_val_cluster_t0.05",  # exp 2, softmax head
             root / "inference/best_3_val_cluster_t0.05",  # exp 3, focal head
         ],
+        # Which classes to score, each against its own labels. None (or an empty
+        # dict) scores every line together, which is right for the one-class
+        # runs 1 to 3. For a two-class run use {0: "hedge", 1: "tree row"}: the
+        # hedge row is then directly comparable with exp 2, and the detail
+        # sections below follow the first class listed.
+        classes=None,  # {0: "hedge", 1: "tree row"} for exp 4
         # Written by exps/probe_recreation_crops.py. Missing file just skips
         # the campsite rows.
         recreation_stems=root / "recreation_crops_val_cluster.txt",

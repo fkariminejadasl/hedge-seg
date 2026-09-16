@@ -5,6 +5,11 @@ DETR-style polyline training (scripts/train_detr_unet_polyline.py).
 Unlike build_lidar_training_dataset.py, this only converts ground truth: no
 embeddings are computed, so the same NPZ files work for any image backbone.
 
+Classes: hedges come from the label JSON and are class 0. With treeline_shp set,
+the Top10NL tree row layer (bomenrij) is clipped to each crop and added as class
+1, using the same code that produced the hedge labels. The crops and the images
+are unchanged, so no imagery has to be regenerated.
+
 Train/val split is geographic, not random. Crops are sampled per polyline, so
 crops from the same location overlap (in pdok_dataset3, 72.6% of crops overlap
 at least one other crop), and a random split would leak: most val crops would
@@ -14,6 +19,11 @@ label JSON, blocks are hashed into train/val, and any connected group of overlap
 crops that touches a train block goes entirely to train. A KDTree check asserts that
 no val crop overlaps a train crop. Optionally, val also avoids areas used by another
 dataset (for example the semseg backbone training data), via avoid_label_dirs.
+
+The computed split depends on the machine, because avoid_label_dirs sees a
+different number of labels locally and on the cluster. val_stems_file takes the
+split from an existing run's val stem list instead, so both machines agree and a
+new dataset stays scoreable against that run.
 
 Label cleaning:
 - closed rings (first and last point within closed_eps_px, after collapsing
@@ -47,7 +57,7 @@ Output layout:
 NPZ content per image (same target format as the embs_polylines NPZs, minus feat):
 
     polylines: (N, num_points, 2) float32, xy pixel coords, equidistant resampled
-    labels: (N,) int64, all class_id
+    labels: (N,) int64, class_id per polyline (0 hedge, 1 tree row)
     image_size: (2,) int32, (H, W)
 """
 
@@ -66,9 +76,12 @@ from PIL import Image
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
+from shapely.geometry import box
 
 from hedge_seg.label_postprocess import resample_polyline_equidistant
 from hedge_seg.paths import DATA_ROOT, print_roots
+from hedge_seg.pdok_training_data import make_polylines_for_chip, prepare_hedge_gdf
+from hedge_seg.training_data import lines_in_bbox
 
 
 def load_json(path: Path) -> dict:
@@ -114,20 +127,19 @@ def open_closed_ring(points: list, closed_eps_px: float) -> Tuple[list, bool]:
     return points, False
 
 
-def convert_label_file(
-    json_path: Path,
-    image_path: Path,
+def _clean_polylines(
+    raw_polylines: list,
     num_points: int,
-    class_id: int,
     min_length_px: float,
     closed_eps_px: float,
 ):
-    data = load_json(json_path)
-    raw_polylines = data.get("polylines_px", []) or []
+    """
+    Open rings, drop short lines, resample to num_points equidistant points.
 
-    with Image.open(image_path) as im:
-        W, H = im.size
-
+    Kept separate so every layer goes through the same cleaning. A tree row
+    cleaned differently from a hedge would be a silent difference between the
+    two classes.
+    """
     kept = []
     n_skipped = 0
     n_opened = 0
@@ -145,6 +157,56 @@ def convert_label_file(
             n_skipped += 1
             continue
         kept.append(resampled)
+    return kept, n_skipped, n_opened
+
+
+def convert_label_file(
+    json_path: Path,
+    image_path: Path,
+    num_points: int,
+    class_id: int,
+    min_length_px: float,
+    closed_eps_px: float,
+    extra_layers=(),
+):
+    """
+    Per-crop polylines and class labels.
+
+    extra_layers is a list of (gdf, sindex, class_id) for layers that are not in
+    the label JSON, currently the Top10NL tree rows. They are clipped to the
+    crop with the same function that produced "polylines_px" for the hedges, so
+    the pixel convention cannot drift between the two classes.
+    """
+    data = load_json(json_path)
+
+    with Image.open(image_path) as im:
+        W, H = im.size
+
+    groups = [(data.get("polylines_px", []) or [], class_id)]
+    for gdf, sindex, extra_class_id in extra_layers:
+        bbox_geom = box(*data["bbox_world"])
+        hits = lines_in_bbox(gdf, sindex, bbox_geom)
+        # min_len_px=10.0 is the value build_pdok_wms_dataset.py used for the
+        # hedges. The filter that matters is min_length_px, applied below.
+        raw = (
+            make_polylines_for_chip(hits, bbox_geom, out_size_px=W, min_len_px=10.0)
+            if len(hits)
+            else []
+        )
+        groups.append((raw, extra_class_id))
+
+    kept = []
+    labels_list = []
+    n_skipped = 0
+    n_opened = 0
+    for raw_polylines, group_class_id in groups:
+        group_kept, group_skipped, group_opened = _clean_polylines(
+            raw_polylines, num_points, min_length_px, closed_eps_px
+        )
+        kept.extend(group_kept)
+        labels_list.extend([group_class_id] * len(group_kept))
+        n_skipped += group_skipped
+        n_opened += group_opened
 
     if kept:
         polylines = np.asarray(kept, dtype=np.float32)  # (N,K,2)
@@ -153,7 +215,7 @@ def convert_label_file(
     else:
         polylines = np.zeros((0, num_points, 2), dtype=np.float32)
 
-    labels = np.full((polylines.shape[0],), class_id, dtype=np.int64)
+    labels = np.asarray(labels_list, dtype=np.int64)
     image_size = np.asarray([H, W], dtype=np.int32)
     return polylines, labels, image_size, n_skipped, n_opened
 
@@ -245,6 +307,34 @@ def spatial_train_val_split(
     return {f.stem: ("val" if v else "train") for f, v in zip(json_files, is_val)}
 
 
+def split_from_val_stems(labels_dir: Path, val_stems_file: Path) -> Dict[str, str]:
+    """
+    Take the split from a file of val stems instead of recomputing it.
+
+    One name per line, with or without a suffix, so the output of
+    `ls polylines/val` can be used directly. Everything else is train.
+
+    The computed split depends on where the conversion runs, because
+    avoid_label_dirs sees 10 pdok_dataset2 labels locally and 5,000 on the
+    cluster. Pinning it to the stem list of an existing run makes the two
+    machines agree and keeps a new dataset scoreable against that run.
+    """
+    wanted = {Path(line).stem for line in Path(val_stems_file).read_text().split()}
+    stems = [f.stem for f in sorted(Path(labels_dir).glob("pos_*.json"))]
+    missing = wanted - set(stems)
+    if missing:
+        raise ValueError(
+            f"{len(missing)} val stems are not in {labels_dir}, "
+            f"first {sorted(missing)[:3]}"
+        )
+    n_val = len(wanted)
+    print(
+        f"Split pinned to {val_stems_file}: train={len(stems) - n_val}, val={n_val} "
+        f"({n_val / len(stems) * 100:.1f}% val)"
+    )
+    return {s: ("val" if s in wanted else "train") for s in stems}
+
+
 # =========================
 # Overlay visualization
 # =========================
@@ -295,17 +385,32 @@ def convert_dataset(
     seed: int = 42,
     n_overlays: int = 20,
     avoid_label_dirs: Optional[List[Path]] = None,
+    treeline_shp: Optional[Path] = None,
+    tree_class_id: int = 1,
+    crs: str = "EPSG:28992",
+    val_stems_file: Optional[Path] = None,
 ):
     image_dir = dataset_root / "images"
     labels_dir = dataset_root / "labels"
 
-    split = spatial_train_val_split(
-        labels_dir,
-        block_m=block_m,
-        val_fraction=val_fraction,
-        seed=seed,
-        avoid_label_dirs=avoid_label_dirs,
-    )
+    if val_stems_file is not None:
+        split = split_from_val_stems(labels_dir, val_stems_file)
+    else:
+        split = spatial_train_val_split(
+            labels_dir,
+            block_m=block_m,
+            val_fraction=val_fraction,
+            seed=seed,
+            avoid_label_dirs=avoid_label_dirs,
+        )
+
+    # Tree rows are a second Top10NL layer and are not in the label JSONs, so
+    # they are clipped to each crop here. None keeps the hedges-only dataset.
+    extra_layers = []
+    if treeline_shp is not None:
+        tree_gdf = prepare_hedge_gdf(treeline_shp, crs)
+        extra_layers.append((tree_gdf, tree_gdf.sindex, tree_class_id))
+        print(f"Tree rows from {Path(treeline_shp).name}: {len(tree_gdf)} features")
 
     # Remove stale NPZs first: a re-run with different split settings can move
     # a crop from val to train, and the leftover copy in the other directory
@@ -334,6 +439,8 @@ def convert_dataset(
     n_opened_total = 0
     n_empty = 0
     max_lines = 0
+    per_class = {}
+    n_with_tree = 0
     for json_path in json_files:
         stem = json_path.stem
         image_path = None
@@ -346,7 +453,13 @@ def convert_dataset(
             raise FileNotFoundError(f"No image for {stem} in {image_dir}")
 
         polylines, labels, image_size, n_skipped, n_opened = convert_label_file(
-            json_path, image_path, num_points, class_id, min_length_px, closed_eps_px
+            json_path,
+            image_path,
+            num_points,
+            class_id,
+            min_length_px,
+            closed_eps_px,
+            extra_layers=extra_layers,
         )
         np.savez_compressed(
             out_root / "polylines" / split[stem] / f"{stem}.npz",
@@ -360,6 +473,9 @@ def convert_dataset(
         n_opened_total += n_opened
         n_empty += int(polylines.shape[0] == 0)
         max_lines = max(max_lines, polylines.shape[0])
+        for c, n in zip(*np.unique(labels, return_counts=True)):
+            per_class[int(c)] = per_class.get(int(c), 0) + int(n)
+        n_with_tree += int((labels == tree_class_id).any())
 
         if stem in overlay_stems:
             save_overlay(
@@ -373,6 +489,16 @@ def convert_dataset(
         f"{n_empty} images left without polylines, "
         f"max lines per image: {max_lines}"
     )
+    print(
+        "  per class: "
+        + ", ".join(f"{c}: {n}" for c, n in sorted(per_class.items()))
+        + (
+            f"; {n_with_tree} crops ({n_with_tree / len(json_files) * 100:.1f}%) "
+            f"have a class {tree_class_id} line"
+            if extra_layers
+            else ""
+        )
+    )
     if n_overlays > 0:
         print(f"GT overlays for {len(overlay_stems)} images in {overlay_dir}")
 
@@ -381,20 +507,34 @@ def main() -> None:
     print_roots()
     convert_dataset(
         dataset_root=DATA_ROOT / "pdok_dataset3",
-        out_root=DATA_ROOT / "pdok_dataset3_polylines",
+        out_root=DATA_ROOT / "pdok_dataset3_tree_polylines",
         num_points=20,
         class_id=0,
         # Drop polylines shorter than this (in pixels): 40 px = 10 m at 25 cm/px.
         min_length_px=40.0,
         # Open rings whose start and end are within this distance (in pixels).
         closed_eps_px=2.0,
-        # Geographic split: block size, val fraction, seed.
+        # Geographic split: block size, val fraction, seed. Ignored when
+        # val_stems_file is set.
         block_m=5000.0,
         val_fraction=0.2,
         seed=42,
         n_overlays=20,
         # Keep val away from the areas used to train the semseg backbone.
         avoid_label_dirs=[DATA_ROOT / "pdok_dataset2/labels"],
+        # Tree rows as a second class. None reproduces the hedges-only dataset
+        # (pdok_dataset3_polylines). Use the same Top10NL year as the hedge
+        # labels, 2023, so the only change is the extra class.
+        treeline_shp=Path(
+            "/home/fatemeh/Downloads/hedge/Topo10NL2023/Treelines_polylines/"
+            "Top10NL2023_inrichtingselementen_lijn_bomenrij.shp"
+        ),
+        tree_class_id=1,
+        crs="EPSG:28992",
+        # The val stems of cluster run 2, so this dataset is scoreable against
+        # it and the laptop and the cluster produce the same split. None
+        # computes the geographic split instead.
+        val_stems_file=Path("/home/fatemeh/Downloads/hedge/cluster_val_stems.txt"),
     )
 
 

@@ -445,8 +445,8 @@ elsewhere, whether or not augmentation is on.
 
 | | under hedges | elsewhere | gap |
 |---|---|---|---|
-| augment off | 0.920 | 0.456 | +0.463 |
-| augment on | 0.917 | 0.456 | **+0.461** |
+| augment off | 0.924 | 0.467 | +0.457 |
+| augment on | 0.921 | 0.467 | **+0.453** |
 
 The gap survives, so both paths agree.
 
@@ -463,9 +463,9 @@ nothing woody in it has no value at all.
 
 | | nodata share |
 |---|---|
-| all cells | 48.4% |
-| cells a hedge passes through | **7.2%** |
-| every other cell | 51.8% |
+| all cells | 46.2% |
+| cells a hedge passes through | **6.7%** |
+| every other cell | 49.6% |
 
 So an empty cell is telling you something, not hiding something. Two things
 follow. Filling the metrics with 0 is right rather than a fudge, because no
@@ -566,8 +566,9 @@ tree row does. Two details worth keeping:
 
 This is per-feature classification given that a line is already there, so it is
 an upper bound on what a 10 m grid can contribute, not a detector result. At
-10 m a 250 m crop is only 25x25 cells, so the right role is a side branch that
-informs the class, never the geometry.
+10 m a 250 m crop is only 25x25 cells, so the natural role is a side branch,
+which is what exp 4 does. Whether it may also touch the geometry is decided in
+"Where the lidar is allowed to act" below.
 
 Reproduce with `exps/probe_lidar_hedge_vs_tree.py`.
 
@@ -751,6 +752,106 @@ always be tested by dropping crops at scoring time
 (`exps/probe_recreation_crops.py` writes the stem list) before anyone touches
 the dataset. That test cost an afternoon and saved a reconversion.
 
+## Tree rows cost nothing to add, because the crops already exist
+
+Adding Top10NL `bomenrij` as class 1 needs no new imagery and no new crops. The
+converter clips the layer to each existing crop with the same function that made
+the hedge labels (`scripts/data/convert_pdok_polylines_to_detr_polyline.py`),
+which takes about a minute for 30,000 crops.
+
+What that gives, over the whole dataset:
+
+| | hedges only | with tree rows |
+|---|---|---|
+| lines | 103,432 | 103,432 + 44,435 |
+| lines per crop, mean | 3.45 | 4.93 |
+| **max lines per crop** | **49** | **49** |
+| crops with a tree row | 0 | 18,061 (60.2%) |
+
+Three things worth keeping:
+
+- **The query budget does not change.** The crowded crop already had 49 lines,
+  so 60 queries are still enough and `num_polylines` stays at 60. This was worth
+  checking before anything else, since a second class competing for queries
+  would have been a real cost.
+- **The hedge half is untouched.** The stored class 0 arrays are bit-identical
+  to `pdok_dataset3_polylines` on 1,000 random crops, so any change in the hedge
+  score comes from the model, not from the data.
+- **The classes blur at 10 m.** 12.2% of tree length is within 10 m of the heg
+  layer and 11.0% of hedge length within 10 m of bomenrij, against 2.4% and 1.7%
+  at 5 m (`exps/probe_tree_class_labels.py`). So read the 5 m buffered score as
+  the cleaner class separation, and the 10 m one as partly forgiving of a
+  confusion between the two.
+
+Use the same Top10NL year as the hedge labels, 2023. Taking the tree rows from
+2025 would change the label year at the same time and confound the run.
+
+## Where the lidar is allowed to act
+
+The backbone turns the image into a 64x64 grid of feature vectors, one per
+token, and the dataset puts the lidar patch on that same grid. So the lidar can
+enter in two places:
+
+- **In the tokens.** Add a learned lidar vector to each image token. Everything
+  downstream sees image and lidar mixed, so the lidar can change the class and
+  the point positions.
+- **In the class head only.** Sample the lidar under each predicted line and
+  give it only to the head that says hedge or tree. It can rename a line but
+  never move one.
+
+Exp 4 uses the first, although an earlier note here argued for the second on the
+grounds that a 10 m grid could blur a thin line. Three reasons:
+
+- It is far less code: an addition after `input_proj`, against sampling at each
+  predicted point plus a wider head.
+- `LidarTokenEncoder`'s last layer is zero-initialised, so at step 0 the model
+  is exactly the no-lidar model. The lidar only moves the geometry if the
+  gradient says that helps, and a lidar run and a no-lidar run start from the
+  same place.
+- The limit is that too few correct lines are drawn at all. A class-only branch
+  cannot change which lines are drawn, so it cannot touch that.
+
+How the old worry would show up: hedge F1 at 5 m falling against exp 2's 0.547
+while the 10 m number holds. That is the signature of blurrier geometry, and
+then the class-only version is the fallback.
+
+Two details that are not cosmetic. BatchNorm comes first because the six metrics
+are in different units, five band ratios in [0, 1] against `perc_95` reaching
+56 m with a standard deviation of 6, so without it one channel dominates the
+sum. And `lidar_stride` has to equal the feature stride, or the lidar grid and
+the token grid are different sizes; `main` asserts it.
+
+## A GPU run does not come back bitwise months later
+
+Re-inferring exp 2 with the current code gave the same number of predictions on
+every crop, but coordinates up to 0.19 px different from the run stored in July,
+which is 4.7 cm on the ground. That looks like a regression and is not one.
+
+The code is equivalent. With lidar off, the new model produces bitwise identical
+logits, polylines and boxes to the committed version on CPU, with the real
+best_2.pt weights. The GPU is deterministic within a session, two runs came out
+bitwise equal, but GPU and CPU differ by 0.58 px on the same weights and input,
+because cuDNN TF32 is on. A driver or library change since July is enough to
+move the last bits.
+
+So to check that a refactor left a model alone, run the two code paths on CPU
+with the same weights and compare the tensors. Comparing NPZs from two GPU runs
+on different days answers a different question.
+
+## A split can be pinned to a stem list
+
+The geographic split depends on where the conversion runs, because
+`avoid_label_dirs` sees 10 pdok_dataset2 labels locally and 5,000 on the
+cluster. That trap cost a val set once and is why `polylines/val_cluster`
+exists.
+
+`val_stems_file` in the converter takes the split from an existing run's val
+stem list instead of recomputing it. Pointed at the 3,098 stems of cluster run
+2, the new tree dataset came out at exactly train 26,902 / val 3,098 on the
+laptop, so a new dataset can be built on either machine and still be scored
+against an old checkpoint. The rule stays the same: the split is part of the
+run, so keep the stem list with the checkpoint.
+
 ## Done
 
 Phase A — data + split:
@@ -834,19 +935,20 @@ against 0.731 on crops with one). So the next runs should target perception.
   stage at stride 8. Memory is available: batch 16 uses 5.8 of 40 GB, and
   stride 8 is 4x the tokens. This is the most direct attack on the real limit.
 
-- Exp 5, the data step, two things in one conversion: tree lines as a second
-  class, and labels from Top10NL2025 instead of 2023. The second closes the
+- Exp 4, running: tree lines as a second class and the lidar side branch, both
+  at once, to find out quickly whether the pair pays. Tree lines are worth 0.053
+  of predicted length on their own and lidar separates heg from bomenrij at
+  balanced accuracy 0.778, so they are partners. Score class 0 against class 0
+  on the same 3,098 val stems and beat exp 2's F1 0.699 at 10 m by more than
+  about 0.02, or stop. A loss will not say which half failed, which is the price
+  of running them together; the per-class rows partly disambiguate.
+  - Then the ablations, each one config line and no code change: trees only,
+    lidar only.
+- Labels from Top10NL2025 instead of 2023, a separate conversion. It closes the
   three-year image/label gap at no imagery cost, since the crops are already
   2025. Both shapefiles are downloaded, in
-  `/home/fatemeh/Downloads/hedge/Top10NL2025`. Tree lines are worth 0.053 of
-  predicted length on their own.
-
-- LiDAR as a side branch, once the second class exists. Structure metrics
-  separate heg from bomenrij at balanced accuracy 0.778, so this is the partner
-  to exp 5. Feed the band ratios (BR_1_2, BR_2_3, BR_above_3, BR_below_5) and a
-  couple of variability metrics, not `perc_95` height and not all 25. Fuse at
-  10 m so the semseg-pretrained RGB backbone stays untouched, and use it only
-  for the class head, never for geometry.
+  `/home/fatemeh/Downloads/hedge/Top10NL2025`. Keep it out of exp 4: changing
+  the label year and adding a class at once cannot be read.
 
 - Backbone unfreezing with low lr. Only 5.8 M of the network trains today. Pair
   it with exp 4 rather than running it alone.

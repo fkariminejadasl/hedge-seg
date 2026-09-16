@@ -8,6 +8,14 @@ script); the test fails (times out) if that regresses. It also exercises the
 whole pipeline end to end: backbone checkpoint load, image dataset, augmentation,
 forward/backward/optimizer, matcher, eval, and checkpoint saving.
 
+It runs the two-class tree dataset with the lidar branch on, so it covers the
+exp 4 configuration. Before the training run it checks the lidar branch itself
+(`check_lidar_branch`), because two of its properties cannot be seen from a loss
+curve: the branch is exactly inert at initialisation, and it does receive
+gradients. Without the first, a lidar run would not be comparable with a
+no-lidar one; without the second, the branch could sit there doing nothing for
+eleven hours.
+
 Needs a free GPU (it will OOM if a real training run is using it), the backbone
 checkpoint, and pdok_dataset3 + its converted polylines. Run it after changing
 the training script, the dataset, or the env:
@@ -19,6 +27,7 @@ import sys
 import time
 from pathlib import Path
 
+import torch
 from omegaconf import OmegaConf
 
 # scripts/, not this file's own directory: the test moved to exps/ but the
@@ -40,28 +49,101 @@ NUM_WORKERS = 4
 TIMEOUT_S = 600  # a healthy run finishes in well under a minute on any GPU
 
 
+def check_lidar_branch(n_lidar_channels=7, grid=8, num_polylines=4, num_points=20):
+    """
+    Three things about the lidar branch that a training log would not show.
+
+    1. The patch the dataset produces has the shape of the token grid, so the
+       two can be added at all.
+    2. At initialisation the branch outputs exactly zero, so the model is the
+       no-lidar model and a lidar run starts from the same place as one without.
+    3. A few steps later it is no longer zero, so it is able to learn.
+
+    A small grid is used here because none of this depends on the size.
+
+    The gradient check has to go through the class head. At initialisation every
+    reg_branch's last layer is zero, so the geometry path passes no gradient
+    back into the tokens at all and a loss made only of pred_polylines leaves
+    the lidar branch with a zero gradient. That is true of the image path too
+    and it clears up after the first steps, but a test written the obvious way
+    fails for a reason that has nothing to do with lidar.
+    """
+    ds = t.DetrPolylineImageDataset(
+        image_dir=DATA_ROOT / "pdok_dataset3/images",
+        polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
+        num_points=20,
+        pad_to=1024,
+        augment=False,
+        lidar_path=DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy",
+        lidar_stride=16,
+    )
+    _, target = ds[0]
+    assert target["lidar"].shape == (7, 64, 64), target["lidar"].shape
+    assert ds.n_lidar_channels == 7, ds.n_lidar_channels
+
+    detr = t.DetrPolylineFromEmbeddings(
+        in_dim=32,
+        num_classes=2,
+        num_polylines=num_polylines,
+        d_model=32,
+        nhead=4,
+        num_encoder_layers=1,
+        num_decoder_layers=1,
+        dim_feedforward=32,
+        dropout=0.0,
+        grid_size=(grid, grid),
+        num_points=num_points,
+        n_lidar_channels=n_lidar_channels,
+    ).eval()
+
+    tokens = torch.randn(2, grid * grid, 32)
+    lidar = torch.randn(2, n_lidar_channels, grid, grid)
+
+    assert detr.lidar_encoder(lidar).abs().max().item() == 0.0, "branch not zero-init"
+    with_lidar = detr(tokens, lidar=lidar)["pred_polylines"]
+    detr.lidar_encoder, saved = None, detr.lidar_encoder
+    without = detr(tokens)["pred_polylines"]
+    detr.lidar_encoder = saved
+    assert torch.equal(with_lidar, without), "lidar changed the output at init"
+
+    detr.train()
+    optimizer = torch.optim.AdamW(detr.parameters(), lr=1e-3)
+    for _ in range(3):
+        optimizer.zero_grad(set_to_none=True)
+        out = detr(tokens, lidar=lidar)
+        (out["pred_logits"].sum() + out["pred_polylines"].sum()).backward()
+        grad = detr.lidar_encoder.net[-1].weight.grad
+        assert grad is not None and grad.abs().max() > 0, "no gradient into the branch"
+        optimizer.step()
+    detr.eval()
+    assert detr.lidar_encoder(lidar).abs().max() > 0, "branch stayed at zero"
+    print(
+        "LIDAR BRANCH OK: patch on the token grid, inert at init, learns after 3 steps"
+    )
+
+
 def main():
+    check_lidar_branch()
     scratch = Path("/tmp") / "smoke_detr_unet_polyline"
     cfg = dict(
         mode="train",
         exp="smoke",
         save_path=scratch,
         image_dir=DATA_ROOT / "pdok_dataset3/images",
-        train_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/train",
-        val_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
+        train_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/train",
+        val_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
         pad_to=1024,
         augment=True,
-        # Lidar off: the patches only exist for part of the dataset and no
-        # model branch reads them yet. exps/probe_lidar_crop_alignment.py is
-        # what exercises the lidar path.
-        lidar_path=None,
+        # Lidar on, the exp 4 setting. Needs the full patch file: a crop
+        # without a patch stops the dataset, which is right during training.
+        lidar_path=DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy",
         lidar_stride=16,
         backbone_ckpt=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
         feature_stage="up3",
         freeze_backbone=True,
         num_points=20,
         num_polylines=60,
-        num_classes=1,
+        num_classes=2,  # 0 hedge, 1 tree row, the exp 4 dataset
         d_model=256,
         nhead=8,
         num_encoder_layers=1,
@@ -106,7 +188,7 @@ def main():
         preview_out_dir=scratch / "preview",
         preview_n=2,
         infer_ckpt=None,
-        infer_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
+        infer_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
         infer_out_dir=scratch / "inference",
         infer_score_thresh=0.5,
         infer_topk=60,
