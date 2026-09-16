@@ -126,7 +126,8 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 4 (planned, 2026-09-16): tree rows and lidar together, everything else the
+- 4 (submitted 2026-09-16, job 26798493, gpu_a100, git 9db4a10, --time=16:00:00,
+  about 11 h expected): tree rows and lidar together, everything else the
   exp 2 recipe (frozen up3, cls_loss=ce, 45 epochs, batch 16, same 3,098 val
   stems). Config changes are four lines: the tree polyline directory,
   num_classes=2, lidar_path set, and exp=4.
