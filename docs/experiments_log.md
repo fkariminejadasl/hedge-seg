@@ -33,7 +33,9 @@ forgotten:
   built on one machine therefore names crops the other does not have. This is
   why `pdok_dataset3_tree_polylines` is 26,900 train crops on the cluster and
   26,902 on the laptop, and why `lidar_patches.npy` has no patch for
-  `pos_030002` or `pos_030003`. Reason in `docs/lesson_learned.md`.
+  `pos_030002` or `pos_030003`. Check both machines with
+  `exps/probe_dataset_stem_mismatch.py` before using a dataset across them.
+  Reason in `docs/lesson_learned.md`.
 - `Actueel_ortho25` is not a fixed layer. It is bit-identical to
   `2025_ortho25` today and will silently become 2026 imagery later. **Rebuilding
   `pdok_dataset3` from `Actueel_ortho25` will not reproduce it.** Use

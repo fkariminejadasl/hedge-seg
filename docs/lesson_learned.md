@@ -896,6 +896,10 @@ names every missing crop before the GPU is touched, the way the lidar check
 already did. Getting this wrong costs a queue slot and an hour of waiting to
 learn about a two-file mismatch.
 
+Run `exps/probe_dataset_stem_mismatch.py` on both machines before using a
+dataset across them. It prints the numbering with its gaps and every polyline
+stem that has no image or no lidar patch.
+
 ## Done
 
 Phase A — data + split:
