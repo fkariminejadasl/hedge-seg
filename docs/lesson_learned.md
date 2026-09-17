@@ -857,6 +857,45 @@ laptop, so a new dataset can be built on either machine and still be scored
 against an old checkpoint. The rule stays the same: the split is part of the
 run, so keep the stem list with the checkpoint.
 
+It pins the split, not the stem set. The train half is still recomputed from
+whatever labels the converting machine has, which is how exp 4 failed. See the
+next section.
+
+## Two builds of the same dataset are not the same crops
+
+`pdok_dataset3` was downloaded twice, once on the laptop and once on the
+cluster. Both hold exactly 30,000 crops, which is why the count never looked
+wrong. They are not the same 30,000:
+
+| | laptop | cluster |
+|---|---|---|
+| range | `pos_000000` .. `pos_029999`, no gaps | `pos_000000` .. `pos_030003`, four gaps |
+| missing | none | `pos_029989`, `pos_029998`, `pos_030000`, `pos_030001` |
+
+Four PDOK WMS requests failed during the cluster download, so it ran on past
+`pos_029999` to reach 30,000. Crops are sampled one per polyline, so a failure
+shifts the numbering and nothing downstream notices.
+
+This killed exp 4 three minutes into epoch 1 with "No image for pos_029989".
+Exps 1 to 3 never hit it because `pdok_dataset3_polylines` was converted **on
+the cluster**, from the cluster's own labels, so its stems match the cluster
+images by construction. `pdok_dataset3_tree_polylines` was built on the laptop
+and copied over, so it carried two crops the cluster does not have.
+
+The same thing is true of `lidar_patches.npy`, built on the laptop: it has no
+patch for `pos_030002` or `pos_030003`. The tree dataset does not contain those
+stems, so exp 4 was unaffected, but `pdok_dataset3_polylines` does, so the
+lidar-only ablation has to drop them or build the two patches first.
+
+Two rules. A dataset built on one machine has to be checked against the images
+on the machine it runs on, not assumed to match a dataset of the same name.
+And that check belongs at dataset construction, not at the first batch:
+`DetrPolylineImageDataset.__init__` in
+`scripts/train_detr_unet_polyline.py` now lists the image directory once and
+names every missing crop before the GPU is touched, the way the lidar check
+already did. Getting this wrong costs a queue slot and an hour of waiting to
+learn about a two-file mismatch.
+
 ## Done
 
 Phase A — data + split:
@@ -948,7 +987,9 @@ against 0.731 on crops with one). So the next runs should target perception.
   about 0.02, or stop. A loss will not say which half failed, which is the price
   of running them together; the per-class rows partly disambiguate.
   - Then the ablations, each one config line and no code change: trees only,
-    lidar only.
+    lidar only. Lidar only reads `pdok_dataset3_polylines`, which holds
+    `pos_030002` and `pos_030003`, and `lidar_patches.npy` has no patch for
+    either, so drop those two NPZs or build the patches first.
 - Labels from Top10NL2025 instead of 2023, a separate conversion. It closes the
   three-year image/label gap at no imagery cost, since the crops are already
   2025. Both shapefiles are downloaded, in

@@ -21,7 +21,9 @@ similar code as train_detr_maptr_polyline.py with these changes:
   initialized from the train_semseg_unet_resnet18.py semseg checkpoint,
   freezable (frozen keeps BatchNorm in eval so semseg statistics are preserved).
 - Dataset loads images + polyline NPZs produced by
-  scripts/data/convert_pdok_polylines_to_detr_polyline.py.
+  scripts/data/convert_pdok_polylines_to_detr_polyline.py, and checks up front
+  that every crop has an image and a lidar patch, since two builds of the same
+  dataset are not the same crops.
 - Images are zero-padded 1000 -> pad_to (default 1024, divisible by 32);
   polylines are normalized by the padded extent so they stay aligned with
   the feature grid.
@@ -1695,6 +1697,23 @@ class DetrPolylineImageDataset(Dataset):
         self.pad_to = pad_to
         self.augment = augment
         self.lidar_stride = lidar_stride
+
+        # One listing up front, so a crop with no image is named here instead of
+        # in a DataLoader worker on the first batch. Two builds of the same
+        # dataset are not the same crops: a failed download shifts the
+        # numbering, so pdok_dataset3 on the laptop and on the cluster hold
+        # 30,000 crops each but not the same 30,000.
+        suffixes = set(self.IMAGE_SUFFIXES)
+        have = {
+            p.stem for p in self.image_dir.iterdir() if p.suffix.lower() in suffixes
+        }
+        missing = [f.stem for f in self.files if f.stem not in have]
+        if missing:
+            raise FileNotFoundError(
+                f"{len(missing)} crops have no image in {self.image_dir}, first "
+                f"{missing[:3]}. A polyline set built on one machine has to be "
+                f"checked against the images on the machine it runs on."
+            )
 
         # Memory-mapped so workers share the page cache instead of each holding
         # a copy, and keyed by stem so the same file serves any train/val split.

@@ -23,9 +23,17 @@ have to be rebuilt from nothing but this table. Sizes are on the cluster.
 | `pdok_dataset_semseg3` | `scripts/data/convert_pdok_polylines_to_semseg.py` | `pdok_dataset3` | 511 MB |
 | `pdok_dataset_yolo` | `scripts/data/convert_pdok_polylines_to_yolo_{bbox,seg}.py` | `pdok_dataset` | 1.6 GB |
 
-Two things that are not in the script docstrings and cost a day each when
+Things that are not in the script docstrings and cost a day each when
 forgotten:
 
+- **The laptop and cluster copies of `pdok_dataset3` are not the same 30,000
+  crops.** Four WMS requests failed on the cluster, so it lacks `pos_029989`,
+  `pos_029998`, `pos_030000` and `pos_030001` and runs on to `pos_030003`; the
+  laptop copy is `pos_000000` .. `pos_029999` with no gaps. A polyline dataset
+  built on one machine therefore names crops the other does not have. This is
+  why `pdok_dataset3_tree_polylines` is 26,900 train crops on the cluster and
+  26,902 on the laptop, and why `lidar_patches.npy` has no patch for
+  `pos_030002` or `pos_030003`. Reason in `docs/lesson_learned.md`.
 - `Actueel_ortho25` is not a fixed layer. It is bit-identical to
   `2025_ortho25` today and will silently become 2026 imagery later. **Rebuilding
   `pdok_dataset3` from `Actueel_ortho25` will not reproduce it.** Use
@@ -126,18 +134,27 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 4 (submitted 2026-09-16, job 26798493, gpu_a100, git 9db4a10, --time=16:00:00,
-  about 11 h expected): tree rows and lidar together, everything else the
-  exp 2 recipe (frozen up3, cls_loss=ce, 45 epochs, batch 16, same 3,098 val
-  stems). Config changes are four lines: the tree polyline directory,
-  num_classes=2, lidar_path set, and exp=4.
+- 4 (running, job 26834940, submitted 2026-09-17, gpu_a100, git 9db4a10,
+  --time=16:00:00, about 11 h expected): tree rows and lidar together,
+  everything else the exp 2 recipe (frozen up3, cls_loss=ce, 45 epochs, batch
+  16, same 3,098 val stems). Config changes are four lines: the tree polyline
+  directory, num_classes=2, lidar_path set, and exp=4.
+
+  The first submission (job 26798493, 2026-09-16) died three minutes into
+  epoch 1 with "No image for pos_029989". The tree dataset was built on the
+  laptop, and two of its train crops are not in the cluster copy of
+  pdok_dataset3. Fixed by deleting pos_029989 and pos_029998 NPZs, on the cluster, 
+  so train is 26,900 there against 26,902 on the laptop. Val is untouched at 3,098 
+  and identical to exp 2's. Exp 4 and exp 2 therefore differ by four train crops,
+  0.015%, against a decision bar of 0.02 F1. Reason in docs/lesson_learned.md.
 
   Data built and checked before submitting, all local:
   - `pdok_dataset3_tree_polylines`: 30,000 crops, 103,432 hedge lines and
     44,435 tree lines, 5,331 dropped under 40 px, 339 rings opened, 1 crop left
     with nothing. 60.2% of crops have a tree row. Max lines per crop 49, the
     same as the hedges-only dataset, so num_polylines stays 60. Split pinned to
-    the cluster run 2 val stems: train 26,902 / val 3,098.
+    the cluster run 2 val stems: train 26,902 / val 3,098 locally, 26,900 /
+    3,098 on the cluster after the two orphan crops were dropped.
   - Class 0 arrays bit-identical to `pdok_dataset3_polylines` on 1,000 random
     crops, so only the added class differs.
   - `exps/probe_tree_class_labels.py`: 100% of class 0 on the heg layer and
@@ -153,11 +170,11 @@ bbox 3900/903.
   When it finishes, in order:
 
   ```
-  ssh me "squeue -j 26798493; sacct -j 26798493"
+  ssh me "squeue -j 26834940; sacct -j 26834940"
   scp -r me:exps/hedge/detr_unet_polyline/4 \
       /home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/
   scp me:exps/hedge/detr_unet_polyline/4.sh \
-      me:exps/hedge/detr_unet_polyline/4_26798493.out \
+      me:exps/hedge/detr_unet_polyline/4_26834940.out \
       /home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/4/
   ```
 
