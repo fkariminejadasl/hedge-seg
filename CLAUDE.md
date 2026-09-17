@@ -52,10 +52,19 @@ Run the formatter and linter:
 
 ```
 for i in hedge_seg exps scripts tests; do echo $i; black $i -l 88; isort $i --profile black; pyflakes $i; done
+mdformat docs/
 ```
 
 Fix what pyflakes reports in the code being committed. Leave unrelated
 pre-existing warnings alone and mention them instead.
+
+`mdformat docs/` formats the markdown and aligns the pipe tables (`mdformat`
+plus the `mdformat-gfm` plugin, both in the `test` extra of `pyproject.toml`).
+Run it on `docs/` only, never on `presentation/`: those are Marp decks where a
+slide must fit one page, measured in lines, so a reflow can silently push
+content off the bottom. If mdformat adds a backslash escape, the markdown was
+ambiguous; put that filename or expression in backticks rather than keep the
+escape.
 
 ## Commit messages
 

@@ -1,13 +1,12 @@
 ## MapTR lessons
 
-BEV resolution: MapTR-tiny uses a 30 cm BEV cell size over a (30 x 60) m area, giving a (100 x 200) BEV grid (`projects/configs/maptr/maptr_tiny_r50_24e.py`). MapTR-nano uses 75 cm cells, giving a (40 x 80) grid. 
+BEV resolution: MapTR-tiny uses a 30 cm BEV cell size over a (30 x 60) m area, giving a (100 x 200) BEV grid (`projects/configs/maptr/maptr_tiny_r50_24e.py`). MapTR-nano uses 75 cm cells, giving a (40 x 80) grid.
 
 The decoder uses self-attention among hierarchical instance and point queries, and deformable cross-attention from these queries to the BEV features.
 
 A coarse BEV token may summarize several nearby polylines. The important factor is the spatial granularity of the BEV features. If downsampling removes the polylines’ relative positions, and that information is not retained in the feature channels, the decoder cannot reliably separate or localize them.
 
 Having more polylines than BEV tokens is not inherently a problem because there is no one-token-per-polyline assignment. Each hierarchical point query can sample multiple BEV locations, and multiple queries can use overlapping BEV features. The polylines remain distinguishable only if those features preserve enough spatial information about them.
-
 
 ## Why extra losses cause a zigzag (and why only poly + class overfits)
 
@@ -19,12 +18,12 @@ and so on. All the other losses do not care about the order of the points. A zig
 
 Think of 20 numbered beads that should sit on a straight wire, in order.
 
-| Loss | What it checks | Effect on a zigzag |
-|---|---|---|
-| **Ordered L1** (poly) | each bead k must go to its own target spot k | the only loss that cares about order. On its own it fixes the line, so the model overfits. |
-| **Box** (L1 / gIoU) | the outer rectangle around the points | does not care about order. Any shape that fills the same rectangle gets the same score, and it only moves the corner points. This is the main cause (removing it helped). |
-| **Length** | the distance between neighbor points | any zigzag with the right spacing scores zero. Early in training it spreads the points in random directions, which starts the zigzag. |
-| **Direction** (1 - cos angle) | the angle of each small piece | if fully satisfied it gives a straight line, so it does not prefer a zigzag. It is not a main cause (changing it did not help). |
+| Loss                          | What it checks                               | Effect on a zigzag                                                                                                                                                        |
+| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Ordered L1** (poly)         | each bead k must go to its own target spot k | the only loss that cares about order. On its own it fixes the line, so the model overfits.                                                                                |
+| **Box** (L1 / gIoU)           | the outer rectangle around the points        | does not care about order. Any shape that fills the same rectangle gets the same score, and it only moves the corner points. This is the main cause (removing it helped). |
+| **Length**                    | the distance between neighbor points         | any zigzag with the right spacing scores zero. Early in training it spreads the points in random directions, which starts the zigzag.                                     |
+| **Direction** (1 - cos angle) | the angle of each small piece                | if fully satisfied it gives a straight line, so it does not prefer a zigzag. It is not a main cause (changing it did not help).                                           |
 
 ## Why the ordered loss cannot fix the zigzag
 
@@ -32,16 +31,16 @@ The box and length losses are happy with a zigzag, so the ordered loss is the on
 that complains, and it gets outvoted:
 
 - Forward/backward switching: A line has two ends, and reading its points from
-either end describes the same line. So the loss matches the prediction to the ground
-truth read forward or read backward, whichever is closer. A clean line clearly matches
-one way, so the choice is stable. A zigzag sits evenly on both sides of the true line,
-so both readings are about equally close and the model keeps switching. Each switch
-sends a point's target to the opposite end of the line. Point 3 is told "go to the top"
-one step and "go to the bottom" the next step, so the two orders cancel and every point
-drifts to the middle. The order never settles.
+  either end describes the same line. So the loss matches the prediction to the ground
+  truth read forward or read backward, whichever is closer. A clean line clearly matches
+  one way, so the choice is stable. A zigzag sits evenly on both sides of the true line,
+  so both readings are about equally close and the model keeps switching. Each switch
+  sends a point's target to the opposite end of the line. Point 3 is told "go to the top"
+  one step and "go to the bottom" the next step, so the two orders cancel and every point
+  drifts to the middle. The order never settles.
 
 - Gradient clipping: When two points sit almost on top of each other, the direction
-loss gradient becomes very large. The gradient clipping then shrinks the whole gradient, including the ordered loss that would fix the order. This is why the loss keeps going down very slowly for thousands of epochs but never finishes.
+  loss gradient becomes very large. The gradient clipping then shrinks the whole gradient, including the ordered loss that would fix the order. This is why the loss keeps going down very slowly for thousands of epochs but never finishes.
 
 Note: the direction loss has zero gradient when a piece points exactly forward (0 degrees) or exactly backward (180 degrees). That is true for the formula, but it only happens at those exact angles. Real zigzag pieces sit at in-between angles where the gradient is fine, so this is not the real cause here.
 
@@ -60,21 +59,20 @@ class (plus aux) overfits, and adding box or length brings back the zigzag.
 Two more lessons, both confirmed in the code:
 
 - Per-layer reference-point refinement plus dynamic query position: Each decoder layer
-   does not predict the points from scratch. It starts from the current reference points and
-   predicts a small correction, so the points get sharper layer by layer. At each layer the
-   query position is rebuilt from the current reference point, so the attention knows where
-   each point sits right now. This is the main reason MapTR-style point queries learn fast.
+  does not predict the points from scratch. It starts from the current reference points and
+  predicts a small correction, so the points get sharper layer by layer. At each layer the
+  query position is rebuilt from the current reference point, so the attention knows where
+  each point sits right now. This is the main reason MapTR-style point queries learn fast.
 
 - The query content is learned, not only the query position: Each query has two learned
-   parts: one for position (query_pos) and one for content (query_content, the starting input
-   to the decoder). In plain DETR the content input starts at zero and only the position is
-   learned. In MapTR both are learned (see `_build_hierarchical_queries`, where the query
-   embedding is split into query_pos and query_content).
+  parts: one for position (query_pos) and one for content (query_content, the starting input
+  to the decoder). In plain DETR the content input starts at zero and only the position is
+  learned. In MapTR both are learned (see `_build_hierarchical_queries`, where the query
+  embedding is split into query_pos and query_content).
 
-   This may help because the learned content gives each point query a starting hint
-   about which point it is and how it relates to the other points in the same line,
-   instead of starting from a zero vector.
-
+  This may help because the learned content gives each point query a starting hint
+  about which point it is and how it relates to the other points in the same line,
+  instead of starting from a zero vector.
 
 ## Converting the polyline loss into meters
 
@@ -86,7 +84,6 @@ Two more lessons, both confirmed in the code:
   `hedge_seg/metrics.py`). Note this is per coordinate, with
   x and y averaged separately, so the real distance from a predicted point to its
   target is somewhat larger, up to about 1.4 times.
-
 
 ## A zigzag early in training that fixes itself is normal
 
@@ -172,11 +169,11 @@ Probed on an A100-40GB with `exps/probe_batch_size.py` (real train step:
 forward, loss, backward, optimizer, since backward dominates peak memory):
 
 | batch | peak GB | s/step | s/image |
-|---|---|---|---|
-| 4 | 1.55 | 0.123 | 0.0307 |
-| 16 | 5.76 | 0.445 | 0.0278 |
-| 32 | 11.41 | 0.861 | 0.0269 |
-| 64 | 22.67 | 1.678 | 0.0262 |
+| ----- | ------- | ------ | ------- |
+| 4     | 1.55    | 0.123  | 0.0307  |
+| 16    | 5.76    | 0.445  | 0.0278  |
+| 32    | 11.41   | 0.861  | 0.0269  |
+| 64    | 22.67   | 1.678  | 0.0262  |
 
 Memory is linear in batch size (about 0.354 GB per 1024x1024 image), so 40 GB
 would fit roughly 100 images. But time per image is already flat at batch 16:
@@ -185,6 +182,7 @@ by 4 (313 to 78 for a 5,000 image epoch). The GPU is saturated well before it
 is full, so the extra memory buys steps, not speed.
 
 Consequences:
+
 - Pick the batch size where s/image stops improving, not the one that fills
   the GPU. Here that is 16, which also matches the effective batch size DETR's
   lr=1e-4 is tuned for.
@@ -283,12 +281,12 @@ crop's predictions against a *different* crop's labels, so the number, length
 and orientation of the lines are unchanged and only the link to the image is
 broken:
 
-| threshold | pred/img | real recall | null recall | skill |
-|---|---|---|---|---|
-| 0.05 | 12.6 | 0.840 | 0.379 | 0.461 |
-| 0.40 | 7.9 | 0.805 | 0.334 | 0.471 |
-| 0.90 | 3.2 | 0.696 | 0.266 | **0.431** |
-| 0.95 | 1.9 | 0.608 | 0.228 | 0.380 |
+| threshold | pred/img | real recall | null recall | skill     |
+| --------- | -------- | ----------- | ----------- | --------- |
+| 0.05      | 12.6     | 0.840       | 0.379       | 0.461     |
+| 0.40      | 7.9      | 0.805       | 0.334       | 0.471     |
+| 0.90      | 3.2      | 0.696       | 0.266       | **0.431** |
+| 0.95      | 1.9      | 0.608       | 0.228       | 0.380     |
 
 Nearly half of the celebrated 0.84 is what another crop's predictions would
 score.
@@ -321,12 +319,12 @@ Measured on exp 2 `best_2.pt`, all 3,098 val crops from the t=0.05 run. A
 prediction counts as correct if at least 80% of its length is within 10 m of a
 label. 7,956 of 39,104 predictions are correct.
 
-| straightness | median score, correct | median score, wrong |
-|---|---|---|
-| < 0.85 (bent) | **0.453** | 0.216 |
-| 0.85 to 0.95 | 0.883 | 0.690 |
-| 0.95 to 0.99 | 0.951 | 0.868 |
-| > 0.99 (straight) | 0.974 | **0.957** |
+| straightness      | median score, correct | median score, wrong |
+| ----------------- | --------------------- | ------------------- |
+| < 0.85 (bent)     | **0.453**             | 0.216               |
+| 0.85 to 0.95      | 0.883                 | 0.690               |
+| 0.95 to 0.99      | 0.951                 | 0.868               |
+| > 0.99 (straight) | 0.974                 | **0.957**           |
 
 A correct bent line scores 0.45 and a wrong straight one scores 0.96, so no
 single threshold can keep both. At t=0.95 only 9% of correct bent predictions
@@ -408,10 +406,10 @@ The obvious way to add lidar is to blow the 25x25 patch up to 1000x1000, then
 flip, rotate and pad it exactly like the image. Same code, nothing new to think
 about. It was not done that way, for one reason:
 
-| how the lidar is carried | size per crop | per batch of 16 |
-|---|---|---|
-| upsampled to the padded image, 1024x1024 | 28.7 MB | **470 MB** |
-| on the token grid, 64x64 | 112 KB | 1.8 MB |
+| how the lidar is carried                 | size per crop | per batch of 16 |
+| ---------------------------------------- | ------------- | --------------- |
+| upsampled to the padded image, 1024x1024 | 28.7 MB       | **470 MB**      |
+| on the token grid, 64x64                 | 112 KB        | 1.8 MB          |
 
 470 MB per batch would go through the DataLoader, which sends every batch
 between worker processes, and it buys nothing. Upsampling adds no information:
@@ -443,10 +441,10 @@ them against each other: the presence channel says where the laser found
 vegetation, and it should be high in the cells the hedges pass through and low
 elsewhere, whether or not augmentation is on.
 
-| | under hedges | elsewhere | gap |
-|---|---|---|---|
-| augment off | 0.924 | 0.467 | +0.457 |
-| augment on | 0.921 | 0.467 | **+0.453** |
+|             | under hedges | elsewhere | gap        |
+| ----------- | ------------ | --------- | ---------- |
+| augment off | 0.924        | 0.467     | +0.457     |
+| augment on  | 0.921        | 0.467     | **+0.453** |
 
 The gap survives, so both paths agree.
 
@@ -461,11 +459,11 @@ because it cannot fail.
 24 of the 25 metrics are computed from vegetation returns only, so a cell with
 nothing woody in it has no value at all.
 
-| | nodata share |
-|---|---|
-| all cells | 46.2% |
-| cells a hedge passes through | **6.7%** |
-| every other cell | 49.6% |
+|                              | nodata share |
+| ---------------------------- | ------------ |
+| all cells                    | 46.2%        |
+| cells a hedge passes through | **6.7%**     |
+| every other cell             | 49.6%        |
 
 So an empty cell is telling you something, not hiding something. Two things
 follow. Filling the metrics with 0 is right rather than a fudge, because no
@@ -529,12 +527,12 @@ was chosen before the definition was read.
 All 25 AHN4 metrics, 2,000 features per layer, split by 5 km geographic blocks
 so nearby features cannot straddle train and test:
 
-| features used | balanced accuracy | AUC |
-|---|---|---|
-| height p95 only, 1 metric | 0.601 | 0.649 |
-| all **7** height metrics | 0.709 | 0.771 |
-| the other **18**, no height at all | **0.765** | **0.844** |
-| all 25, gradient boosting | **0.778** | **0.852** |
+| features used                      | balanced accuracy | AUC       |
+| ---------------------------------- | ----------------- | --------- |
+| height p95 only, 1 metric          | 0.601             | 0.649     |
+| all **7** height metrics           | 0.709             | 0.771     |
+| the other **18**, no height at all | **0.765**         | **0.844** |
+| all 25, gradient boosting          | **0.778**         | **0.852** |
 
 (7 height metrics, not 8, as an earlier version of this table said. The paper
 lists max, mean, median and the 25th, 50th, 75th and 95th percentiles, and
@@ -545,12 +543,12 @@ Structure alone beats every height metric put together. The best single metric
 is the share of vegetation returns between 1 and 2 m, which is a literal
 measurement of the rule above:
 
-| metric | heg | bomenrij | best single cut |
-|---|---|---|---|
-| BR_1_2 (returns 1-2 m) | 0.079 | 0.008 | 0.739 |
-| BR_2_3 (returns 2-3 m) | 0.066 | 0.007 | 0.701 |
-| BR_above_3 | 0.686 | 0.933 | 0.696 |
-| height p95 | 8.0 m | 12.1 m | 0.635 |
+| metric                 | heg   | bomenrij | best single cut |
+| ---------------------- | ----- | -------- | --------------- |
+| BR_1_2 (returns 1-2 m) | 0.079 | 0.008    | 0.739           |
+| BR_2_3 (returns 2-3 m) | 0.066 | 0.007    | 0.701           |
+| BR_above_3             | 0.686 | 0.933    | 0.696           |
+| height p95             | 8.0 m | 12.1 m   | 0.635           |
 
 A hedge puts ten times as much of its return profile in the 1-2 m layer as a
 tree row does. Two details worth keeping:
@@ -580,14 +578,14 @@ nothing else changed. Best F1 at 10 m fell from **0.699 to 0.664**.
 Each run at its own best threshold, so neither is handicapped. Exp 3's better
 checkpoint is the last epoch (`3.pt`, F1 0.664); `best_3.pt` gives 0.660.
 
-| | exp 2 `best_2.pt` | exp 3 `3.pt` |
-|---|---|---|
-| best F1 at 10 m | **0.699** at t=0.90 | 0.664 at t=0.40 |
-| P / R there | 0.701 / 0.696 | 0.779 / 0.578 |
-| pred per image there | 3.2 | 1.6 |
-| recall at t=0.05 | 0.840 | 0.845 |
-| score AUC, correct vs wrong | 0.767 | 0.739 |
-| same, inside the bent group | 0.618 | 0.642 |
+|                             | exp 2 `best_2.pt`   | exp 3 `3.pt`    |
+| --------------------------- | ------------------- | --------------- |
+| best F1 at 10 m             | **0.699** at t=0.90 | 0.664 at t=0.40 |
+| P / R there                 | 0.701 / 0.696       | 0.779 / 0.578   |
+| pred per image there        | 3.2                 | 1.6             |
+| recall at t=0.05            | 0.840               | 0.845           |
+| score AUC, correct vs wrong | 0.767               | 0.739           |
+| same, inside the bent group | 0.618               | 0.642           |
 
 (The AUC rows are `3.pt`. For `best_3.pt` they are 0.742 and 0.648.)
 
@@ -761,12 +759,12 @@ which takes about a minute for 30,000 crops.
 
 What that gives, over the whole dataset:
 
-| | hedges only | with tree rows |
-|---|---|---|
-| lines | 103,432 | 103,432 + 44,435 |
-| lines per crop, mean | 3.45 | 4.93 |
-| **max lines per crop** | **49** | **49** |
-| crops with a tree row | 0 | 18,061 (60.2%) |
+|                        | hedges only | with tree rows   |
+| ---------------------- | ----------- | ---------------- |
+| lines                  | 103,432     | 103,432 + 44,435 |
+| lines per crop, mean   | 3.45        | 4.93             |
+| **max lines per crop** | **49**      | **49**           |
+| crops with a tree row  | 0           | 18,061 (60.2%)   |
 
 All of it from `exps/probe_tree_dataset_stats.py`, which compares the two
 datasets crop by crop.
@@ -867,10 +865,10 @@ next section.
 cluster. Both hold exactly 30,000 crops, which is why the count never looked
 wrong. They are not the same 30,000:
 
-| | laptop | cluster |
-|---|---|---|
-| range | `pos_000000` .. `pos_029999`, no gaps | `pos_000000` .. `pos_030003`, four gaps |
-| missing | none | `pos_029989`, `pos_029998`, `pos_030000`, `pos_030001` |
+|         | laptop                                | cluster                                                |
+| ------- | ------------------------------------- | ------------------------------------------------------ |
+| range   | `pos_000000` .. `pos_029999`, no gaps | `pos_000000` .. `pos_030003`, four gaps                |
+| missing | none                                  | `pos_029989`, `pos_029998`, `pos_030000`, `pos_030001` |
 
 Four PDOK WMS requests failed during the cluster download, so it ran on past
 `pos_029999` to reach 30,000. Crops are sampled one per polyline, so a failure
@@ -990,13 +988,15 @@ against 0.731 on crops with one). So the next runs should target perception.
   on the same 3,098 val stems and beat exp 2's F1 0.699 at 10 m by more than
   about 0.02, or stop. A loss will not say which half failed, which is the price
   of running them together; the per-class rows partly disambiguate.
+
   - Then the ablations, each one config line and no code change: trees only,
     lidar only. Lidar only reads `pdok_dataset3_polylines`, which holds
     `pos_030002` and `pos_030003`, and `lidar_patches.npy` has no patch for
     either, so drop those two NPZs or build the patches first.
-- Labels from Top10NL2025 instead of 2023, a separate conversion. It closes the
-  three-year image/label gap at no imagery cost, since the crops are already
-  2025. Both shapefiles are downloaded, in
+
+- Labels from Top10NL2025 instead of 2023, a separate conversion. It closes
+  the three-year image/label gap at no imagery cost, since the crops are
+  already 2025. Both shapefiles are downloaded, in
   `/home/fatemeh/Downloads/hedge/Top10NL2025`. Keep it out of exp 4: changing
   the label year and adding a class at once cannot be read.
 
@@ -1025,5 +1025,3 @@ Dropped, with the reason:
 
 Note: the spatial split makes val numbers look worse than a random split would.
 That is expected; they are the real baseline to improve from.
-
-

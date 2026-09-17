@@ -14,14 +14,14 @@ Which script built which directory, and from what. Kept here rather than only
 in the script docstrings, because datasets get deleted to free inodes and then
 have to be rebuilt from nothing but this table. Sizes are on the cluster.
 
-| dataset | built by | from | size |
-|---|---|---|---|
-| `pdok_dataset3` (30,000 crops, 46 GB) | `scripts/data/build_pdok_wms_dataset.py` | PDOK WMS layer `Actueel_ortho25` plus `Top10NL2023_..._heg.shp`, 250 m crops at 1000 px, sampled one per polyline | 46 GB, 60,000 files |
-| `pdok_dataset3_polylines` | `scripts/data/convert_pdok_polylines_to_detr_polyline.py` | `pdok_dataset3/labels/*.json` | small |
-| `pdok_dataset3_polylines/lidar_patches.npy` | `scripts/data/build_lidar_patches.py` | the 6 AHN4 metric GeoTIFFs in `/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4`, 16 GB, laptop only | 450 MB, 2 files |
-| `pdok_dataset3_tree_polylines` (2026-09-16) | same converter, with `treeline_shp` and `val_stems_file` set | `pdok_dataset3/labels/*.json` plus `Top10NL2023_..._bomenrij.shp` | 144 MB, 30,000 files |
-| `pdok_dataset_semseg3` | `scripts/data/convert_pdok_polylines_to_semseg.py` | `pdok_dataset3` | 511 MB |
-| `pdok_dataset_yolo` | `scripts/data/convert_pdok_polylines_to_yolo_{bbox,seg}.py` | `pdok_dataset` | 1.6 GB |
+| dataset                                     | built by                                                     | from                                                                                                              | size                 |
+| ------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | -------------------- |
+| `pdok_dataset3` (30,000 crops, 46 GB)       | `scripts/data/build_pdok_wms_dataset.py`                     | PDOK WMS layer `Actueel_ortho25` plus `Top10NL2023_..._heg.shp`, 250 m crops at 1000 px, sampled one per polyline | 46 GB, 60,000 files  |
+| `pdok_dataset3_polylines`                   | `scripts/data/convert_pdok_polylines_to_detr_polyline.py`    | `pdok_dataset3/labels/*.json`                                                                                     | small                |
+| `pdok_dataset3_polylines/lidar_patches.npy` | `scripts/data/build_lidar_patches.py`                        | the 6 AHN4 metric GeoTIFFs in `/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4`, 16 GB, laptop only              | 450 MB, 2 files      |
+| `pdok_dataset3_tree_polylines` (2026-09-16) | same converter, with `treeline_shp` and `val_stems_file` set | `pdok_dataset3/labels/*.json` plus `Top10NL2023_..._bomenrij.shp`                                                 | 144 MB, 30,000 files |
+| `pdok_dataset_semseg3`                      | `scripts/data/convert_pdok_polylines_to_semseg.py`           | `pdok_dataset3`                                                                                                   | 511 MB               |
+| `pdok_dataset_yolo`                         | `scripts/data/convert_pdok_polylines_to_yolo_{bbox,seg}.py`  | `pdok_dataset`                                                                                                    | 1.6 GB               |
 
 Things that are not in the script docstrings and cost a day each when
 forgotten:
@@ -60,6 +60,7 @@ is 60,000 inodes.
 Timing: 2 min per epoch for 17,381 images on an A100 40GB.
 
 Parameter counts:
+
 - ResNet18: 11.7 M
 - ResNet18-UNet: 14.4 M
 - Polyline total: 7.9 M (encoder 3.2 M, decoder 4.2 M, rest 0.6 M)
@@ -67,7 +68,7 @@ Parameter counts:
 
 MapTR image/feature/BEV grid sizes:
 
-| Model          | Resized input | Padded image | Feature grid | BEV grid  |
+| Model          | Resized input | Padded image | Feature grid |  BEV grid |
 | -------------- | ------------: | -----------: | -----------: | --------: |
 | MapTR-nano R18 |     320 x 180 |    320 x 192 |       10 x 6 |   80 x 40 |
 | MapTR-tiny R50 |     800 x 450 |    800 x 480 |      25 x 15 | 200 x 100 |
@@ -76,13 +77,13 @@ MapTR image/feature/BEV grid sizes:
 
 experiment: epochs, n_polyline, n_points, eos_coef, dino grid, extras, dataset
 
-- detr_polyline_3:  3000, 100, 10, eos=.064_256, dino_14, wd=1e-2, dropout=0.1, giou=1, test_64_256_tiny
-- detr_polyline_4:  3000, 100, 10, eos=.5, dino_14, wd=1e-2, dropout=0.1, giou=1, test_64_256_tiny
-- detr_polyline_5:  3000, 100, 20, eos=.1, dino_14, wd=1e-2, dropout=0.1, giou=1, test_256
-- detr_polyline_6:  3000, 450, 20, eos=.1, dino_14, wd=1e-2, dropout=0.1, giou=1, test_256
-- detr_polyline_7:  3000, 450, 20, eos=.5, dino_14, wd=1e-2, dropout=0.1, giou=1, test_256
-- detr_polyline_8:  3000, 450, 20, eos=.5, dino_16, wd=1e-2, dropout=0.1, giou=1, test_256_dino256
-- detr_polyline_9:  3000,  16, 20, eos=.5, dino_16, wd=0,    dropout=0,    giou=0, test_256_dino256
+- detr_polyline_3: 3000, 100, 10, eos=.064_256, dino_14, wd=1e-2, dropout=0.1, giou=1, test_64_256_tiny
+- detr_polyline_4: 3000, 100, 10, eos=.5, dino_14, wd=1e-2, dropout=0.1, giou=1, test_64_256_tiny
+- detr_polyline_5: 3000, 100, 20, eos=.1, dino_14, wd=1e-2, dropout=0.1, giou=1, test_256
+- detr_polyline_6: 3000, 450, 20, eos=.1, dino_14, wd=1e-2, dropout=0.1, giou=1, test_256
+- detr_polyline_7: 3000, 450, 20, eos=.5, dino_14, wd=1e-2, dropout=0.1, giou=1, test_256
+- detr_polyline_8: 3000, 450, 20, eos=.5, dino_16, wd=1e-2, dropout=0.1, giou=1, test_256_dino256
+- detr_polyline_9: 3000, 16, 20, eos=.5, dino_16, wd=0, dropout=0, giou=0, test_256_dino256
 - detr_polyline_10: 3000, 100, 20, eos=.1, dino_16, wd=1e-2, dropout=0.01, giou=1, test_256_dino256
 
 overfit 10 has all defaults except dropout. Dropout larger than 0.01 collapses.
@@ -116,6 +117,7 @@ lower when only 2 polylines; with 11 it is higher.
 ## detect_ultralytics (YOLO bbox, pdok_dataset_yolo, 1000x1000, 250m)
 
 bbox 3900/903.
+
 - 1: yolo26l, 800/200, batch=16, 2000 ep, imgsz=1000 -> best=176, stop=276, not great.
 - 2: yolo26n, 800/200, batch=16, 2000 ep, imgsz=1000 -> better than 1.
 - 3: from 2/last.pt, 24000/6000 (47h, 1 GPU, budget ran out at 559). Better.
@@ -145,12 +147,13 @@ bbox 3900/903.
   The first submission (job 26798493, 2026-09-16) died three minutes into
   epoch 1 with "No image for pos_029989". The tree dataset was built on the
   laptop, and two of its train crops are not in the cluster copy of
-  pdok_dataset3. Fixed by deleting pos_029989 and pos_029998 NPZs, on the cluster, 
-  so train is 26,900 there against 26,902 on the laptop. Val is untouched at 3,098 
+  pdok_dataset3. Fixed by deleting pos_029989 and pos_029998 NPZs, on the cluster,
+  so train is 26,900 there against 26,902 on the laptop. Val is untouched at 3,098
   and identical to exp 2's. Exp 4 and exp 2 therefore differ by four train crops,
   0.015%, against a decision bar of 0.02 F1. Reason in docs/lesson_learned.md.
 
   Data built and checked before submitting, all local:
+
   - `pdok_dataset3_tree_polylines`: 30,000 crops, 103,432 hedge lines and
     44,435 tree lines, 5,331 dropped under 40 px, 339 rings opened, 1 crop left
     with nothing. 60.2% of crops have a tree row. Max lines per crop 49, the
@@ -164,8 +167,7 @@ bbox 3900/903.
     at 5 m.
   - `lidar_patches.npy` rebuilt for all 30,000 crops (was 300).
 
-  Score with `exps/probe_polyline_pr.py` and `classes={0: "hedge", 1: "tree
-  row"}`, hedge against hedge, sweeping the threshold. Beat exp 2's F1 0.699 at
+  Score with `exps/probe_polyline_pr.py` and `classes={0: "hedge", 1: "tree row"}`, hedge against hedge, sweeping the threshold. Beat exp 2's F1 0.699 at
   10 m and 0.547 at 5 m. loss_ce is on a new scale with two classes, so the loss
   curve is comparable only with itself.
 
@@ -189,11 +191,11 @@ bbox 3900/903.
 - 3 scored, 2026-08-11. **Lost.** Best F1 at 10 m 0.664 against exp 2's 0.699.
   Both checkpoints, all 3,098 val crops, `exps/probe_polyline_pr.py`:
 
-  | run | best t | P | R | F1 @10m |
-  |---|---|---|---|---|
-  | exp 2 `best_2.pt` | 0.90 | .701 | .696 | **.699** |
-  | exp 3 `best_3.pt` | 0.40 | .781 | .572 | .660 |
-  | exp 3 `3.pt` (ep 45) | 0.40 | .779 | .578 | .664 |
+  | run                  | best t | P    | R    | F1 @10m  |
+  | -------------------- | ------ | ---- | ---- | -------- |
+  | exp 2 `best_2.pt`    | 0.90   | .701 | .696 | **.699** |
+  | exp 3 `best_3.pt`    | 0.40   | .781 | .572 | .660     |
+  | exp 3 `3.pt` (ep 45) | 0.40   | .779 | .578 | .664     |
 
   The last epoch beats the best-eval-loss checkpoint again, by 0.004. Small,
   but the third time the eval loss has ranked wrong.
@@ -209,7 +211,7 @@ bbox 3900/903.
   0.2 and above 0.98 rather than spreading; at >0.99 straightness, correct and
   wrong sit at 0.983 and 0.979.
 
-  Geometry unchanged: predicted straightness 0.946 with bent<0.85 at 0.110,
+  Geometry unchanged: predicted straightness 0.946 with `bent<0.85` at 0.110,
   against exp 2's 0.942 / 0.101 and GT 0.909 / 0.220.
 
   Job 25396297, gpu_a100, git 34ea159, 11:28:40 for 45 epochs (15:05/epoch).
@@ -220,10 +222,10 @@ bbox 3900/903.
   exp 3 was worth running and the reason not to run a fourth score-head variant.
   Scoring each crop's predictions against a different crop's labels:
 
-  | t | pred/img | real R | null R | skill |
-  |---|---|---|---|---|
-  | 0.05 | 12.6 | .840 | .379 | .461 |
-  | 0.90 | 3.2 | .696 | .266 | .431 |
+  | t    | pred/img | real R | null R | skill |
+  | ---- | -------- | ------ | ------ | ----- |
+  | 0.05 | 12.6     | .840   | .379   | .461  |
+  | 0.90 | 3.2      | .696   | .266   | .431  |
 
   Half of "recall 0.84 at t=0.05" is luck from drawing 13 lines per image.
   Skill peaks at 0.471 (t=0.40) and is 0.431 at the operating point, so a
@@ -254,6 +256,7 @@ bbox 3900/903.
   queries. Do not compare exp 3's loss curve to exp 2's, only to itself.
 
 - probes, 2026-08-10, no training:
+
   - `exps/probe_score_quality.py`: the score/straightness result above.
   - `exps/probe_lidar_hedge_vs_tree.py`: AHN4 p95 height along 2,000 features
     per layer. heg median 8.0 m, bomenrij 12.2 m, best single cut 9.0 m at
@@ -267,13 +270,15 @@ bbox 3900/903.
 
 - unet1 / detr_unet_polyline_1: overfit one image (val = same image), 2000 ep,
   4 enc / 4 dec (00:18:00). Validated frozen semseg features support polyline
-  regression, sub-meter memorization. best_*.pt at epoch 1722.
+  regression, sub-meter memorization. `best_*.pt` at epoch 1722.
+
 - unet2 / detr_unet_polyline_2: 10 img, 2000 ep, 1 enc / 4 dec, augmentation
   (00:42:00). Better than unet3 on val (one almost good).
+
 - unet3 / detr_unet_polyline_3: 10 img, 2000 ep, 1 enc / 4 dec, no aug (00:42:00).
   unet2/3: train poly ~0.007 (~1.8 m), eval poly ~0.17 (~43 m); eval rises after
   ~100 ep (n=8 cannot generalize). Inspect small-data runs with the final
-  checkpoint ({exp}.pt), not best_*.pt (best froze at epoch 101 / 27). With the
+  checkpoint (`{exp}.pt`), not `best_*.pt` (best froze at epoch 101 / 27). With
   final ckpt, train images match GT to 0.6-6.3 px.
 
 - 1 (cluster, Phase B baseline, 2026-07-21): job 24799874 on gpu_a100.
@@ -292,10 +297,10 @@ bbox 3900/903.
 
   Checkpoints on the cluster val split (32 crops, t=0.95, GT 2.44 lines/img):
 
-  | checkpoint | pred/img | abs err/img | 0 pred | over by 3+ | worst |
-  |---|---|---|---|---|---|
-  | best_1.pt (ep 65) | 1.75 | 1.06 | 0 | 0 | -5 |
-  | 1_150.pt (ep 150) | 2.41 | 1.59 | 2 | 2 | +13 |
+  | checkpoint        | pred/img | abs err/img | 0 pred | over by 3+ | worst |
+  | ----------------- | -------- | ----------- | ------ | ---------- | ----- |
+  | best_1.pt (ep 65) | 1.75     | 1.06        | 0      | 0          | -5    |
+  | 1_150.pt (ep 150) | 2.41     | 1.59        | 2      | 2          | +13   |
 
   The mean flatters 1_150. Per image it predicts nothing on pos_026918 and
   pos_028651 and 16 lines on pos_024293, which has 3, and those cancel. Counts
@@ -304,32 +309,32 @@ bbox 3900/903.
 - exp 1 scored, 2026-07-28. `exps/probe_polyline_pr.py`, buffered length,
   all 3,098 cluster val crops, per image then averaged, t=0.95.
 
-  | checkpoint | 5 m | 10 m | 15 m |
-  |---|---|---|---|
-  | best_1.pt | .57/.39 F1 .466 | .75/.52 F1 .614 | .83/.59 F1 .688 |
-  | 1_150.pt | .54/.45 F1 .489 | .70/.59 F1 .640 | .78/.67 F1 .717 |
+  | checkpoint | 5 m             | 10 m            | 15 m            |
+  | ---------- | --------------- | --------------- | --------------- |
+  | best_1.pt  | .57/.39 F1 .466 | .75/.52 F1 .614 | .83/.59 F1 .688 |
+  | 1_150.pt   | .54/.45 F1 .489 | .70/.59 F1 .640 | .78/.67 F1 .717 |
 
   **1_150.pt wins at every buffer.** The eval loss turns at epoch 65 and the
   detector keeps improving to 150, so do not early-stop on it.
 
   1_150.pt at 10 m by GT line count. Precision flat, recall falls with density:
 
-  | GT lines | crops | share of GT lines | P | R | F1 |
-  |---|---|---|---|---|---|
-  | 1 | 1438 | 22% | .70 | .71 | .704 |
-  | 2-3 | 1220 | 43% | .71 | .51 | .596 |
-  | 4-6 | 363 | 25% | .68 | .42 | .520 |
-  | 7+ | 76 | 11% | .62 | .38 | .473 |
+  | GT lines | crops | share of GT lines | P   | R   | F1   |
+  | -------- | ----- | ----------------- | --- | --- | ---- |
+  | 1        | 1438  | 22%               | .70 | .71 | .704 |
+  | 2-3      | 1220  | 43%               | .71 | .51 | .596 |
+  | 4-6      | 363   | 25%               | .68 | .42 | .520 |
+  | 7+       | 76    | 11%               | .62 | .38 | .473 |
 
   Threshold sweep, 1_150.pt at 10 m, from the t0.05 inference run:
 
-  | t | pred/img | P | R | F1 |
-  |---|---|---|---|---|
-  | 0.05 | 8.42 | .41 | .75 | .530 |
-  | 0.80 | 4.70 | .54 | .70 | .612 |
-  | 0.90 | 3.69 | .60 | .66 | .632 |
-  | 0.95 | 2.26 | .70 | .59 | **.640** |
-  | 0.98 | 0.83 | .86 | .35 | .494 |
+  | t    | pred/img | P   | R   | F1       |
+  | ---- | -------- | --- | --- | -------- |
+  | 0.05 | 8.42     | .41 | .75 | .530     |
+  | 0.80 | 4.70     | .54 | .70 | .612     |
+  | 0.90 | 3.69     | .60 | .66 | .632     |
+  | 0.95 | 2.26     | .70 | .59 | **.640** |
+  | 0.98 | 0.83     | .86 | .35 | .494     |
 
   0.95 is already the optimum, so no change. But recall is 0.75 at t=0.05:
   the lines exist and the score cannot rank them. best_1.pt peaks at 0.90
@@ -347,7 +352,7 @@ bbox 3900/903.
     Predictions bend and stretch like the labels, so the "only straight lines"
     impression from a 16-crop figure was a sampling artifact.
 
-  By eye (screenshots detr_unet_polyline_{1_gt,best_1,1_150}_*cluster_t.95.png):
+  By eye (screenshots `detr_unet_polyline_{1_gt,best_1,1_150}_*cluster_t.95.png`):
   both accurate on simple single-hedge crops; both predict one line where
   several labelled lines meet at a junction (pos_009106, pos_013789,
   pos_027437); 1_150 falls apart on crowded crops. Label problems seen: hedges
@@ -386,22 +391,22 @@ bbox 3900/903.
   exp 1. 14:26/epoch, 10:54:49 total. Same val stems as exp 1.
 
   Losses: train 1.1756, eval 1.2076 at epoch 45. **Eval loss fell at every
-  single eval and best is the last epoch**. Exp 1 ended train 1.12 / eval 1.41, 
-  so the train-eval gap went from 0.29 to 0.03. 5.4x the data removed the 
+  single eval and best is the last epoch**. Exp 1 ended train 1.12 / eval 1.41,
+  so the train-eval gap went from 0.29 to 0.03. 5.4x the data removed the
   overfitting completely, and the run was still improving when it stopped.
 
-  | epoch | 5 | 15 | 25 | 35 | 45 |
-  |---|---|---|---|---|---|
+  | epoch | 5      | 15     | 25     | 35     | 45     |
+  | ----- | ------ | ------ | ------ | ------ | ------ |
   | train | 1.4495 | 1.3076 | 1.2407 | 1.1949 | 1.1756 |
-  | eval | 1.3990 | 1.2879 | 1.2455 | 1.2195 | 1.2076 |
+  | eval  | 1.3990 | 1.2879 | 1.2455 | 1.2195 | 1.2076 |
 
   Buffered length against exp 1, both at t=0.95 on the same 3,098 crops:
 
-  | buffer | exp 1 `1_150.pt` | exp 2 `best_2.pt` |
-  |---|---|---|
-  | 5 m | .535/.450 F1 .489 | .629/.484 F1 **.547** |
-  | 10 m | .702/.589 F1 .640 | .783/.608 F1 **.685** |
-  | 15 m | .778/.665 F1 .717 | .845/.674 F1 **.750** |
+  | buffer | exp 1 `1_150.pt`  | exp 2 `best_2.pt`     |
+  | ------ | ----------------- | --------------------- |
+  | 5 m    | .535/.450 F1 .489 | .629/.484 F1 **.547** |
+  | 10 m   | .702/.589 F1 .640 | .783/.608 F1 **.685** |
+  | 15 m   | .778/.665 F1 .717 | .845/.674 F1 **.750** |
 
   More data bought mostly precision, +0.08 at 10 m against +0.02 recall, and
   the largest relative gain is at the tightest buffer (5 m F1 +0.058), so the
@@ -416,12 +421,12 @@ bbox 3900/903.
   By GT line count at 10 m, t=0.95 (exp 1 -> exp 2). Precision rose everywhere,
   recall barely moved, so the dense-crop problem is not a data-volume problem:
 
-  | GT lines | P | R |
-  |---|---|---|
-  | 1 | .701 -> .788 | .707 -> .731 |
-  | 2-3 | .714 -> .786 | .512 -> .530 |
-  | 4-6 | .682 -> .774 | .420 -> .435 |
-  | 7+ | .619 -> .688 | .383 -> .372 |
+  | GT lines | P            | R            |
+  | -------- | ------------ | ------------ |
+  | 1        | .701 -> .788 | .707 -> .731 |
+  | 2-3      | .714 -> .786 | .512 -> .530 |
+  | 4-6      | .682 -> .774 | .420 -> .435 |
+  | 7+       | .619 -> .688 | .383 -> .372 |
 
   Campsite crops excluded: F1 .685 -> .696, same small effect as exp 1.
 
@@ -440,7 +445,7 @@ bbox 3900/903.
   Worst false negatives are crops with ~1000 m of GT and almost nothing found:
   pos_016471 (recall .14), 010771 (.09), 029904 (.17), 028417 (.10).
 
-  The missing-label rule (recall >= .8, precision <= .5, unmatched >= 100 m)
+  The missing-label rule (`recall >= .8, precision <= .5, unmatched >= 100 m`)
   flags 40 crops. By eye on 16 of them, most are correct: pos_025224, 008752,
   023818, 007358 and 025758 all show two or three clearly visible woody lines
   where the labels have one. pos_019018 is the exception, a built-up crop the
@@ -468,6 +473,7 @@ bbox 3900/903.
 ## Batch size probe (2026-07-21)
 
 exps/probe_batch_size.py, real train step per batch size.
+
 - A100 40GB (job 24798721): 16 = 5.76 GB, 32 = 11.41 GB, 64 = 22.67 GB;
   0.354 GB/image; s/image flat past 16 (0.0278 -> 0.0262). Chose batch 16.
 - RTX PRO 3000 12.3 GB: 4 = 1.55, 16 = 5.76, 32 = 11.41, 48 = OOM.

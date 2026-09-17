@@ -35,8 +35,9 @@ Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of pol
   Exp 4 adds both tree rows (class 1) and the lidar branch in one run, to find out quickly whether the pair pays. The dataset and the branch each switch on one config line, so the three ablations (trees only, lidar only, neither) need no code edit.
 
   Not tried yet:
-    - LiDAR only, aerial only, and the tree/lidar ablations after exp 4
-    - Different backbone/embeddings: DINOv3 sat, Google Satellite embeddings
+
+  - LiDAR only, aerial only, and the tree/lidar ablations after exp 4
+  - Different backbone/embeddings: DINOv3 sat, Google Satellite embeddings
 
 ### Key Findings
 
@@ -53,8 +54,6 @@ Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of pol
 - **Top10NL separates hedge from tree row by understory, not height.** A `heg` blocks the view up to man-height and a `bomenrij` does not, so a tall row of trees is a hedge when it has undergrowth. Height therefore cannot be the discriminator.
 - **LiDAR structure does separate the two classes**, at balanced accuracy 0.778 and AUC 0.852 over all 25 AHN4 metrics on a geographic split. Structure alone beats every height metric combined (0.765 against 0.709). The best single metric is the share of returns between 1 and 2 m, which is a literal measurement of the label rule: 0.079 for hedges against 0.008 for tree rows. (`exps/probe_lidar_hedge_vs_tree.py`.)
 - **Both Top10NL layers are officially incomplete** ("Volledigheid: Beperkt"), and hedges inside built-up areas or on an *erf* (the plot or grounds of a house or farm) are excluded by rule. So those areas carry fewer labels than hedges on the ground, and predictions there are counted as errors. Whether that explains the built-up and campsite crops topping the false-positive ranking is untested; it is consistent with it, not shown.
-
-
 
 ## Code Description
 
@@ -78,10 +77,15 @@ Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of pol
 - `scripts/data/build_lidar_patches.py`: cuts the AHN4 lidar metrics into one 25x25 cell patch per crop (250 m crop, 10 m cell), for the six metrics that separate hedge from tree row best. Writes a single `lidar_patches.npy` plus a stem index rather than one file per crop, because inodes are the tight resource on the cluster and 30,000 crops would cost 30,000 of them. Keyed by stem, so one file serves the laptop split and the cluster split alike. About 26 min and 450 MB for the full dataset; `cfg.limit` builds a subset when only a check is needed.
 
 - `scripts/data/build_lidar_training_dataset.py`: end-to-end local-raster pipeline. It creates images and labels with `hedge_seg.training_data`, postprocesses labels with `hedge_seg.label_postprocess`, computes DINOv3 embeddings, and packs embeddings with labels using `hedge_seg.embeddings_and_pack`.
+
 - `scripts/data/build_pdok_wms_dataset.py`: entry point for the PDOK WMS data-generation workflow in `hedge_seg.pdok_training_data`.
+
 - `scripts/data/convert_pdok_polylines_to_yolo_bbox.py`: converts the generated JSON/polyline dataset into an Ultralytics detection dataset. Each polyline is converted to one normalized YOLO bounding box row.
+
 - `scripts/data/convert_pdok_polylines_to_yolo_seg.py`: converts the generated JSON/polyline dataset into an Ultralytics segmentation dataset. Each polyline is buffered into a thin polygon mask and written as a normalized YOLO segmentation row.
+
 - `scripts/data/convert_pdok_polylines_to_semseg.py`: converts the generated JSON/polyline dataset into a semantic-segmentation dataset (`images/`, `masks/`, `centerlines/` train/val folders). Each polyline is buffered into a foreground mask and its raw skeleton is kept separately as the centerline target; used by `train_semseg_unet_resnet18.py`.
+
 - `scripts/data/convert_pdok_polylines_to_detr_polyline.py`: converts the generated JSON/polyline dataset into per-image polyline NPZs for `train_detr_unet_polyline.py`, decoupled from any backbone/embeddings. Cleans labels (opens closed rings, drops polylines under `min_length_px`) and splits crops into `polylines/{train,val}/` by geographic blocks on `center_world`, so overlapping crops never land on both sides of the split (see `hedge_seg.utils.geographic_overlap_stats`/`verify_no_split_overlap`, used by `exps/quantify_geographic_crop_overlap_pdok_dataset3.py` and `exps/dataset_stats.py`). With `treeline_shp` set it also clips the Top10NL tree row layer (`bomenrij`) to each crop and stores it as class 1 next to the hedges (class 0), reusing `make_polylines_for_chip` and `lines_in_bbox`, the same functions that produced the hedge labels, so the two classes cannot end up in different pixel conventions. No imagery is regenerated: the crops are the existing hedge-centred ones. `val_stems_file` takes the split from an existing run's val stem list instead of recomputing it, which makes the laptop and the cluster agree and keeps a new dataset scoreable against that run. `_clean_polylines` holds the ring/length/resample pass so every class goes through it identically.
 
 #### Training
@@ -104,7 +108,6 @@ All training scripts read datasets produced by the `scripts/data/*` workflows ab
 - `scripts/show_polyline_results.py`: views an inference run of `train_detr_unet_polyline.py`. List one or more run directories in its cfg block; it draws a GT figure plus one prediction figure per run, all over the same crops so panels can be compared directly. Needs only the run directories, since each already contains the matching ground truth. `score_thresh` filters the stored predictions by score, so a run inferred at 0.05 can be viewed at any higher threshold with no second inference pass; this was verified bit-identical to a real t=0.95 run on all 3,098 val crops. Three modes: labels and predictions together (list `run_dirs`), labels alone (leave `run_dirs` empty and set `gt_dir` to a polyline directory, so nothing has to be inferred first), or predictions alone (`show_gt=False`). With `paging=True` the figures wait for `n` to show the next page of crops and `q` to stop; the crop order is shuffled once by `seed`, so paging never repeats a crop. `save` writes the figures to `save_dir` as `<model>_<run>_<split>_t<thresh>.png`, with `_p<page>` appended after the first page.
 - `scripts/infer_detr_dino_polyline.py`: loads a checkpoint from `train_detr_dino_polyline.py` (plain `model` or `model_with_diffusion`) and runs/visualizes polyline predictions on precomputed embeddings.
 - `scripts/infer_detr_dino_polyline_rel.py`: same as above for checkpoints from `train_detr_dino_polyline_rel.py` (box + relative-offset polyline head).
-
 
 ### Experiments
 
