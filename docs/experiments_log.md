@@ -138,11 +138,56 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 4 (running, job 26834940, submitted 2026-09-17, gpu_a100, git 9db4a10,
-  --time=16:00:00, about 11 h expected): tree rows and lidar together,
-  everything else the exp 2 recipe (frozen up3, cls_loss=ce, 45 epochs, batch
-  16, same 3,098 val stems). Config changes are four lines: the tree polyline
-  directory, num_classes=2, lidar_path set, and exp=4.
+- 4 scored, 2026-09-23. **Did not win.** Hedge F1 at 10 m 0.698 against exp 2's
+  0.699, at 5 m 0.533 against 0.553. Job 26834940, gpu_a100, git 9db4a10, all 45
+  epochs in 11:12:54 (14:56/epoch). Train 1.3592 / eval 1.4714 at epoch 45, best
+  eval 1.4678 at epoch 40.
+
+  Tree rows and lidar together, everything else the exp 2 recipe (frozen up3,
+  cls_loss=ce, 45 epochs, batch 16, same 3,098 val stems). Config changes are
+  four lines: the tree polyline directory, num_classes=2, lidar_path set, and
+  exp=4.
+
+  Hedge against hedge (class 0 both sides), all 3,098 val crops,
+  `exps/probe_polyline_pr.py` with `classes={0: "hedge", 1: "tree row"}`. Both
+  runs peak at t=0.90, so that row is the comparison:
+
+  | run at t=0.90        | 5 m      | 10 m     | 15 m     | pred/img |
+  | -------------------- | -------- | -------- | -------- | -------- |
+  | exp 2 `best_2.pt`    | **.553** | **.699** | .767     | 3.23     |
+  | exp 4 `best_4.pt`    | .533     | .698     | **.773** | 3.26     |
+  | exp 4 `4.pt` (ep 45) | .533     | .697     | .772     | 3.26     |
+
+  At t=0.95 the same shape: exp 4 0.531 / 0.682 / 0.754 against exp 2's 0.547 /
+  0.685 / 0.750.
+
+  **This is the blur signature the lidar section of docs/lesson_learned.md said
+  to watch for**: 5 m down 0.020, 10 m flat, 15 m up 0.006. Written down before
+  the run, so it is a prediction, not a story told afterwards. Exp 4 moved two
+  things at once, so it does not say which one did it. The ablations are one
+  config line each.
+
+  Not all bad. Recall rose at every threshold (0.703 against 0.696 at t=0.90,
+  0.845 against 0.840 at t=0.05) and precision fell (0.693 against 0.701). The
+  clutter dropped hard: 10.70 pred/img at t=0.05 against exp 2's 12.63, so F1
+  there is 0.545 against 0.506. Geometry moved towards the labels, not away:
+  straightness 0.913 with `bent<0.85` at 0.169, against exp 2's 0.927 / 0.136 and
+  GT 0.909 / 0.220.
+
+  The tree row class works on its own terms, at t=0.90: 0.601 at 5 m,
+  **0.688** at 10 m, 0.726 at 15 m, 1.55 pred/img against 1.49 GT. It is
+  localised more tightly than the hedge class is (5 m 0.601 against 0.533), so
+  the second class is not what is costing the 5 m number.
+
+  **The last epoch did not win this time.** `best_4.pt` (ep 40) beats `4.pt`
+  (ep 45) by 0.001 at 10 m, which is a tie. The last epoch had won the only two
+  runs where the two checkpoints differ, exp 1 by 0.026 and exp 3 by 0.004; in
+  exp 2 the best eval loss was the last epoch, so there was nothing to compare.
+  Still no reason to early-stop on eval loss, only no longer a reason to prefer
+  the last checkpoint over the best one.
+
+  loss_ce is on a new scale with two classes, so the loss curve is comparable
+  only with itself.
 
   The first submission (job 26798493, 2026-09-16) died three minutes into
   epoch 1 with "No image for pos_029989". The tree dataset was built on the
@@ -167,26 +212,17 @@ bbox 3900/903.
     at 5 m.
   - `lidar_patches.npy` rebuilt for all 30,000 crops (was 300).
 
-  Score with `exps/probe_polyline_pr.py` and `classes={0: "hedge", 1: "tree row"}`, hedge against hedge, sweeping the threshold. Beat exp 2's F1 0.699 at
-  10 m and 0.547 at 5 m. loss_ce is on a new scale with two classes, so the loss
-  curve is comparable only with itself.
+  Inference runs kept at
+  `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_tree_polylines/inference/{best_4,4}_val_t0.05`,
+  both at `infer_score_thresh=0.05` so the threshold sweeps both ways.
 
-  When it finishes, in order:
+  Next, to find out which of the two changes cost the 5 m number. One config
+  line each in `scripts/train_detr_unet_polyline.py`, no code edit:
 
-  ```
-  ssh me "squeue -j 26834940; sacct -j 26834940"
-  scp -r me:exps/hedge/detr_unet_polyline/4 \
-      /home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/
-  scp me:exps/hedge/detr_unet_polyline/4.sh \
-      me:exps/hedge/detr_unet_polyline/4_26834940.out \
-      /home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/4/
-  ```
-
-  Then `mode="infer"` in the training script with `infer_ckpt` at `4/best_4.pt`
-  and again at `4/4.pt` (the last epoch has won three times), `num_classes=2`,
-  `lidar_path` set and `infer_polyline_dir` at
-  `pdok_dataset3_tree_polylines/polylines/val`, at `infer_score_thresh=0.05` so
-  the threshold can be swept both ways afterwards.
+  | run        | polyline dir                 | num_classes | lidar_path |
+  | ---------- | ---------------------------- | ----------- | ---------- |
+  | trees only | pdok_dataset3_tree_polylines | 2           | None       |
+  | lidar only | pdok_dataset3_polylines      | 1           | set        |
 
 - 3 scored, 2026-08-11. **Lost.** Best F1 at 10 m 0.664 against exp 2's 0.699.
   Both checkpoints, all 3,098 val crops, `exps/probe_polyline_pr.py`:

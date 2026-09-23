@@ -787,6 +787,12 @@ Three things worth keeping:
 Use the same Top10NL year as the hedge labels, 2023. Taking the tree rows from
 2025 would change the label year at the same time and confound the run.
 
+Exp 4 confirms it on the model side: the tree row class reaches F1 0.688 at 10 m
+and 0.601 at 5 m, and the hedge class holds at 10 m (0.698 against exp 2's
+0.699). Tree rows are localised more tightly than hedges are, 0.601 against
+0.533 at 5 m, so the second class is not what costs exp 4 its 5 m number.
+*(exp 4, `exps/probe_polyline_pr.py`)*
+
 ## Where the lidar is allowed to act
 
 The backbone turns the image into a 64x64 grid of feature vectors, one per
@@ -812,9 +818,18 @@ grounds that a 10 m grid could blur a thin line. Three reasons:
 - The limit is that too few correct lines are drawn at all. A class-only branch
   cannot change which lines are drawn, so it cannot touch that.
 
-How the old worry would show up: hedge F1 at 5 m falling against exp 2's 0.547
-while the 10 m number holds. That is the signature of blurrier geometry, and
-then the class-only version is the fallback.
+**The old worry was right.** The signature written down here before the run was
+hedge F1 at 5 m falling while the 10 m number holds. Exp 4 gave exactly that:
+5 m 0.533 against exp 2's 0.553, 10 m 0.698 against 0.699, and 15 m 0.773
+against 0.767. Tight buffer down, loose buffer up, which is what a blurrier line
+looks like. The class-only version is now the fallback to try.
+
+Two things keep this from being proof. Exp 4 turned on tree rows and lidar at
+once, so the ablations have to say which one did it. And the lines did not get
+blurrier in the way you would guess: predicted straightness moved towards the
+labels, 0.913 with `bent<0.85` at 0.169 against exp 2's 0.927 / 0.136 and GT's
+0.909 / 0.220. Whatever costs the 5 m number, it is not that the lines got
+straighter. *(exp 4, `exps/probe_polyline_pr.py`)*
 
 Two details that are not cosmetic. BatchNorm comes first because the six metrics
 are in different units, five band ratios in [0, 1] against `perc_95` reaching

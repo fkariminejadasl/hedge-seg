@@ -152,6 +152,24 @@ blocks)*
 
 ---
 
+## We tried both, and the hedges did not improve
+
+Tree rows as a second class and the laser data, together in one run.
+
+**Tree rows worked.** We draw them as their own class now, about as well as we
+draw hedges *(F1 0.69 at 10 m)*.
+
+**Hedges did not move.** 0.699 to 0.698. At the tightest tolerance they got a
+little worse, 0.553 to 0.533 *(5 m buffer)*.
+
+That drop is the sign we had written down in advance: a 10 m laser grid
+blurring a 3 m hedge. Next we run the two changes separately, to see which one
+did it.
+
+*(exp 4, `exps/probe_polyline_pr.py`)*
+
+---
+
 ## Hedges the map is missing entirely (High R, low P)
 
 ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_missing_labels_gt_val_cluster_t.90.png) ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_missing_labels_best_2_val_cluster_t.90.png)
@@ -293,7 +311,8 @@ we were about to spend far more on the same idea.
 1. **Look at finer detail.** A hedge is about 3 m wide, 12 pixels. One grid
    cell is 4 m, 16 pixels. The hedge is thinner than a single cell, so its
    shape is gone before the head sees it *(feature stride 16 to 8)*
-2. **Tree rows as a second class**, with laser structure to tell them apart
+2. **Split the run we just did**, tree rows and laser separately, to find which
+   one cost the fine detail *(exp 4 ablations)*
 3. **Use the 2025 map**, so photos and labels are the same year
 4. **Train the image backbone**, which is frozen today
 5. **Lower resolution**, to see how much depends on 25 cm imagery
@@ -307,6 +326,7 @@ we were about to spend far more on the same idea.
 | 1 | 5,000 crops, 150 epochs | 0.640 |
 | 2 | all 26,902 crops, 45 epochs | **0.699** |
 | 3 | focal sigmoid score head | 0.664 |
+| 4 | tree rows as class 2, plus laser | 0.698 |
 
 Exp 2 is 11 h on one A100. All scored on the same 3,098 held-out crops with
 `exps/probe_polyline_pr.py`.
