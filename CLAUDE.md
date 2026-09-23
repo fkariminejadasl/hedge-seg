@@ -32,6 +32,14 @@
 - When asked to diagnose, diagnose first and do not change code until asked.
 - Say which files were inspected before answering a question about the repo.
 
+## Report files touched outside git status
+
+- **Report files touched outside `git status`.** Finish any task that ran,
+  copied or scored something with a list of what changed outside the repo:
+  directories created, with sizes; and any tracked file edited in place and
+  then restored, naming the fields changed. A file that was edited and restored
+  still has to be named, because it is how the numbers were produced.
+
 ## Committing
 
 - Never run `git commit` on your own. Make the change, run the formatter, say
