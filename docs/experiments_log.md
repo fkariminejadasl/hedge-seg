@@ -138,19 +138,27 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 5 (prepared, not yet submitted): the exp 4 ablation. Tree rows kept, lidar
+- 5 (running, job 27058081, submitted 2026-09-23 14:27, gpu_a100, git 8dab16d,
+  --time=16:00:00, 14:29/epoch so about 11 h, due about 01:25 on 2026-09-24):
+  the exp 4 ablation. Tree rows kept, lidar
   off, so it differs from exp 4 by `lidar_path` alone and from exp 2 by the
   second class plus the same four train crops. Everything else is the exp 4
   recipe: frozen up3, cls_loss=ce, 45 epochs, batch 16, 26,900 train / 3,098 val
-  on the cluster. About 11 h on gpu_a100, `--time=16:00:00`.
+  on the cluster.
 
   Config is one line, `lidar_path=None`, plus `exp="5"`.
 
-  Checked before submitting, with a 32-crop 1-epoch smoke run on the laptop:
-  the model has no lidar keys at all where exp 4 has 9, the lidar branch is
-  67,869 parameters, every other key matches exp 4, and the class head is
-  (3, 256), two classes plus the no-object column. So the run is a clean
-  one-variable ablation.
+  Checked before submitting, `exps/probe_lidar_branch_absent.py`: with the lidar
+  off the model has no lidar keys where exp 4 has 9, the lidar branch is 67,869
+  parameters, every other key is identical, and the class head is (3, 256), two
+  classes plus the no-object column. So the run is a clean one-variable
+  ablation. Add `5/best_5.pt` to that probe when the run lands.
+
+  Epoch 1 came out at train_total 2.1948 against exp 4's 2.1644, 1.4% apart,
+  which is the expected start: `LidarTokenEncoder` has a zero-initialised last
+  layer, so at step 0 exp 4 is the no-lidar model and the two only diverge as
+  the branch learns. The log has no `Lidar: 7 channels` line, which is the
+  direct confirmation the branch is off.
 
   What it decides:
 

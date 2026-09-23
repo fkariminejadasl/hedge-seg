@@ -192,6 +192,24 @@ Consequences:
   eval loader: 8 workers means 16 processes, which is right for the 18 CPUs
   that come with one A100.
 
+## A slurm log begins with the source code, so do not grep the whole file
+
+The slurm script cats `paths.py`, the data scripts and the whole training
+script into the `.out` file, so the log documents the run on its own. That means
+the first few thousand lines are Python, not output. Grepping the file for
+`Error` or `Traceback` matches error-handling code in the source and reports a
+failure on a healthy job. It happened on exp 5, on a run that was training fine.
+
+Cut to the run output first, then search:
+
+```
+sed -n '/^start training/,$p' <n>_<jobid>.out | grep ...
+```
+
+The same trap hides real information. A config that is off shows up in the
+dumped source as well as in the output, so a grep for a setting returns both
+and the source copy is the one that is always there.
+
 ## A slurm log that stops updating is usually just buffering
 
 In the first cluster run the .out file stopped at "Epoch 005 starting" while
@@ -229,6 +247,19 @@ How to tell a hang from slow training: check GPU utilization (nvtop), not just
 the log. 0% GPU with a busy CPU means a worker hang; a busy GPU means it is just
 slow. `exps/smoke_test_train_detr_unet_polyline.py` reproduces the eval to
 train transitions quickly and fails if this regresses.
+
+## A score is meaningless without the threshold it was read at
+
+Exp 2 is on record as F1 0.699 at 10 m and 0.547 at 5 m. Those are two different
+thresholds: 0.699 is at t=0.90 and 0.547 is at t=0.95. At its own best threshold
+exp 2 scores 0.553 at 5 m, not 0.547. Comparing exp 4 against the pair as if it
+were one operating point makes the 5 m loss look like 0.014 when it is 0.020.
+
+The optimum also moves with the model, so it has to be re-swept every time
+(exp 1 peaked at 0.95, exps 2 and 4 at 0.90, exp 3 at 0.40). Quote the
+threshold beside every number, and compare two runs either at one shared
+threshold or each at its own optimum, never one of each.
+*(`exps/probe_polyline_pr.py`)*
 
 ## No cheap measure can rank two checkpoints, so build the real one
 
