@@ -22,15 +22,25 @@ Result (2026-09-23):
       all other keys identical    True
 
     checkpoints
-      detr_unet_polyline/2/best_2.pt   0 lidar keys, class head (2, 256)
-      detr_unet_polyline/4/best_4.pt   9 lidar keys, class head (3, 256)
+      2/best_2.pt   0 lidar keys, head (2, 256), 14,397,534 + 5,771,788 = 20,169,322
+      4/best_4.pt   9 lidar keys, head (3, 256), 14,397,534 + 5,839,914 = 20,237,448
 
-The build numbers count the polyline head only, which is what holds the lidar
-branch. A saved checkpoint is about 20.2 M parameters because it also carries
-the frozen ResNet18-UNet backbone.
+Two things that look wrong and are not.
 
-The class head is (num_classes + 1, d_model) because cls_loss="ce" keeps a
-no-object column, so 1 class gives 2 rows and 2 classes give 3.
+**A checkpoint is 20.2 M, not the 11.7 M of a ResNet18.** It stores three
+things: the ResNet18 encoder without its 1000-class fc layer (11,176,512), the
+UNet decoder on top of it (3,221,022, giving the 14,397,534 backbone), and the
+polyline head (5.8 M). The training log prints `trainable params: 5.8M` because
+`freeze_backbone=True`, so only the head trains, but the frozen backbone is
+saved with it. The build numbers above count the head alone, since that is what
+holds the lidar branch.
+
+**best_2.pt and a 2-class checkpoint differ by 257 parameters.** The class head
+is (num_classes + 1, d_model) because cls_loss="ce" keeps a no-object column, so
+1 class gives (2, 256) and 2 classes give (3, 256). One extra row is 256 weights
+plus 1 bias. That 257 is the whole difference between a hedges-only head and a
+hedge-plus-tree-row head, and it is not a discrepancy between two counts of the
+same model.
 
 So lidar_path=None builds no branch at all and touches nothing else, and exp 5
 differs from exp 4 by those 67,869 parameters and nothing more.
@@ -109,10 +119,13 @@ def main(cfg):
             print(f"  {path}  missing, skipped")
             continue
         state = torch.load(path, map_location="cpu")["model"]
-        name = f"{path.parent.parent.name}/{path.parent.name}/{path.name}"
+        name = f"{path.parent.name}/{path.name}"
+        back = sum(v.numel() for k, v in state.items() if k.startswith("backbone."))
+        head = sum(v.numel() for k, v in state.items() if not k.startswith("backbone."))
         print(
-            f"  {name}   {len(lidar_keys(state))} lidar keys, "
-            f"class head {class_head(state)}"
+            f"  {name:<18} {len(lidar_keys(state))} lidar keys, "
+            f"class head {class_head(state)}, "
+            f"backbone {back:,} + head {head:,} = {back + head:,}"
         )
 
 
