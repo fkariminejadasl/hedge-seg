@@ -2539,21 +2539,23 @@ if __name__ == "__main__":
         # overrides: exp="<n>_laptop", num_workers=4, eval_every=10,
         # n_val_subset=1000 (its val split is leakier, so full val is not the
         # honest number anyway).
-        exp="4",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
+        exp="5",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
         save_path=EXP_ROOT / "detr_unet_polyline",
         # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
         # which writes geographically split polylines/{train,val} directories)
         #
-        # Exp 4 changes two things against exp 2, on purpose, to find out
-        # quickly whether the pair is worth anything: tree rows as a second
-        # class, and lidar as a side branch. The dataset and the model each
-        # switch on one config line, so the three ablations need no code edit:
+        # Exp 4 turned on tree rows and lidar together and did not beat exp 2:
+        # hedge F1 0.698 at 10 m against 0.699, and 0.533 at 5 m against 0.553.
+        # Exp 5 is the ablation that says which of the two cost the 5 m number.
+        # It keeps the tree rows and switches the lidar off, so it differs from
+        # exp 4 by lidar_path alone. With lidar_path=None no lidar branch is
+        # built, so the model is the exp 2 model with a two-class head:
         #
-        #   run          | polyline dir                | num_classes | lidar_path
+        #   run          | polyline dir                 | num_classes | lidar_path
         #   exp 2        | pdok_dataset3_polylines      | 1           | None
-        #   trees only   | pdok_dataset3_tree_polylines | 2           | None
+        #   exp 5 (here) | pdok_dataset3_tree_polylines | 2           | None
         #   lidar only   | pdok_dataset3_polylines      | 1           | set
-        #   exp 4 (both) | pdok_dataset3_tree_polylines | 2           | set
+        #   exp 4        | pdok_dataset3_tree_polylines | 2           | set
         image_dir=DATA_ROOT / "pdok_dataset3/images",
         train_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/train",
         val_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
@@ -2563,7 +2565,7 @@ if __name__ == "__main__":
         # model is then exactly the exp 2 model. A crop with no patch is an
         # error, so a partial .npy only works with a matching polyline
         # directory (see exps/probe_lidar_crop_alignment.py).
-        lidar_path=DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy",
+        lidar_path=None,  # exp 5 ablation; set to the .npy to put lidar back
         lidar_stride=16,  # must equal the feature stride, so 1024 -> 64x64
         augment=True,  # flip/rot90 of image + polylines (train split only)
         # exp 2 is the data-scaling A/B against exp 1: full train split instead

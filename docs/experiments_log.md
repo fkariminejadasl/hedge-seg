@@ -138,6 +138,31 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
+- 5 (prepared, not yet submitted): the exp 4 ablation. Tree rows kept, lidar
+  off, so it differs from exp 4 by `lidar_path` alone and from exp 2 by the
+  second class plus the same four train crops. Everything else is the exp 4
+  recipe: frozen up3, cls_loss=ce, 45 epochs, batch 16, 26,900 train / 3,098 val
+  on the cluster. About 11 h on gpu_a100, `--time=16:00:00`.
+
+  Config is one line, `lidar_path=None`, plus `exp="5"`.
+
+  Checked before submitting, with a 32-crop 1-epoch smoke run on the laptop:
+  the model has no lidar keys at all where exp 4 has 9, the lidar branch is
+  67,869 parameters, every other key matches exp 4, and the class head is
+  (3, 256), two classes plus the no-object column. So the run is a clean
+  one-variable ablation.
+
+  What it decides:
+
+  | 5 m hedge F1  | reading                                                                        |
+  | ------------- | ------------------------------------------------------------------------------ |
+  | back to ~.553 | the lidar cost the fine detail; fall back to feeding it to the class head only |
+  | stays ~.533   | the second class cost it, and the lidar is not to blame                        |
+
+  Score the same way as exp 4: `exps/probe_polyline_pr.py` with
+  `classes={0: "hedge", 1: "tree row"}`, class 0 against class 0, on the same
+  3,098 val stems, sweeping the threshold.
+
 - 4 scored, 2026-09-23. **Did not win.** Hedge F1 at 10 m 0.698 against exp 2's
   0.699, at 5 m 0.533 against 0.553. Job 26834940, gpu_a100, git 9db4a10, all 45
   epochs in 11:12:54 (14:56/epoch). Train 1.3592 / eval 1.4714 at epoch 45, best

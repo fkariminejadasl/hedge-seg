@@ -210,8 +210,7 @@ Cluster (Snellius, `ssh me`):
   Report what the commands say; do not copy the numbers into the docs, they
   change constantly.
 - To free space, delete intermediate checkpoints first: the `<n>_<epoch>.pt`
-  snapshots, once a run has been scored. Keep `best_<n>.pt` and `<n>.pt`,
-  because the last epoch has beaten the best-eval one three times. Do not
+  snapshots, once a run has been scored. Keep `best_<n>.pt` and `<n>.pt`. Do not
   delete `pdok_dataset3` or any other dataset unless there is no alternative
   and the user has agreed; regenerating one is slow and changes the split.
 - A100 gives 18 CPUs per GPU, H100 gives 16. A100 has a shorter queue, H100 is
