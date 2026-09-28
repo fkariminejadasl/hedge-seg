@@ -2549,7 +2549,9 @@ if __name__ == "__main__":
         # Exp 5 is the ablation that says which of the two cost the 5 m number.
         # It keeps the tree rows and switches the lidar off, so it differs from
         # exp 4 by lidar_path alone. With lidar_path=None no lidar branch is
-        # built, so the model is the exp 2 model with a two-class head:
+        # built, so the model is the exp 2 model with a two-class head.
+        # Result: the tree rows cost it, not the lidar. Exp 5 hedge F1 is 0.536
+        # at 5 m and 0.689 at 10 m (exps/probe_polyline_pr.py).
         #
         #   run          | polyline dir                 | num_classes | lidar_path
         #   exp 2        | pdok_dataset3_polylines      | 1           | None

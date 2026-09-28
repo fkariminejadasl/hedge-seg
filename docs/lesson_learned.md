@@ -753,6 +753,10 @@ Exp 2 precision at 10 m is 0.783, so 0.217 of predicted length is unmatched and
 lines as a second class, and it is why the reported precision is a lower bound
 on hedgerow performance rather than an honest error rate.
 
+Exp 5 did not collect it. With tree rows as a second class, hedge precision at
+10 m went down, not up: 0.777 against 0.783 at t=0.95, and 0.692 against 0.701
+at t=0.90. *(exp 5, `exps/probe_polyline_pr.py`)*
+
 This reverses an earlier call. Tree lines were ranked low because the worst
 crops looked like campsites rather than tree rows. The worst crops are not the
 typical crops: campsite exclusion moved F1 by 0.011, while tree rows account
@@ -818,11 +822,17 @@ Three things worth keeping:
 Use the same Top10NL year as the hedge labels, 2023. Taking the tree rows from
 2025 would change the label year at the same time and confound the run.
 
-Exp 4 confirms it on the model side: the tree row class reaches F1 0.688 at 10 m
-and 0.601 at 5 m, and the hedge class holds at 10 m (0.698 against exp 2's
-0.699). Tree rows are localised more tightly than hedges are, 0.601 against
-0.533 at 5 m, so the second class is not what costs exp 4 its 5 m number.
-*(exp 4, `exps/probe_polyline_pr.py`)*
+Cheap in data, but not free for the hedges. Exp 5 adds the tree rows and nothing
+else, and the hedge class gets a little worse at every buffer: F1 0.536 against
+exp 2's 0.553 at 5 m, 0.689 against 0.699 at 10 m, 0.761 against 0.767 at 15 m.
+The tree row class itself reaches 0.624 at 10 m, and 0.688 with the lidar
+added (exp 4).
+
+Exp 4 alone had been read the other way. Its tree rows were placed more tightly
+than its hedges, 0.601 against 0.533 at 5 m, so the tree class looked innocent
+of the 5 m drop. Exp 5 shows it was the cause. How well one class is placed
+says nothing about what it costs the other. *(exps 4 and 5,
+`exps/probe_polyline_pr.py`)*
 
 ## Where the lidar is allowed to act
 
@@ -849,18 +859,20 @@ grounds that a 10 m grid could blur a thin line. Three reasons:
 - The limit is that too few correct lines are drawn at all. A class-only branch
   cannot change which lines are drawn, so it cannot touch that.
 
-**The old worry was right.** The signature written down here before the run was
-hedge F1 at 5 m falling while the 10 m number holds. Exp 4 gave exactly that:
-5 m 0.533 against exp 2's 0.553, 10 m 0.698 against 0.699, and 15 m 0.773
-against 0.767. Tight buffer down, loose buffer up, which is what a blurrier line
-looks like. The class-only version is now the fallback to try.
+**The old worry looked right and was wrong.** The signature written down here
+before the run was hedge F1 at 5 m falling while the 10 m number holds. Exp 4
+gave exactly that: 5 m 0.533 against exp 2's 0.553, 10 m 0.698 against 0.699.
+But exp 5, the same run with the lidar off, falls just as far at 5 m (0.536).
+The tree rows did it, not the lidar.
 
-Two things keep this from being proof. Exp 4 turned on tree rows and lidar at
-once, so the ablations have to say which one did it. And the lines did not get
-blurrier in the way you would guess: predicted straightness moved towards the
-labels, 0.913 with `bent<0.85` at 0.169 against exp 2's 0.927 / 0.136 and GT's
-0.909 / 0.220. Whatever costs the 5 m number, it is not that the lines got
-straighter. *(exp 4, `exps/probe_polyline_pr.py`)*
+The lidar in the tokens helps. Against exp 5 it adds 0.009 to hedge F1 at 10 m
+and 0.012 at 15 m, leaves 5 m flat, and adds 0.064 to the tree row class at
+10 m (0.688 against 0.624). It also removes clutter: 10.70 hedge lines per image
+at t=0.05 against 12.00. So there is no case for moving it to the class head.
+
+The lesson is about reading a run. A pattern predicted in advance is still not
+proof when the run changed two things at once. *(exps 4 and 5,
+`exps/probe_polyline_pr.py`)*
 
 Two details that are not cosmetic. BatchNorm comes first because the six metrics
 are in different units, five band ratios in [0, 1] against `perc_95` reaching
@@ -1009,12 +1021,20 @@ Phase C — the score head, closed:
   showed that half of the recall it was chasing is clutter. Both sections
   above. Perception, not ranking, is the limit.
 
+Phase C — tree rows and lidar:
+
+- Exp 4 (tree rows and lidar) and exp 5 (tree rows only) scored. Neither beats
+  exp 2 on hedges: F1 at 10 m 0.698 and 0.689 against 0.699. The tree rows cost
+  0.017 at 5 m. The lidar gives back 0.009 at 10 m and adds 0.064 to the tree
+  row class. See "Tree rows cost nothing to add" and "Where the lidar is allowed
+  to act".
+
 ## TODO
 
 Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
 
-Exp 3 is done and lost (0.699 -> 0.664). Exp 2 `best_2.pt` at t=0.90 remains
-the baseline.
+Exp 3 is done and lost (0.699 -> 0.664), and exps 4 and 5 did not beat it
+either (0.698, 0.689). Exp 2 `best_2.pt` at t=0.90 remains the baseline.
 
 The bottleneck is that the model does not draw enough correct lines, worst
 where crops are crowded (exp 2 recall 0.372 on crops with 7+ labelled lines
@@ -1027,18 +1047,12 @@ against 0.731 on crops with one). So the next runs should target perception.
   stage at stride 8. Memory is available: batch 16 uses 5.8 of 40 GB, and
   stride 8 is 4x the tokens. This is the most direct attack on the real limit.
 
-- Exp 4, running: tree lines as a second class and the lidar side branch, both
-  at once, to find out quickly whether the pair pays. Tree lines are worth 0.053
-  of predicted length on their own and lidar separates heg from bomenrij at
-  balanced accuracy 0.778, so they are partners. Score class 0 against class 0
-  on the same 3,098 val stems and beat exp 2's F1 0.699 at 10 m by more than
-  about 0.02, or stop. A loss will not say which half failed, which is the price
-  of running them together; the per-class rows partly disambiguate.
-
-  - Then the ablations, each one config line and no code change: trees only,
-    lidar only. Lidar only reads `pdok_dataset3_polylines`, which holds
-    `pos_030002` and `pos_030003`, and `lidar_patches.npy` has no patch for
-    either, so drop those two NPZs or build the patches first.
+- Lidar only, the last ablation of exp 4: `pdok_dataset3_polylines`,
+  num_classes=1, lidar_path set, one config line and no code change. Exp 5 shows
+  the lidar helps on top of tree rows; this says whether it helps hedges on
+  their own. That dataset holds `pos_030002` and `pos_030003`, and
+  `lidar_patches.npy` has no patch for either, so drop those two NPZs or build
+  the patches first.
 
 - Labels from Top10NL2025 instead of 2023, a separate conversion. It closes
   the three-year image/label gap at no imagery cost, since the crops are

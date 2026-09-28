@@ -162,11 +162,26 @@ draw hedges *(F1 0.69 at 10 m)*.
 **Hedges did not move.** 0.699 to 0.698. At the tightest tolerance they got a
 little worse, 0.553 to 0.533 *(5 m buffer)*.
 
-That drop is the sign we had written down in advance: a 10 m laser grid
-blurring a 3 m hedge. Next we run the two changes separately, to see which one
-did it.
+That drop looked like the sign we had written down in advance: a 10 m laser
+grid blurring a 3 m hedge.
 
 *(exp 4, `exps/probe_polyline_pr.py`)*
+
+---
+
+## The tree rows cost the detail, not the laser
+
+The same run with the laser switched off.
+
+**The drop stayed**, 0.536 at 5 m. So the tree rows did it.
+
+**The laser helps.** With it, hedges 0.698 against 0.689, tree rows 0.69
+against 0.62 *(10 m buffer)*.
+
+Our advance prediction matched the result and still blamed the wrong thing.
+One run that changes two things cannot say which one did it.
+
+*(exp 5 against exp 4, `exps/probe_polyline_pr.py`)*
 
 ---
 
@@ -311,8 +326,8 @@ we were about to spend far more on the same idea.
 1. **Look at finer detail.** A hedge is about 3 m wide, 12 pixels. One grid
    cell is 4 m, 16 pixels. The hedge is thinner than a single cell, so its
    shape is gone before the head sees it *(feature stride 16 to 8)*
-2. **Split the run we just did**, tree rows and laser separately, to find which
-   one cost the fine detail *(exp 4 ablations)*
+2. **Laser without tree rows**, to see if the laser helps hedges on their own
+   *(lidar-only ablation)*
 3. **Use the 2025 map**, so photos and labels are the same year
 4. **Train the image backbone**, which is frozen today
 5. **Lower resolution**, to see how much depends on 25 cm imagery
@@ -327,6 +342,7 @@ we were about to spend far more on the same idea.
 | 2 | all 26,902 crops, 45 epochs | **0.699** |
 | 3 | focal sigmoid score head | 0.664 |
 | 4 | tree rows as class 2, plus laser | 0.698 |
+| 5 | tree rows as class 2, no laser | 0.689 |
 
 Exp 2 is 11 h on one A100. All scored on the same 3,098 held-out crops with
 `exps/probe_polyline_pr.py`.

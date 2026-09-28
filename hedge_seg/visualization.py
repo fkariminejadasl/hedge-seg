@@ -4,6 +4,7 @@ from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
 
@@ -166,33 +167,46 @@ def show_image_with_mask(image, mask, alpha=0.25):
     plt.show(block=False)
 
 
+# One colour per class, so a hedge is the same colour in every figure. Blue and
+# orange stay apart for colour-blind readers and against green vegetation.
+CLASS_COLORS = {0: "#2a78d6", 1: "#eb6834"}
+CLASS_NAMES = {0: "hedge", 1: "tree row"}
+
+
 def _read_polylines(polyline_path, score_thresh=None, class_id=None):
     """
-    Read one polyline file. `score_thresh` keeps only predictions scoring at or
-    above it, so a run inferred at 0.05 can be viewed at any higher threshold
-    without running inference again. Ground truth has no scores and is returned
-    whole.
+    Read one polyline file. Returns (polylines, labels), one class id per line.
+    A file without labels is a one-class file, so every line gets class 0.
+
+    `score_thresh` keeps only predictions scoring at or above it, so a run
+    inferred at 0.05 can be viewed at any higher threshold without running
+    inference again. Ground truth has no scores and is returned whole.
 
     `class_id` keeps one class of a multi-class file, for example only the
     hedges (0) of a run that also predicts tree rows (1), so its figure can be
-    compared with a hedge-only run. None draws every line.
+    compared with a hedge-only run. None keeps every line.
     """
     polyline_path = Path(polyline_path)
 
     if polyline_path.suffix == ".json":
         data = json.load(open(polyline_path))
-        if "polylines_px_resampled" in data:
-            return np.asarray(data["polylines_px_resampled"], dtype=float)
-        return np.asarray(data["polylines_px"], dtype=float)
+        key = (
+            "polylines_px_resampled"
+            if "polylines_px_resampled" in data
+            else "polylines_px"
+        )
+        polylines = np.asarray(data[key], dtype=float)
+        return polylines, np.zeros(len(polylines), dtype=int)
 
     data = np.load(polyline_path)
     polylines = data["polylines"] if "polylines" in data else data["polylines_px"]
+    labels = data["labels"] if "labels" in data else np.zeros(len(polylines), int)
     keep = np.ones(len(polylines), dtype=bool)
     if score_thresh is not None and "scores" in data:
         keep &= data["scores"] >= score_thresh
-    if class_id is not None and "labels" in data:
-        keep &= data["labels"] == class_id
-    return polylines[keep]
+    if class_id is not None:
+        keep &= labels == class_id
+    return polylines[keep], labels[keep]
 
 
 def _sample_id_from_path(path):
@@ -262,6 +276,7 @@ def show_polyline_grid(
     for ax in axes:
         ax.axis("off")
 
+    drawn = set()  # class ids drawn anywhere in the figure, for the legend
     for ax, i in zip(axes, ids):
         image_path = image_dir / image_pattern.format(i)
         polyline_path = _polyline_path_for_id(polyline_dir, i, polyline_pattern)
@@ -274,21 +289,39 @@ def show_polyline_grid(
 
         ax.imshow(image)
         if polyline_path.exists():
-            polylines = _read_polylines(polyline_path, score_thresh, class_id)
-            for polyline in polylines:
+            polylines, labels = _read_polylines(polyline_path, score_thresh, class_id)
+            for polyline, label in zip(polylines, labels):
                 polyline = np.asarray(polyline)
                 ax.plot(
                     polyline[:, 0],
                     polyline[:, 1],
                     "o-",
+                    color=CLASS_COLORS[int(label)],
                     alpha=0.65,
                     markersize=2,
                     linewidth=linewidth,
                 )
+                drawn.add(int(label))
 
         ax.set_title(f"pos_{i:06d}", fontsize=8, pad=0)
 
+    if class_id is not None:
+        title = f"{title}, {CLASS_NAMES[class_id]} only"
     fig.suptitle(title, fontsize=9)
+    # A legend only when the colour has to tell two classes apart. A one-class
+    # figure is named by its title.
+    if len(drawn) > 1:
+        handles = [
+            Line2D([], [], color=CLASS_COLORS[c], linewidth=2, label=CLASS_NAMES[c])
+            for c in sorted(drawn)
+        ]
+        fig.legend(
+            handles=handles,
+            loc="upper right",
+            ncol=len(handles),
+            fontsize=8,
+            frameon=False,
+        )
     fig.subplots_adjust(
         left=0.01, right=0.99, bottom=0.01, top=0.96, wspace=0.01, hspace=0.05
     )

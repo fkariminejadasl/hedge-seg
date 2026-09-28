@@ -19,6 +19,9 @@ runs: the exp 1 optimum is 0.95 and the exp 2 optimum is 0.90.
 `detr_unet_polyline_best_2_val_cluster_t.95.png`, with the ground truth as
 `detr_unet_polyline_gt_val_cluster_t.95.png`.
 
+Each line is coloured by its class, hedges blue and tree rows orange, with a
+legend when both are drawn. `class_id` shows one class only.
+
 `gt_only` skips the prediction figures. Press `n` on a figure for a fresh set of
 crops, `q` or close the windows to stop.
 
@@ -135,22 +138,25 @@ def main(cfg):
 
 if __name__ == "__main__":
     inference = DATA_ROOT / "pdok_dataset3_polylines/inference"
+    tree_inference = DATA_ROOT / "pdok_dataset3_tree_polylines/inference"
     cfg = dict(
         # One directory per run to view. The first one also supplies the ground
         # truth figure. Add or remove lines to compare different checkpoints.
         # Use the t0.05 runs: they hold every prediction, so score_thresh below
         # picks the operating point without re-running inference.
         run_dirs=[
-            inference / "best_2_val_cluster_t0.05",
-            inference / "1_150_val_cluster_t0.05",
+            # inference / "best_2_val_cluster_t0.05",
+            tree_inference
+            / "best_5_val_t0.05",
         ],
         image_dir=DATA_ROOT / "pdok_dataset3/images",
-        score_thresh=0.95,  # exp 1 optimum 0.95, exp 2 optimum 0.90
+        score_thresh=0.95,  # exp 1 optimum 0.95, exps 2, 4 and 5 optimum 0.90
         n=16,  # crops per figure, drawn as a 4x4 grid
         seed=42,  # same seed gives the same crops, so figures stay comparable
         gt_only=False,  # skip the prediction figures
-        # One class of a two-class run, 0 hedge or 1 tree row. None draws both.
-        # Use 0 to put a two-class run next to a hedge-only one.
+        # One class of a two-class run, 0 hedge or 1 tree row. None draws both,
+        # hedges in blue and tree rows in orange. Use 0 to put a two-class run
+        # next to a hedge-only one.
         class_id=None,
         # None picks at random. Paste a list from exps/probe_worst_crops.py,
         # e.g. [19018, 27324, 27068], to look at specific crops instead.

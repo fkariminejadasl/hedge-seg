@@ -13,7 +13,7 @@ Two checks:
 - checkpoints. Count lidar keys in real checkpoints, which says what a finished
   run actually saved rather than what the code would build.
 
-Result (2026-09-23):
+Result (2026-09-23, checkpoints re-run 2026-09-28 with exp 5 finished):
 
     build, 0 vs 7 lidar channels
       lidar keys                  0  against  9
@@ -24,6 +24,7 @@ Result (2026-09-23):
     checkpoints
       2/best_2.pt   0 lidar keys, head (2, 256), 14,397,534 + 5,771,788 = 20,169,322
       4/best_4.pt   9 lidar keys, head (3, 256), 14,397,534 + 5,839,914 = 20,237,448
+      5/best_5.pt   0 lidar keys, head (3, 256), 14,397,534 + 5,772,045 = 20,169,579
 
 Two things that look wrong and are not.
 
@@ -43,7 +44,9 @@ hedge-plus-tree-row head, and it is not a discrepancy between two counts of the
 same model.
 
 So lidar_path=None builds no branch at all and touches nothing else, and exp 5
-differs from exp 4 by those 67,869 parameters and nothing more.
+differs from exp 4 by those 67,869 parameters and nothing more. The trained
+best_5.pt confirms it: no lidar keys, and a head exactly 257 larger than
+exp 2's.
 
     /home/fatemeh/miniconda3/envs/hedge/bin/python exps/probe_lidar_branch_absent.py
 """
@@ -136,8 +139,6 @@ if __name__ == "__main__":
         # presence channel. main() reads it from the patch index file.
         n_lidar_channels=7,
         num_classes=2,  # exp 4 and exp 5; exp 2 used 1
-        # Add 5/best_5.pt once exp 5 has finished, to confirm the run that
-        # actually trained saved no lidar weights.
         checkpoints=[
             root / "2/best_2.pt",
             root / "4/best_4.pt",

@@ -138,38 +138,62 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 5 (running, job 27058081, submitted 2026-09-23 14:27, gpu_a100, git 8dab16d,
-  --time=16:00:00, 14:29/epoch so about 11 h, due about 01:25 on 2026-09-24):
-  the exp 4 ablation. Tree rows kept, lidar
-  off, so it differs from exp 4 by `lidar_path` alone and from exp 2 by the
-  second class plus the same four train crops. Everything else is the exp 4
-  recipe: frozen up3, cls_loss=ce, 45 epochs, batch 16, 26,900 train / 3,098 val
-  on the cluster.
+- 5 scored, 2026-09-28. **Did not win, and it names the culprit: the tree
+  rows.** Hedge F1 at 5 m 0.536 against exp 2's 0.553, at 10 m 0.689 against
+  0.699. Job 27058081, gpu_a100, git 8dab16d, all 45 epochs in 11:00:06
+  (14:30/epoch). Train 1.4607 / eval 1.5864 at epoch 45, which was also the
+  best eval, so `best_5.pt` and `5.pt` hold identical weights (all 292 tensors
+  equal) and only `best_5.pt` was inferred.
 
-  Config is one line, `lidar_path=None`, plus `exp="5"`.
+  The exp 4 ablation. Tree rows kept, lidar off, so it differs from exp 4 by
+  `lidar_path` alone and from exp 2 by the second class plus the same four
+  train crops. Everything else is the exp 4 recipe: frozen up3, cls_loss=ce, 45
+  epochs, batch 16, 26,900 train / 3,098 val on the cluster. Config is one line,
+  `lidar_path=None`, plus `exp="5"`.
 
-  Checked before submitting, `exps/probe_lidar_branch_absent.py`: with the lidar
-  off the model has no lidar keys where exp 4 has 9, the lidar branch is 67,869
-  parameters, every other key is identical, and the class head is (3, 256), two
-  classes plus the no-object column. So the run is a clean one-variable
-  ablation. Add `5/best_5.pt` to that probe when the run lands.
+  `exps/probe_lidar_branch_absent.py`, before and after: the finished
+  `best_5.pt` has 0 lidar keys where exp 4 has 9, class head (3, 256), and a
+  head exactly 257 parameters larger than exp 2's, which is the one extra class
+  row. The log has no `Lidar: 7 channels` line. So it is a clean one-variable
+  ablation.
 
-  Epoch 1 came out at train_total 2.1948 against exp 4's 2.1644, 1.4% apart,
-  which is the expected start: `LidarTokenEncoder` has a zero-initialised last
-  layer, so at step 0 exp 4 is the no-lidar model and the two only diverge as
-  the branch learns. The log has no `Lidar: 7 channels` line, which is the
-  direct confirmation the branch is off.
+  Hedge against hedge, all 3,098 val crops, `exps/probe_polyline_pr.py` (its
+  committed cfg lists exps 2 to 5). All three runs peak at t=0.90:
 
-  What it decides:
+  | run at t=0.90     | 5 m      | 10 m     | 15 m     | pred/img |
+  | ----------------- | -------- | -------- | -------- | -------- |
+  | exp 2 `best_2.pt` | **.553** | **.699** | .767     | 3.23     |
+  | exp 5 `best_5.pt` | .536     | .689     | .761     | 3.13     |
+  | exp 4 `best_4.pt` | .533     | .698     | **.773** | 3.26     |
 
-  | 5 m hedge F1  | reading                                                                        |
-  | ------------- | ------------------------------------------------------------------------------ |
-  | back to ~.553 | the lidar cost the fine detail; fall back to feeding it to the class head only |
-  | stays ~.533   | the second class cost it, and the lidar is not to blame                        |
+  The rule written before the run: 5 m back to about .553 means the lidar cost
+  it, staying at about .533 means the second class did. It stayed, at .536. So
+  the tree rows cost the fine detail, not the lidar. That reverses the reading
+  of exp 4.
 
-  Score the same way as exp 4: `exps/probe_polyline_pr.py` with
-  `classes={0: "hedge", 1: "tree row"}`, class 0 against class 0, on the same
-  3,098 val stems, sweeping the threshold.
+  - Tree rows alone lower hedge precision and recall together, 0.692 / 0.686
+    at 10 m against exp 2's 0.701 / 0.696. The 0.053 precision prize from
+    `exps/probe_treeline_overlap.py` did not appear.
+  - The lidar helps on top of tree rows. Hedges: +0.009 at 10 m, +0.012 at
+    15 m, 5 m flat. The tree row class gains more, .561 / .624 / .659 at 5 /
+    10 / 15 m against exp 4's .601 / .688 / .726.
+  - The clutter drop of exp 4 was the lidar: 12.00 hedge pred/img at t=0.05,
+    against exp 4's 10.70 and exp 2's 12.63.
+  - Perception unchanged: hedge recall at t=0.05 is 0.844, exp 2 0.840.
+  - The geometry shift of exp 4 was the tree rows: straightness 0.915 with
+    `bent<0.85` at 0.167, against exp 4's 0.913 / 0.169 and exp 2's 0.927 /
+    0.136.
+  - Tree rows are drawn too rarely: 1.18 per crop at t=0.90 against 1.49 in the
+    labels, recall 0.564 at 10 m. At t=0.95 only 0.21 per crop are left
+    (recall 0.447), so a figure at 0.95 shows almost none.
+
+  No run has been repeated with another seed, so the run-to-run noise is
+  unknown and gaps under about 0.01 could be chance. The 5 m drop appears in
+  both tree runs, -0.017 and -0.020, which is more convincing than either alone.
+
+  Inference run kept at
+  `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_tree_polylines/inference/best_5_val_t0.05`,
+  at `infer_score_thresh=0.05`.
 
 - 4 scored, 2026-09-23. **Did not win.** Hedge F1 at 10 m 0.698 against exp 2's
   0.699, at 5 m 0.533 against 0.553. Job 26834940, gpu_a100, git 9db4a10, all 45
@@ -197,8 +221,8 @@ bbox 3900/903.
   **This is the blur signature the lidar section of docs/lesson_learned.md said
   to watch for**: 5 m down 0.020, 10 m flat, 15 m up 0.006. Written down before
   the run, so it is a prediction, not a story told afterwards. Exp 4 moved two
-  things at once, so it does not say which one did it. The ablations are one
-  config line each.
+  things at once, so it does not say which one did it. Exp 5 did: the tree
+  rows, not the lidar.
 
   Not all bad. Recall rose at every threshold (0.703 against 0.696 at t=0.90,
   0.845 against 0.840 at t=0.05) and precision fell (0.693 against 0.701). The
@@ -209,8 +233,9 @@ bbox 3900/903.
 
   The tree row class works on its own terms, at t=0.90: 0.601 at 5 m,
   **0.688** at 10 m, 0.726 at 15 m, 1.55 pred/img against 1.49 GT. It is
-  localised more tightly than the hedge class is (5 m 0.601 against 0.533), so
-  the second class is not what is costing the 5 m number.
+  localised more tightly than the hedge class is (5 m 0.601 against 0.533).
+  That was read as the second class not costing the 5 m number; exp 5 showed it
+  does.
 
   **The last epoch did not win this time.** `best_4.pt` (ep 40) beats `4.pt`
   (ep 45) by 0.001 at 10 m, which is a tie. The last epoch had won the only two
@@ -249,13 +274,13 @@ bbox 3900/903.
   `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_tree_polylines/inference/{best_4,4}_val_t0.05`,
   both at `infer_score_thresh=0.05` so the threshold sweeps both ways.
 
-  Next, to find out which of the two changes cost the 5 m number. One config
-  line each in `scripts/train_detr_unet_polyline.py`, no code edit:
+  The two ablations, one config line each in
+  `scripts/train_detr_unet_polyline.py`, no code edit:
 
-  | run        | polyline dir                 | num_classes | lidar_path |
-  | ---------- | ---------------------------- | ----------- | ---------- |
-  | trees only | pdok_dataset3_tree_polylines | 2           | None       |
-  | lidar only | pdok_dataset3_polylines      | 1           | set        |
+  | run                | polyline dir                 | num_classes | lidar_path |
+  | ------------------ | ---------------------------- | ----------- | ---------- |
+  | trees only (exp 5) | pdok_dataset3_tree_polylines | 2           | None       |
+  | lidar only, to do  | pdok_dataset3_polylines      | 1           | set        |
 
 - 3 scored, 2026-08-11. **Lost.** Best F1 at 10 m 0.664 against exp 2's 0.699.
   Both checkpoints, all 3,098 val crops, `exps/probe_polyline_pr.py`:

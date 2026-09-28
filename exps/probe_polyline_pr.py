@@ -21,6 +21,11 @@ docs/experiments_log.md.
   (+0.02), and nothing at all on crowded crops.
 - exp 2's best threshold is 0.90, not 0.95: 0.701/0.696 F1 0.699 at 10 m. The
   optimum moves with the model, so re-sweep after any change.
+- Tree rows as class 1, hedge against hedge at t=0.90, F1 at 5 / 10 / 15 m:
+  exp 2 (hedges only) 0.553 / 0.699 / 0.767, exp 5 (plus tree rows) 0.536 /
+  0.689 / 0.761, exp 4 (plus tree rows and lidar) 0.533 / 0.698 / 0.773. The
+  tree rows cost the 5 m number; the lidar then won back 10 and 15 m. The tree
+  row class at 10 m is 0.624 without lidar and 0.688 with it.
 - Buffered length at 10 m within exp 1: best_1.pt 0.75/0.52 (F1 0.614),
   1_150.pt 0.70/0.59 (F1 0.640). 1_150.pt wins at every buffer, so the
   checkpoint the eval loss calls overfit is the better detector. Rank by this
@@ -207,6 +212,14 @@ def main(cfg):
         print(f"=== {run_dir.name}  ({len(items)} crops, reported at t={thresh}) ===")
 
         for class_id, name in classes.items():
+            # A one-class run has no tree row labels. Scoring that class would
+            # give 1.0 on every crop, nothing there and nothing drawn, so skip it.
+            if class_id is not None and not any(
+                item["gt_labels"] is not None and (item["gt_labels"] == class_id).any()
+                for item in items
+            ):
+                print(f" no {name} labels in this run, skipped")
+                continue
             class_rows = score(items, score_thresh=thresh, class_id=class_id)
             n_pred = np.mean([r["n_pred"] for r in class_rows])
             n_gt = np.mean([r["n_gt"] for r in class_rows])
@@ -264,23 +277,28 @@ def main(cfg):
 
 if __name__ == "__main__":
     root = DATA_ROOT / "pdok_dataset3_polylines"
+    tree = DATA_ROOT / "pdok_dataset3_tree_polylines"
     cfg = dict(
+        # All four hold the same 3,098 val stems, so they can be listed together.
         run_dirs=[
             root / "inference/best_2_val_cluster_t0.05",  # exp 2, softmax head
             root / "inference/best_3_val_cluster_t0.05",  # exp 3, focal head
+            tree / "inference/best_4_val_t0.05",  # exp 4, tree rows and lidar
+            tree / "inference/best_5_val_t0.05",  # exp 5, tree rows, no lidar
         ],
-        # Which classes to score, each against its own labels. None (or an empty
-        # dict) scores every line together, which is right for the one-class
-        # runs 1 to 3. For a two-class run use {0: "hedge", 1: "tree row"}: the
-        # hedge row is then directly comparable with exp 2, and the detail
-        # sections below follow the first class listed.
-        classes=None,  # {0: "hedge", 1: "tree row"} for exp 4
+        # Which classes to score, each against its own labels. With
+        # {0: "hedge", 1: "tree row"} the hedge row of a two-class run is
+        # directly comparable with a one-class run, whose lines are all class 0.
+        # A class with no labels in a run is skipped. The detail sections below
+        # follow the first class listed. None scores every line together.
+        classes={0: "hedge", 1: "tree row"},
         # Written by exps/probe_recreation_crops.py. Missing file just skips
         # the campsite rows.
         recreation_stems=root / "recreation_crops_val_cluster.txt",
         # Headline threshold. The run directories were inferred at 0.05 so the
-        # sweep has something to sweep; 0.95 is the operating point run 1 uses.
-        report_thresh=0.95,
+        # sweep has something to sweep. 0.90 is the optimum of exps 2, 4 and 5;
+        # run 1 used 0.95 and exp 3 peaks at 0.40.
+        report_thresh=0.90,
         sweep=True,  # needs a run inferred at a low threshold
         # chamfer and merge_gt validate the metric itself, not a run. They were
         # settled on exp 1 (F1 0.41 against 0.64, and 0.001) and cost about
