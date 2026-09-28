@@ -32,13 +32,19 @@
 - When asked to diagnose, diagnose first and do not change code until asked.
 - Say which files were inspected before answering a question about the repo.
 
-## Report files touched outside git status
+## Reporting a result
 
 - **Report files touched outside `git status`.** Finish any task that ran,
   copied or scored something with a list of what changed outside the repo:
   directories created, with sizes; and any tracked file edited in place and
   then restored, naming the fields changed. A file that was edited and restored
   still has to be named, because it is how the numbers were produced.
+- **Report the commands that produced a result, and what was checked.** Give
+  the commands that actually ran, in order, in one code block, with a short
+  comment above each saying what it does. Long paths may be shortened. Then
+  list what was checked and what it showed, for example that the job exited 0,
+  that two checkpoints hold the same weights, or that an old run reproduces its
+  logged numbers. Say which tests ran, and if none ran, say so and why.
 
 ## Committing
 
