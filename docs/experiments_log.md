@@ -143,7 +143,9 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 6 (prepared 2026-09-28, not yet submitted): lidar only, the other ablation of
+- 6 (running, job 27303687, submitted 2026-09-28 16:39, gpu_a100, git 1b66da6,
+  --time=16:00:00, 14:39/epoch so about 11 h, due about 03:45 on 2026-09-29):
+  lidar only, the other ablation of
   exp 4. Hedges-only `pdok_dataset3_polylines`, num_classes=1, `lidar_path`
   set. Everything else is the exp 4 recipe: frozen up3, cls_loss=ce, 45
   epochs, batch 16. Train is the same 26,900 crops as exps 4 and 5 (the two
@@ -158,6 +160,12 @@ bbox 3900/903.
   configuration: lidar branch inert at initialisation and learning after 3
   steps, 6 epochs in 48 s, and the checkpoint has 9 lidar keys and class head
   (2, 256), one class plus the no-object column.
+
+  The log shows `Lidar: 7 channels` and `train=26900, val=3098`, so the branch
+  is on and no crop was missing a patch. Epoch 1 train_total 1.8004 against
+  exp 2's 1.8175, 0.9% apart (ce 0.2486 against 0.2567, poly 0.0945 against
+  0.0944). That is the expected start: the lidar branch is zero-initialised, so
+  at step 0 this is the exp 2 model.
 
   What it decides, hedge F1 at 10 m against exp 2's 0.699, both at their best
   threshold:

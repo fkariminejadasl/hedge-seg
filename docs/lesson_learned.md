@@ -1047,7 +1047,7 @@ against 0.731 on crops with one). So the next runs should target perception.
   stage at stride 8. Memory is available: batch 16 uses 5.8 of 40 GB, and
   stride 8 is 4x the tokens. This is the most direct attack on the real limit.
 
-- Exp 6, prepared: lidar only, the last ablation of exp 4.
+- Exp 6, running (job 27303687): lidar only, the last ablation of exp 4.
   `pdok_dataset3_polylines`, num_classes=1, lidar_path set, no code change.
   Exp 5 shows the lidar helps on top of tree rows; this says whether it helps
   hedges on their own. The two train crops without a lidar patch,
