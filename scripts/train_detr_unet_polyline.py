@@ -2539,35 +2539,38 @@ if __name__ == "__main__":
         # overrides: exp="<n>_laptop", num_workers=4, eval_every=10,
         # n_val_subset=1000 (its val split is leakier, so full val is not the
         # honest number anyway).
-        exp="5",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
+        exp="6",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
         save_path=EXP_ROOT / "detr_unet_polyline",
         # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
         # which writes geographically split polylines/{train,val} directories)
         #
         # Exp 4 turned on tree rows and lidar together and did not beat exp 2:
         # hedge F1 0.698 at 10 m against 0.699, and 0.533 at 5 m against 0.553.
-        # Exp 5 is the ablation that says which of the two cost the 5 m number.
-        # It keeps the tree rows and switches the lidar off, so it differs from
-        # exp 4 by lidar_path alone. With lidar_path=None no lidar branch is
-        # built, so the model is the exp 2 model with a two-class head.
-        # Result: the tree rows cost it, not the lidar. Exp 5 hedge F1 is 0.536
-        # at 5 m and 0.689 at 10 m (exps/probe_polyline_pr.py).
+        # Exp 5 kept the tree rows and switched the lidar off: the tree rows
+        # cost the 5 m number, not the lidar (hedge F1 0.536 at 5 m, 0.689 at
+        # 10 m, exps/probe_polyline_pr.py).
+        # Exp 6 is the other ablation: hedges only, one class, lidar on. It says
+        # whether the lidar helps hedges without the tree rows. It trains on the
+        # same 26,900 crops as exps 4 and 5, so it differs from exp 4 by the tree
+        # rows alone, and from exp 2 by the lidar plus two crops.
         #
         #   run          | polyline dir                 | num_classes | lidar_path
         #   exp 2        | pdok_dataset3_polylines      | 1           | None
-        #   exp 5 (here) | pdok_dataset3_tree_polylines | 2           | None
-        #   lidar only   | pdok_dataset3_polylines      | 1           | set
+        #   exp 5        | pdok_dataset3_tree_polylines | 2           | None
+        #   exp 6 (here) | pdok_dataset3_polylines      | 1           | set
         #   exp 4        | pdok_dataset3_tree_polylines | 2           | set
         image_dir=DATA_ROOT / "pdok_dataset3/images",
-        train_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/train",
-        val_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
+        train_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/train",
+        val_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         pad_to=1024,  # images zero-padded 1000 -> 1024 (divisible by 32)
         # Lidar patches from scripts/data/build_lidar_patches.py, keyed by stem,
         # so one file serves any split. None switches the branch off and the
         # model is then exactly the exp 2 model. A crop with no patch is an
         # error, so a partial .npy only works with a matching polyline
         # directory (see exps/probe_lidar_crop_alignment.py).
-        lidar_path=None,  # exp 5 ablation; set to the .npy to put lidar back
+        # On the cluster, pos_030002 and pos_030003 of the hedges train split
+        # have no patch. For exp 6 they were moved to polylines/excluded_no_lidar.
+        lidar_path=DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy",
         lidar_stride=16,  # must equal the feature stride, so 1024 -> 64x64
         augment=True,  # flip/rot90 of image + polylines (train split only)
         # exp 2 is the data-scaling A/B against exp 1: full train split instead
@@ -2576,7 +2579,7 @@ if __name__ == "__main__":
         # started from exp 1: those 5,000 crops are a subset of these 26,902 and
         # exp 1 had begun memorising them by epoch 65, so its weights would bias
         # the result.
-        n_train_subset=None,  # None = full train split (26,902 on the cluster)
+        n_train_subset=None,  # None = full train split (26,900 on the cluster)
         n_val_subset=None,  # None = full val split; subset only speeds up eval
         # backbone
         backbone_ckpt=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
@@ -2587,7 +2590,7 @@ if __name__ == "__main__":
         # 2 for the tree-row dataset (0 hedge, 1 tree row), 1 for the
         # hedges-only one. Tree rows add 1.3 lines per crop on top of 3.6
         # hedges, so 60 queries are still ample.
-        num_classes=2,
+        num_classes=1,
         # base model
         d_model=256,
         nhead=8,

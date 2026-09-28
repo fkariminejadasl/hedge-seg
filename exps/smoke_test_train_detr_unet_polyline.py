@@ -8,8 +8,10 @@ script); the test fails (times out) if that regresses. It also exercises the
 whole pipeline end to end: backbone checkpoint load, image dataset, augmentation,
 forward/backward/optimizer, matcher, eval, and checkpoint saving.
 
-It runs the two-class tree dataset with the lidar branch on, so it covers the
-exp 4 configuration. Before the training run it checks the lidar branch itself
+It runs the hedges-only dataset with one class and the lidar branch on, so it
+covers the exp 6 configuration. For exp 4, two classes with lidar, point the
+polyline directories at pdok_dataset3_tree_polylines and set num_classes=2.
+Before the training run it checks the lidar branch itself
 (`check_lidar_branch`), because two of its properties cannot be seen from a loss
 curve: the branch is exactly inert at initialisation, and it does receive
 gradients. Without the first, a lidar run would not be comparable with a
@@ -132,11 +134,11 @@ def main():
         exp="smoke",
         save_path=scratch,
         image_dir=DATA_ROOT / "pdok_dataset3/images",
-        train_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/train",
-        val_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
+        train_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/train",
+        val_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         pad_to=1024,
         augment=True,
-        # Lidar on, the exp 4 setting. Needs the full patch file: a crop
+        # Lidar on, the exp 6 setting. Needs the full patch file: a crop
         # without a patch stops the dataset, which is right during training.
         lidar_path=DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy",
         lidar_stride=16,
@@ -145,7 +147,7 @@ def main():
         freeze_backbone=True,
         num_points=20,
         num_polylines=60,
-        num_classes=2,  # 0 hedge, 1 tree row, the exp 4 dataset
+        num_classes=1,  # hedges only, the exp 6 dataset
         d_model=256,
         nhead=8,
         num_encoder_layers=1,
@@ -190,7 +192,7 @@ def main():
         preview_out_dir=scratch / "preview",
         preview_n=2,
         infer_ckpt=None,
-        infer_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
+        infer_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         infer_out_dir=scratch / "inference",
         infer_score_thresh=0.5,
         infer_topk=60,

@@ -36,6 +36,11 @@ forgotten:
   `pos_030002` or `pos_030003`. Check both machines with
   `exps/probe_dataset_stem_mismatch.py` before using a dataset across them.
   Reason in `docs/lesson_learned.md`.
+- **On the cluster, `pdok_dataset3_polylines/polylines/train` is 26,900
+  crops since 2026-09-28, not 26,902.** For exp 6, `pos_030002.npz` and
+  `pos_030003.npz` were moved to `polylines/excluded_no_lidar/`, because they
+  have no lidar patch. Move them back to rerun exps 1 to 3 on their exact
+  crops.
 - `Actueel_ortho25` is not a fixed layer. It is bit-identical to
   `2025_ortho25` today and will silently become 2026 imagery later. **Rebuilding
   `pdok_dataset3` from `Actueel_ortho25` will not reproduce it.** Use
@@ -137,6 +142,37 @@ bbox 3900/903.
 - 5: 30000 img (24000/6000), centerline_weight=0, threshold=.1, 50 ep, batch=32, pdok_dataset_semseg3 (0:08:27/ep). checked only 1 epoch.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
+
+- 6 (prepared 2026-09-28, not yet submitted): lidar only, the other ablation of
+  exp 4. Hedges-only `pdok_dataset3_polylines`, num_classes=1, `lidar_path`
+  set. Everything else is the exp 4 recipe: frozen up3, cls_loss=ce, 45
+  epochs, batch 16. Train is the same 26,900 crops as exps 4 and 5 (the two
+  crops without a lidar patch moved aside, see the dataset notes above), val
+  the same 3,098. So it differs from exp 4 by the tree rows alone, and from
+  exp 2 by the lidar plus those two crops.
+
+  Config is four lines: the two polyline directories, num_classes=1,
+  `lidar_path` set, plus `exp="6"`.
+
+  Smoke test, `exps/smoke_test_train_detr_unet_polyline.py`, now set to this
+  configuration: lidar branch inert at initialisation and learning after 3
+  steps, 6 epochs in 48 s, and the checkpoint has 9 lidar keys and class head
+  (2, 256), one class plus the no-object column.
+
+  What it decides, hedge F1 at 10 m against exp 2's 0.699, both at their best
+  threshold:
+
+  | hedge F1 at 10 m | reading                                   |
+  | ---------------- | ----------------------------------------- |
+  | 0.72 or more     | the lidar helps hedges on their own       |
+  | 0.68 to 0.72     | no measurable effect, inside the 0.02 bar |
+  | under 0.68       | the lidar hurts hedges on their own       |
+
+  Watch 5 m too. A lidar that blurs lines shows as 5 m falling under exp 2's
+  0.553 while 10 m holds; exp 4 against exp 5 left 5 m flat.
+
+  Score like exp 2: infer on `pdok_dataset3_polylines/polylines/val_cluster`
+  at `infer_score_thresh=0.05`, add the run to `exps/probe_polyline_pr.py`.
 
 - 5 scored, 2026-09-28. **Did not win, and it names the culprit: the tree
   rows.** Hedge F1 at 5 m 0.536 against exp 2's 0.553, at 10 m 0.689 against
