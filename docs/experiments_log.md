@@ -180,6 +180,9 @@ bbox 3900/903.
   11 h. The log shows train=26902, val=3098, one optimizer group at lr 1e-4,
   and no lidar line.
 
+  Exp 8: job 27354074, gpu_a100, git ad56c71, --time=30:00:00, started
+  2026-09-29 14:47, about 22 h. Same log lines as exp 7, for 90 epochs.
+
   Exp 7 matches exp 2 in every cfg value but the seed: the only other
   differences are keys added later, whose values give exp 2's behaviour
   (`cls_loss="ce"`, `loss_ce=1.0`, lidar off).

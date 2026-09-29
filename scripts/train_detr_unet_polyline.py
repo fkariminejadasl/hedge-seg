@@ -2562,7 +2562,7 @@ if __name__ == "__main__":
         # overrides: exp="<n>_laptop", num_workers=4, eval_every=10,
         # n_val_subset=1000 (its val split is leakier, so full val is not the
         # honest number anyway).
-        exp="8",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
+        exp="9",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
         save_path=EXP_ROOT / "detr_unet_polyline",
         # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
         # which writes geographically split polylines/{train,val} directories)
@@ -2574,8 +2574,8 @@ if __name__ == "__main__":
         #
         #   run          | change from exp 2                       | why
         #   exp 7        | seed=43                                 | how much luck moves F1
-        #   exp 8 (here) | n_epochs=90                             | F1 rose until the lr ran out
-        #   exp 9        | freeze_backbone=False, backbone_lr=1e-5 | backbone never trained here
+        #   exp 8        | n_epochs=90                             | F1 rose until the lr ran out
+        #   exp 9 (here) | freeze_backbone=False, backbone_lr=1e-5 | backbone never trained here
         #
         #   run          | polyline dir                 | num_classes | lidar_path
         #   exp 2        | pdok_dataset3_polylines      | 1           | None
@@ -2609,10 +2609,10 @@ if __name__ == "__main__":
         # backbone
         backbone_ckpt=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
         feature_stage="up3",  # "up3": stride 16, 64x64 tokens; "enc4": stride 32, 32x32
-        freeze_backbone=True,
+        freeze_backbone=False,  # exp 9: the backbone trains too
         # Learning rate of the backbone when it trains (freeze_backbone=False).
         # None means max_lr. Unused while the backbone is frozen.
-        backbone_lr=None,
+        backbone_lr=1e-5,  # exp 9: 10x below max_lr, as in DETR
         num_points=20,
         num_polylines=60,  # polyline instance queries (max ~50 GT per image)
         # 2 for the tree-row dataset (0 hedge, 1 tree row), 1 for the
@@ -2680,7 +2680,7 @@ if __name__ == "__main__":
         # 45 epochs is about 10.5 h. 45 epochs is also 1.2M image presentations
         # against exp 1's 750k, comfortably past the point where exp 1 turned
         # over by eval loss.
-        n_epochs=90,  # exp 8: the only change from exp 2, which ran 45
+        n_epochs=45,  # exp 8 ran 90
         batch_size=16,  # images are 1024x1024; up3 gives 4096 tokens
         num_workers=8,  # 8 train + 8 eval = 16 procs for the 18 CPUs of an A100
         max_lr=1e-4,
