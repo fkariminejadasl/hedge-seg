@@ -145,8 +145,9 @@ bbox 3900/903.
 
 - 6 scored, 2026-09-29. **Lidar alone did not make hedges better.** Hedge F1
   at 10 m is 0.703, against 0.699 for exp 2. The gap, 0.004, is too small to
-  count. Our rule is that a run must win by at least 0.02, because we have not
-  measured how much two runs with the same settings differ.
+  count. The bar chosen before exp 4 is 0.02. Drawing the val crops again at
+  random moves this gap by about 0.005 either way, so it could be zero
+  (`exps/probe_f1_gap_bootstrap.py`).
 
   Setup: hedges only (`pdok_dataset3_polylines`), one class, lidar on. The rest
   is the exp 4 recipe. The same 26,900 train crops as exps 4 and 5, and the

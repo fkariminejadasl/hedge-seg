@@ -261,6 +261,23 @@ threshold beside every number, and compare two runs either at one shared
 threshold or each at its own optimum, never one of each.
 *(`exps/probe_polyline_pr.py`)*
 
+## How big a gap has to be before it counts
+
+F1 runs from 0 to 1. At 10 m exp 6 scored 0.703 and exp 2 0.699, a gap of
+0.004. A gap can come from two kinds of luck:
+
+- **Which crops are in the val set.** Measured. Drawing the 3,098 crops again
+  at random moves a gap between two runs by about 0.003, so about 0.005 either
+  way covers 95% of draws. The exp 6 gap at 10 m could be zero on this count
+  alone. The exp 5 loss at 5 m, 0.017, could not.
+- **The random start of training.** Not measured. It needs one run, say exp 2,
+  trained again with another seed.
+
+The 0.02 bar was chosen when exp 4 was planned; nobody measured it. It is about
+seven times the first kind of luck, which leaves room for the second. Replace
+it with a measured number once one run has a second seed.
+*(`exps/probe_f1_gap_bootstrap.py`)*
+
 ## No cheap measure can rank two checkpoints, so build the real one
 
 Cluster run 1, two checkpoints, same cluster-val crops at threshold 0.95. Three
@@ -1037,10 +1054,9 @@ Phase C — tree rows and lidar:
 
 Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
 
-Exp 3 lost (0.664). Exps 4 to 6 did not beat exp 2 by the 0.02 we need
-(0.698, 0.689, 0.703). We need that much because we have not measured how
-much two runs with the same settings differ. Exp 2 `best_2.pt` at t=0.90
-stays the baseline.
+Exp 3 lost (0.664). Exps 4 to 6 did not beat exp 2 by the 0.02 bar
+(0.698, 0.689, 0.703). See "How big a gap has to be before it counts".
+Exp 2 `best_2.pt` at t=0.90 stays the baseline.
 
 The bottleneck is that the model does not draw enough correct lines, worst
 where crops are crowded (exp 2 recall 0.372 on crops with 7+ labelled lines
