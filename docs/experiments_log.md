@@ -143,7 +143,7 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 7, 8, 9 (prepared 2026-09-29, submitted one after the other): back to the
+- 7, 8, 9 (running, all submitted 2026-09-29): back to the
   exp 2 recipe, hedges only, no lidar, 26,902 train crops, and one change each.
   All three run at the same time, because the cluster is down on Thursday and
   Friday.
@@ -182,6 +182,12 @@ bbox 3900/903.
 
   Exp 8: job 27354074, gpu_a100, git ad56c71, --time=30:00:00, started
   2026-09-29 14:47, about 22 h. Same log lines as exp 7, for 90 epochs.
+
+  Exp 9: job 27354321, gpu_a100, git a383742, --time=24:00:00, started
+  2026-09-29 14:58. The log shows 20.2M trainable weights: the head, 5.8M at
+  lr 1e-4, and the backbone, 14.4M at lr 1e-5. Epoch 1 took 17:07, so about 13 h,
+  due about 04:00 on 2026-09-30. Epoch 1 train_total 1.7805 against exp 2's
+  1.8175.
 
   Exp 7 matches exp 2 in every cfg value but the seed: the only other
   differences are keys added later, whose values give exp 2's behaviour
