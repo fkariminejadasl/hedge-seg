@@ -2562,7 +2562,7 @@ if __name__ == "__main__":
         # overrides: exp="<n>_laptop", num_workers=4, eval_every=10,
         # n_val_subset=1000 (its val split is leakier, so full val is not the
         # honest number anyway).
-        exp="7",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
+        exp="8",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
         save_path=EXP_ROOT / "detr_unet_polyline",
         # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
         # which writes geographically split polylines/{train,val} directories)
@@ -2573,8 +2573,8 @@ if __name__ == "__main__":
         # each changes one thing:
         #
         #   run          | change from exp 2                       | why
-        #   exp 7 (here) | seed=43                                 | how much luck moves F1
-        #   exp 8        | n_epochs=90                             | F1 rose until the lr ran out
+        #   exp 7        | seed=43                                 | how much luck moves F1
+        #   exp 8 (here) | n_epochs=90                             | F1 rose until the lr ran out
         #   exp 9        | freeze_backbone=False, backbone_lr=1e-5 | backbone never trained here
         #
         #   run          | polyline dir                 | num_classes | lidar_path
@@ -2680,7 +2680,7 @@ if __name__ == "__main__":
         # 45 epochs is about 10.5 h. 45 epochs is also 1.2M image presentations
         # against exp 1's 750k, comfortably past the point where exp 1 turned
         # over by eval loss.
-        n_epochs=45,
+        n_epochs=90,  # exp 8: the only change from exp 2, which ran 45
         batch_size=16,  # images are 1024x1024; up3 gives 4096 tokens
         num_workers=8,  # 8 train + 8 eval = 16 procs for the 18 CPUs of an A100
         max_lr=1e-4,
@@ -2691,7 +2691,7 @@ if __name__ == "__main__":
         # best_1.pt). Keep enough checkpoints to score.
         save_every=10,
         eval_every=5,  # evaluate every k epochs (best checkpoint only on eval epochs)
-        seed=43,  # exp 7: the only change from exp 2, which used 42
+        seed=42,  # exp 7 used 43
         # checkpoints
         resume_ckpt=None,
         # preview

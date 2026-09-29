@@ -176,6 +176,10 @@ bbox 3900/903.
   image against 0.35, so batch 16 needs about 14 GB and fits on an A100. About
   1.3 times the time per image, so about 14 h for 45 epochs.
 
+  Exp 7: job 27354007, gpu_a100, git 9c149f7, started 2026-09-29 14:44, about
+  11 h. The log shows train=26902, val=3098, one optimizer group at lr 1e-4,
+  and no lidar line.
+
   Exp 7 matches exp 2 in every cfg value but the seed: the only other
   differences are keys added later, whose values give exp 2's behaviour
   (`cls_loss="ce"`, `loss_ce=1.0`, lidar off).
