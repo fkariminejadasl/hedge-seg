@@ -36,11 +36,11 @@ forgotten:
   `pos_030002` or `pos_030003`. Check both machines with
   `exps/probe_dataset_stem_mismatch.py` before using a dataset across them.
   Reason in `docs/lesson_learned.md`.
-- **On the cluster, `pdok_dataset3_polylines/polylines/train` is 26,900
-  crops since 2026-09-28, not 26,902.** For exp 6, `pos_030002.npz` and
-  `pos_030003.npz` were moved to `polylines/excluded_no_lidar/`, because they
-  have no lidar patch. Move them back to rerun exps 1 to 3 on their exact
-  crops.
+- **`pos_030002` and `pos_030003` have no lidar patch.** For exp 6 they were
+  moved out of the cluster's `pdok_dataset3_polylines/polylines/train`, so it
+  trained on 26,900 crops. On 2026-09-29 they were moved back for exps 7 to 9,
+  which have no lidar, so the split is 26,902 again, exactly exp 2's. A lidar
+  run needs them moved out again.
 - `Actueel_ortho25` is not a fixed layer. It is bit-identical to
   `2025_ortho25` today and will silently become 2026 imagery later. **Rebuilding
   `pdok_dataset3` from `Actueel_ortho25` will not reproduce it.** Use
@@ -142,6 +142,43 @@ bbox 3900/903.
 - 5: 30000 img (24000/6000), centerline_weight=0, threshold=.1, 50 ep, batch=32, pdok_dataset_semseg3 (0:08:27/ep). checked only 1 epoch.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
+
+- 7, 8, 9 (prepared 2026-09-29, submitted one after the other): back to the
+  exp 2 recipe, hedges only, no lidar, 26,902 train crops, and one change each.
+  All three run at the same time, because the cluster is down on Thursday and
+  Friday.
+
+  | exp | change from exp 2                       | question                         |
+  | --- | --------------------------------------- | -------------------------------- |
+  | 7   | seed=43                                 | how much does luck move F1?      |
+  | 8   | n_epochs=90                             | does training longer help?       |
+  | 9   | freeze_backbone=False, backbone_lr=1e-5 | does training the backbone help? |
+
+  Why each one:
+
+  - Exp 7. Without it no gap under about 0.02 can be read.
+    `exps/probe_f1_gap_bootstrap.py` measures only the val crop part of the
+    luck; this measures the training part.
+  - Exp 8. Exp 6 F1 at 10 m by epoch: 0.667 at 20, 0.687 at 30, 0.703 at 40,
+    0.703 at 45. It rose about 0.02 per 10 epochs and stopped when the
+    learning rate was down to 4% of its start. So the stop may be the
+    schedule, not the model (`exps/probe_f1_by_epoch.py`).
+  - Exp 9. Exps 3 to 6 changed only what comes after the backbone, and none
+    moved hedge F1 by more than 0.01. The backbone learned from 4,000 crops,
+    for masks, and has never trained on this task. Missing hedges are a
+    seeing problem, which is the backbone's job.
+
+  Exp 9 checks, on the laptop. `build_optimizer` gives the backbone its own
+  group: 14.4 M weights at 1e-5, next to 5.8 M at 1e-4. The smoke test ran
+  with the backbone training, and 110 of its 142 tensors moved; the 32 that
+  did not are the UNet layers after up3 (up2, up1, up0, head), which the model
+  does not use. `exps/probe_batch_size.py` with `FROZEN=False`: 0.83 GB per
+  image against 0.35, so batch 16 needs about 14 GB and fits on an A100. About
+  1.3 times the time per image, so about 14 h for 45 epochs.
+
+  Exp 7 matches exp 2 in every cfg value but the seed: the only other
+  differences are keys added later, whose values give exp 2's behaviour
+  (`cls_loss="ce"`, `loss_ce=1.0`, lidar off).
 
 - 6 scored, 2026-09-29. **Lidar alone did not make hedges better.** Hedge F1
   at 10 m is 0.703, against 0.699 for exp 2. The gap, 0.004, is too small to

@@ -8,9 +8,11 @@ script); the test fails (times out) if that regresses. It also exercises the
 whole pipeline end to end: backbone checkpoint load, image dataset, augmentation,
 forward/backward/optimizer, matcher, eval, and checkpoint saving.
 
-It runs the hedges-only dataset with one class and the lidar branch on, so it
-covers the exp 6 configuration. For exp 4, two classes with lidar, point the
-polyline directories at pdok_dataset3_tree_polylines and set num_classes=2.
+It runs the hedges-only dataset with one class and no lidar, the exps 7 to 9
+configuration. FREEZE_BACKBONE=False with BACKBONE_LR set covers exp 9, which
+trains the backbone too; it needs more GPU memory, so lower BATCH_SIZE on the
+laptop. For exp 6 set lidar_path; for exp 4 also point the polyline
+directories at pdok_dataset3_tree_polylines and set num_classes=2.
 Before the training run it checks the lidar branch itself
 (`check_lidar_branch`), because two of its properties cannot be seen from a loss
 curve: the branch is exactly inert at initialisation, and it does receive
@@ -49,6 +51,8 @@ N_VAL = 64
 BATCH_SIZE = 16
 NUM_WORKERS = 4
 TIMEOUT_S = 600  # a healthy run finishes in well under a minute on any GPU
+FREEZE_BACKBONE = True  # False: the backbone trains too, as in exp 9
+BACKBONE_LR = None  # its learning rate then; None means max_lr
 
 
 def check_lidar_branch(n_lidar_channels=7, grid=8, num_polylines=4, num_points=20):
@@ -138,16 +142,17 @@ def main():
         val_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         pad_to=1024,
         augment=True,
-        # Lidar on, the exp 6 setting. Needs the full patch file: a crop
-        # without a patch stops the dataset, which is right during training.
-        lidar_path=DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy",
+        # Lidar off, the exps 7 to 9 setting. With lidar on it needs the full
+        # patch file: a crop without a patch stops the dataset.
+        lidar_path=None,
         lidar_stride=16,
         backbone_ckpt=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
         feature_stage="up3",
-        freeze_backbone=True,
+        freeze_backbone=FREEZE_BACKBONE,
+        backbone_lr=BACKBONE_LR,
         num_points=20,
         num_polylines=60,
-        num_classes=1,  # hedges only, the exp 6 dataset
+        num_classes=1,  # hedges only, the exps 6 to 9 dataset
         d_model=256,
         nhead=8,
         num_encoder_layers=1,

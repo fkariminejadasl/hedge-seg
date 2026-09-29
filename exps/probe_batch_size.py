@@ -25,6 +25,9 @@ BATCH_SIZES = [4, 8, 16, 24, 32, 48, 64]
 FEATURE_STAGE = "up3"
 NUM_POLYLINES = 60
 N_STEPS = 3
+# False measures a run that trains the backbone too (exp 9). That keeps the
+# backbone activations for backward, so peak memory is much higher.
+FROZEN = True
 
 
 def build(feature_stage: str, num_polylines: int, device):
@@ -33,7 +36,7 @@ def build(feature_stage: str, num_polylines: int, device):
     backbone = t.ResNet18UNetFeatures(
         ckpt_path=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
         feature_stage=feature_stage,
-        frozen=True,
+        frozen=FROZEN,
     )
     detr = t.DetrPolylineFromEmbeddings(
         in_dim=stage["channels"],
@@ -56,7 +59,7 @@ def build(feature_stage: str, num_polylines: int, device):
 def main():
     print_roots()
     device = torch.device("cuda")
-    print(torch.cuda.get_device_name(0))
+    print(torch.cuda.get_device_name(0), f"backbone frozen: {FROZEN}")
     total_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
     print(f"total GPU memory: {total_gb:.1f} GB\n")
 

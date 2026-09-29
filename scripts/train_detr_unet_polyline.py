@@ -20,6 +20,8 @@ similar code as train_detr_maptr_polyline.py with these changes:
 - Backbone on high-resolution PDOK aerial images (25 cm/px, 1000 x 1000),
   initialized from the train_semseg_unet_resnet18.py semseg checkpoint,
   freezable (frozen keeps BatchNorm in eval so semseg statistics are preserved).
+  When it trains (freeze_backbone=False), backbone_lr gives it its own, lower
+  learning rate (build_optimizer).
 - Dataset loads images + polyline NPZs produced by
   scripts/data/convert_pdok_polylines_to_detr_polyline.py, and checks up front
   that every crop has an image and a lidar patch, since two builds of the same
@@ -2247,6 +2249,26 @@ def load_checkpoint_flexible(
 # -------------------------
 
 
+def build_optimizer(model, max_lr, backbone_lr, weight_decay):
+    """
+    AdamW over the weights that train. When the backbone trains too, it gets
+    its own learning rate, backbone_lr, so the pretrained features change slowly
+    (DETR uses 1e-5 for the backbone and 1e-4 for the rest). None means max_lr.
+
+    A frozen backbone has no weights that train, so this is then one group of
+    the same weights in the same order as before the backbone option existed.
+    """
+    backbone, rest = [], []
+    for name, p in model.named_parameters():
+        if p.requires_grad:
+            (backbone if name.startswith("backbone.") else rest).append(p)
+    groups = [{"params": rest, "lr": max_lr, "name": "head"}]
+    if backbone:
+        lr = max_lr if backbone_lr is None else backbone_lr
+        groups.append({"params": backbone, "lr": lr, "name": "backbone"})
+    return torch.optim.AdamW(groups, lr=max_lr, weight_decay=weight_decay)
+
+
 def main(cfg):
     print_roots()
     # Same layout as train_semseg_unet_resnet18.py: save_path/<exp>/best_<exp>.pt,
@@ -2462,11 +2484,12 @@ def main(cfg):
     writer = tensorboard.SummaryWriter(tb_dir)
     best_val = float("inf")
 
-    optimizer = torch.optim.AdamW(
-        [p for p in model.parameters() if p.requires_grad],
-        lr=cfg.max_lr,
-        weight_decay=cfg.weight_decay,
-    )
+    optimizer = build_optimizer(model, cfg.max_lr, cfg.backbone_lr, cfg.weight_decay)
+    for group in optimizer.param_groups:
+        n = sum(p.numel() for p in group["params"])
+        print(
+            f"Optimizer group {group['name']}: {n / 1e6:.1f}M params, lr {group['lr']:g}"
+        )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=cfg.n_epochs, eta_min=1e-6
     )
@@ -2539,27 +2562,25 @@ if __name__ == "__main__":
         # overrides: exp="<n>_laptop", num_workers=4, eval_every=10,
         # n_val_subset=1000 (its val split is leakier, so full val is not the
         # honest number anyway).
-        exp="6",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
+        exp="7",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
         save_path=EXP_ROOT / "detr_unet_polyline",
         # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
         # which writes geographically split polylines/{train,val} directories)
         #
-        # Exp 4 turned on tree rows and lidar together and did not beat exp 2:
-        # hedge F1 0.698 at 10 m against 0.699, and 0.533 at 5 m against 0.553.
-        # Exp 5 kept the tree rows and switched the lidar off: the tree rows
-        # cost the 5 m number, not the lidar (hedge F1 0.536 at 5 m, 0.689 at
-        # 10 m, exps/probe_polyline_pr.py).
-        # Exp 6 is the other ablation: hedges only, one class, lidar on. It says
-        # whether the lidar helps hedges without the tree rows. It trains on the
-        # same 26,900 crops as exps 4 and 5, so it differs from exp 4 by the tree
-        # rows alone, and from exp 2 by the lidar plus two crops.
-        # Result: hedge F1 0.703 at 10 m against exp 2's 0.699, too small a gap
-        # to count, since a run has to win by 0.02 (exps/probe_polyline_pr.py).
+        # Exps 4 to 6 added tree rows and lidar. None beat exp 2 by the 0.02 bar
+        # (hedge F1 at 10 m 0.698, 0.689, 0.703; exps/probe_polyline_pr.py).
+        # Exps 7 to 9 go back to the exp 2 recipe, hedges only and no lidar, and
+        # each changes one thing:
+        #
+        #   run          | change from exp 2                       | why
+        #   exp 7 (here) | seed=43                                 | how much luck moves F1
+        #   exp 8        | n_epochs=90                             | F1 rose until the lr ran out
+        #   exp 9        | freeze_backbone=False, backbone_lr=1e-5 | backbone never trained here
         #
         #   run          | polyline dir                 | num_classes | lidar_path
         #   exp 2        | pdok_dataset3_polylines      | 1           | None
         #   exp 5        | pdok_dataset3_tree_polylines | 2           | None
-        #   exp 6 (here) | pdok_dataset3_polylines      | 1           | set
+        #   exp 6        | pdok_dataset3_polylines      | 1           | set
         #   exp 4        | pdok_dataset3_tree_polylines | 2           | set
         image_dir=DATA_ROOT / "pdok_dataset3/images",
         train_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/train",
@@ -2571,8 +2592,10 @@ if __name__ == "__main__":
         # error, so a partial .npy only works with a matching polyline
         # directory (see exps/probe_lidar_crop_alignment.py).
         # On the cluster, pos_030002 and pos_030003 of the hedges train split
-        # have no patch. For exp 6 they were moved to polylines/excluded_no_lidar.
-        lidar_path=DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy",
+        # have no patch. For exp 6 they were moved to polylines/excluded_no_lidar,
+        # and moved back for exps 7 to 9, which have no lidar.
+        # Exp 6: DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy".
+        lidar_path=None,
         lidar_stride=16,  # must equal the feature stride, so 1024 -> 64x64
         augment=True,  # flip/rot90 of image + polylines (train split only)
         # exp 2 is the data-scaling A/B against exp 1: full train split instead
@@ -2581,12 +2604,15 @@ if __name__ == "__main__":
         # started from exp 1: those 5,000 crops are a subset of these 26,902 and
         # exp 1 had begun memorising them by epoch 65, so its weights would bias
         # the result.
-        n_train_subset=None,  # None = full train split (26,900 on the cluster)
+        n_train_subset=None,  # None = full train split (26,902 on the cluster)
         n_val_subset=None,  # None = full val split; subset only speeds up eval
         # backbone
         backbone_ckpt=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
         feature_stage="up3",  # "up3": stride 16, 64x64 tokens; "enc4": stride 32, 32x32
         freeze_backbone=True,
+        # Learning rate of the backbone when it trains (freeze_backbone=False).
+        # None means max_lr. Unused while the backbone is frozen.
+        backbone_lr=None,
         num_points=20,
         num_polylines=60,  # polyline instance queries (max ~50 GT per image)
         # 2 for the tree-row dataset (0 hedge, 1 tree row), 1 for the
@@ -2665,7 +2691,7 @@ if __name__ == "__main__":
         # best_1.pt). Keep enough checkpoints to score.
         save_every=10,
         eval_every=5,  # evaluate every k epochs (best checkpoint only on eval epochs)
-        seed=42,
+        seed=43,  # exp 7: the only change from exp 2, which used 42
         # checkpoints
         resume_ckpt=None,
         # preview

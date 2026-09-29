@@ -1075,13 +1075,12 @@ against 0.731 on crops with one). So the next runs should target perception.
   `/home/fatemeh/Downloads/hedge/Top10NL2025`. Keep it out of exp 4: changing
   the label year and adding a class at once cannot be read.
 
-- Backbone unfreezing with low lr. Only 5.8 M of the network trains today. Pair
-  it with exp 4 rather than running it alone.
+- Exps 7 to 9, prepared 2026-09-29: exp 2 with another seed, exp 2 for 90
+  epochs, and exp 2 with the backbone training at lr 1e-5. Details and
+  reasons in docs/experiments_log.md.
 
 Then, results-driven:
 
-- Longer training. Exp 2's eval loss fell at every eval including the last, so
-  45 epochs was short. Cheap, but it buys less than the above.
 - Image resolution. Everything so far is 25 cm. Downsampling to 50 cm or 1 m
   costs nothing to try and would say how much of the result depends on
   resolution, which matters for applying this outside PDOK coverage. Not urgent.
