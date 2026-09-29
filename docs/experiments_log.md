@@ -143,44 +143,45 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 6 (running, job 27303687, submitted 2026-09-28 16:39, gpu_a100, git 1b66da6,
-  --time=16:00:00, 14:39/epoch so about 11 h, due about 03:45 on 2026-09-29):
-  lidar only, the other ablation of
-  exp 4. Hedges-only `pdok_dataset3_polylines`, num_classes=1, `lidar_path`
-  set. Everything else is the exp 4 recipe: frozen up3, cls_loss=ce, 45
-  epochs, batch 16. Train is the same 26,900 crops as exps 4 and 5 (the two
-  crops without a lidar patch moved aside, see the dataset notes above), val
-  the same 3,098. So it differs from exp 4 by the tree rows alone, and from
-  exp 2 by the lidar plus those two crops.
+- 6 scored, 2026-09-29. **Lidar alone did not make hedges better.** Hedge F1
+  at 10 m is 0.703, against 0.699 for exp 2. The gap, 0.004, is too small to
+  count. Our rule is that a run must win by at least 0.02, because we have not
+  measured how much two runs with the same settings differ.
 
-  Config is four lines: the two polyline directories, num_classes=1,
-  `lidar_path` set, plus `exp="6"`.
+  Setup: hedges only (`pdok_dataset3_polylines`), one class, lidar on. The rest
+  is the exp 4 recipe. The same 26,900 train crops as exps 4 and 5, and the
+  same 3,098 val crops. Config: the two polyline folders, num_classes=1,
+  `lidar_path`, and `exp="6"`. The rule written before the run: 0.72 or more
+  would mean the lidar helps, under 0.68 that it hurts.
 
-  Smoke test, `exps/smoke_test_train_detr_unet_polyline.py`, now set to this
-  configuration: lidar branch inert at initialisation and learning after 3
-  steps, 6 epochs in 48 s, and the checkpoint has 9 lidar keys and class head
-  (2, 256), one class plus the no-object column.
+  Hedge against hedge, each run at its best threshold, t=0.90
+  (`exps/probe_polyline_pr.py`):
 
-  The log shows `Lidar: 7 channels` and `train=26900, val=3098`, so the branch
-  is on and no crop was missing a patch. Epoch 1 train_total 1.8004 against
-  exp 2's 1.8175, 0.9% apart (ce 0.2486 against 0.2567, poly 0.0945 against
-  0.0944). That is the expected start: the lidar branch is zero-initialised, so
-  at step 0 this is the exp 2 model.
+  | run                           | 5 m  | 10 m | 15 m |
+  | ----------------------------- | ---- | ---- | ---- |
+  | exp 2, hedges                 | .553 | .699 | .767 |
+  | exp 6, hedges + lidar         | .545 | .703 | .774 |
+  | exp 4, hedges + trees + lidar | .533 | .698 | .773 |
+  | exp 5, hedges + trees         | .536 | .689 | .761 |
 
-  What it decides, hedge F1 at 10 m against exp 2's 0.699, both at their best
-  threshold:
+  - Every gap to exp 2 is under 0.01: +0.004 at 10 m, +0.007 at 15 m, -0.008
+    at 5 m.
+  - The lidar removes some wrong lines. At the lowest threshold, t=0.05, it
+    draws 11.83 lines per crop against 12.63.
+  - It may help most on crops with many hedges: F1 0.644 against 0.617 on
+    crops with 4 to 6 hedges. That is only 363 crops, so it is a hint.
+  - Tree rows lower the 5 m score with the lidar on too: 0.533 in exp 4
+    against 0.545 here, on the same crops.
 
-  | hedge F1 at 10 m | reading                                   |
-  | ---------------- | ----------------------------------------- |
-  | 0.72 or more     | the lidar helps hedges on their own       |
-  | 0.68 to 0.72     | no measurable effect, inside the 0.02 bar |
-  | under 0.68       | the lidar hurts hedges on their own       |
+  Checks. Job 27303687 on an A100, git 1b66da6, 45 epochs in 11:06:48. The
+  best and the last checkpoint are the same weights, so only `best_6.pt` was
+  inferred. The laptop and cluster lidar files are identical (same md5).
+  Before the run the smoke test passed, and the log shows the lidar on and no
+  crop missing a patch.
 
-  Watch 5 m too. A lidar that blurs lines shows as 5 m falling under exp 2's
-  0.553 while 10 m holds; exp 4 against exp 5 left 5 m flat.
-
-  Score like exp 2: infer on `pdok_dataset3_polylines/polylines/val_cluster`
-  at `infer_score_thresh=0.05`, add the run to `exps/probe_polyline_pr.py`.
+  Inference run kept at
+  `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/inference/best_6_val_cluster_t0.05`,
+  at `infer_score_thresh=0.05`.
 
 - 5 scored, 2026-09-28. **Did not win, and it names the culprit: the tree
   rows.** Hedge F1 at 5 m 0.536 against exp 2's 0.553, at 10 m 0.689 against

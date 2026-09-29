@@ -26,6 +26,10 @@ docs/experiments_log.md.
   0.689 / 0.761, exp 4 (plus tree rows and lidar) 0.533 / 0.698 / 0.773. The
   tree rows cost the 5 m number; the lidar then won back 10 and 15 m. The tree
   row class at 10 m is 0.624 without lidar and 0.688 with it.
+- Lidar without tree rows, exp 6 at t=0.90: 0.545 / 0.703 / 0.774 against
+  exp 2's 0.553 / 0.699 / 0.767. Every gap is under 0.01, too small to count
+  (a run has to win by 0.02). Recall rose most on crops with 4 to 6 hedges,
+  0.612 against 0.565.
 - Buffered length at 10 m within exp 1: best_1.pt 0.75/0.52 (F1 0.614),
   1_150.pt 0.70/0.59 (F1 0.640). 1_150.pt wins at every buffer, so the
   checkpoint the eval loss calls overfit is the better detector. Rank by this
@@ -279,12 +283,13 @@ if __name__ == "__main__":
     root = DATA_ROOT / "pdok_dataset3_polylines"
     tree = DATA_ROOT / "pdok_dataset3_tree_polylines"
     cfg = dict(
-        # All four hold the same 3,098 val stems, so they can be listed together.
+        # All five hold the same 3,098 val stems, so they can be listed together.
         run_dirs=[
             root / "inference/best_2_val_cluster_t0.05",  # exp 2, softmax head
             root / "inference/best_3_val_cluster_t0.05",  # exp 3, focal head
             tree / "inference/best_4_val_t0.05",  # exp 4, tree rows and lidar
             tree / "inference/best_5_val_t0.05",  # exp 5, tree rows, no lidar
+            root / "inference/best_6_val_cluster_t0.05",  # exp 6, lidar, no tree rows
         ],
         # Which classes to score, each against its own labels. With
         # {0: "hedge", 1: "tree row"} the hedge row of a two-class run is

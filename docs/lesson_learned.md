@@ -865,13 +865,15 @@ gave exactly that: 5 m 0.533 against exp 2's 0.553, 10 m 0.698 against 0.699.
 But exp 5, the same run with the lidar off, falls just as far at 5 m (0.536).
 The tree rows did it, not the lidar.
 
-The lidar in the tokens helps. Against exp 5 it adds 0.009 to hedge F1 at 10 m
-and 0.012 at 15 m, leaves 5 m flat, and adds 0.064 to the tree row class at
-10 m (0.688 against 0.624). It also removes clutter: 10.70 hedge lines per image
-at t=0.05 against 12.00. So there is no case for moving it to the class head.
+The lidar helps hedges very little. With tree rows it adds 0.009 to hedge F1
+at 10 m (exp 4 against exp 5). Without them it adds 0.004 (exp 6 against
+exp 2). Both are too small to count, since we need 0.02. What it does every
+time is remove some wrong lines: at t=0.05, 10.70 lines per crop against
+12.00, and 11.83 against 12.63. It helps the tree row class more. So there is
+no reason to move it to the class head, and it is not a hedge win either.
 
 The lesson is about reading a run. A pattern predicted in advance is still not
-proof when the run changed two things at once. *(exps 4 and 5,
+proof when the run changed two things at once. *(exps 4 to 6,
 `exps/probe_polyline_pr.py`)*
 
 Two details that are not cosmetic. BatchNorm comes first because the six metrics
@@ -1028,13 +1030,17 @@ Phase C — tree rows and lidar:
   0.017 at 5 m. The lidar gives back 0.009 at 10 m and adds 0.064 to the tree
   row class. See "Tree rows cost nothing to add" and "Where the lidar is allowed
   to act".
+- Exp 6 (lidar only) scores 0.703 at 10 m against exp 2's 0.699. The gap is
+  too small to count, so the lidar does not make hedges better on its own.
 
 ## TODO
 
 Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
 
-Exp 3 is done and lost (0.699 -> 0.664), and exps 4 and 5 did not beat it
-either (0.698, 0.689). Exp 2 `best_2.pt` at t=0.90 remains the baseline.
+Exp 3 lost (0.664). Exps 4 to 6 did not beat exp 2 by the 0.02 we need
+(0.698, 0.689, 0.703). We need that much because we have not measured how
+much two runs with the same settings differ. Exp 2 `best_2.pt` at t=0.90
+stays the baseline.
 
 The bottleneck is that the model does not draw enough correct lines, worst
 where crops are crowded (exp 2 recall 0.372 on crops with 7+ labelled lines
@@ -1046,13 +1052,6 @@ against 0.731 on crops with one). So the next runs should target perception.
   and `up3` (stride 16) today, so this means adding the next UNet decoder
   stage at stride 8. Memory is available: batch 16 uses 5.8 of 40 GB, and
   stride 8 is 4x the tokens. This is the most direct attack on the real limit.
-
-- Exp 6, running (job 27303687): lidar only, the last ablation of exp 4.
-  `pdok_dataset3_polylines`, num_classes=1, lidar_path set, no code change.
-  Exp 5 shows the lidar helps on top of tree rows; this says whether it helps
-  hedges on their own. The two train crops without a lidar patch,
-  `pos_030002` and `pos_030003`, were moved aside on the cluster, so it trains
-  on the same 26,900 crops as exps 4 and 5.
 
 - Labels from Top10NL2025 instead of 2023, a separate conversion. It closes
   the three-year image/label gap at no imagery cost, since the crops are

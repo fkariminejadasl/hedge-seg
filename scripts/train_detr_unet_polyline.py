@@ -2553,6 +2553,8 @@ if __name__ == "__main__":
         # whether the lidar helps hedges without the tree rows. It trains on the
         # same 26,900 crops as exps 4 and 5, so it differs from exp 4 by the tree
         # rows alone, and from exp 2 by the lidar plus two crops.
+        # Result: hedge F1 0.703 at 10 m against exp 2's 0.699, too small a gap
+        # to count, since a run has to win by 0.02 (exps/probe_polyline_pr.py).
         #
         #   run          | polyline dir                 | num_classes | lidar_path
         #   exp 2        | pdok_dataset3_polylines      | 1           | None

@@ -171,17 +171,17 @@ grid blurring a 3 m hedge.
 
 ## The tree rows cost the detail, not the laser
 
-The same run with the laser switched off.
+The same run with the laser switched off, and the laser without tree rows.
 
 **The drop stayed**, 0.536 at 5 m. So the tree rows did it.
 
-**The laser helps.** With it, hedges 0.698 against 0.689, tree rows 0.69
-against 0.62 *(10 m buffer)*.
+**The laser helps only a little.** Hedges 0.698 against 0.689 with tree rows,
+0.703 against 0.699 without. Both too small to count *(10 m buffer)*.
 
 Our advance prediction matched the result and still blamed the wrong thing.
 One run that changes two things cannot say which one did it.
 
-*(exp 5 against exp 4, `exps/probe_polyline_pr.py`)*
+*(exps 4 to 6, `exps/probe_polyline_pr.py`)*
 
 ---
 
@@ -326,11 +326,9 @@ we were about to spend far more on the same idea.
 1. **Look at finer detail.** A hedge is about 3 m wide, 12 pixels. One grid
    cell is 4 m, 16 pixels. The hedge is thinner than a single cell, so its
    shape is gone before the head sees it *(feature stride 16 to 8)*
-2. **Laser without tree rows**, to see if the laser helps hedges on their own
-   *(lidar-only ablation)*
-3. **Use the 2025 map**, so photos and labels are the same year
-4. **Train the image backbone**, which is frozen today
-5. **Lower resolution**, to see how much depends on 25 cm imagery
+2. **Use the 2025 map**, so photos and labels are the same year
+3. **Train the image backbone**, which is frozen today
+4. **Lower resolution**, to see how much depends on 25 cm imagery
 
 ---
 
@@ -343,9 +341,10 @@ we were about to spend far more on the same idea.
 | 3 | focal sigmoid score head | 0.664 |
 | 4 | tree rows as class 2, plus laser | 0.698 |
 | 5 | tree rows as class 2, no laser | 0.689 |
+| 6 | laser, no tree rows | 0.703 |
 
-Exp 2 is 11 h on one A100. All scored on the same 3,098 held-out crops with
-`exps/probe_polyline_pr.py`.
+Exp 2 is 11 h on one A100. Gaps under 0.02 do not count. All scored on the
+same 3,098 held-out crops with `exps/probe_polyline_pr.py`.
 
 - **More data buys precision, not recall.** Precision +0.08 in every crowding
   bucket, recall +0.02, nothing on crowded crops *(exp 1 to exp 2)*
