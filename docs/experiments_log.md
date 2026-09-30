@@ -195,8 +195,25 @@ bbox 3900/903.
   Inference run kept at
   `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/inference/best_7_val_cluster_t0.05`.
 
-- 8 (running, job 27354074): exp 2 for 90 epochs, due about 12:50 on
-  2026-09-30. Setup in the next entry.
+- 8 scored, 2026-09-30. **Training longer helps only a little.** Exp 2 for 90
+  epochs instead of 45: hedge F1 0.569 / 0.712 / 0.775 at 5 / 10 / 15 m,
+  against 0.553 / 0.699 / 0.767. At 10 m that is +0.013, a little more than
+  the seed gap (0.008) and below the 0.02 bar. Exp 9 gains about twice as
+  much. Job 27354074, A100, git ad56c71, 90 epochs in 22:00:19. Eval loss was
+  lowest at epoch 70; the last epoch, 90, scores better.
+
+  F1 by epoch at t=0.90 (`exps/probe_f1_by_epoch.py`): 0.692 at epoch 40,
+  0.708 at 60, 0.705 at 70, 0.712 at 90. Most of the gain is in by epoch 60.
+  Recall at t=0.05 stays at about 0.85, so it finds no more hedges.
+
+  Figures, the same 16 crops for GT, exp 2, exp 8 and exp 9 at t=0.90, show
+  four kinds of mistake: two parallel lines on one hedge, lines that fold back
+  into a loop or hook, the short leg of an L-shaped hedge left out, and lines
+  on tree rows the labels do not have. Exp 9 has fewer double lines and loops
+  than exp 8.
+
+  Inference runs kept at
+  `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/inference/{8_40,8_60,best_8,8}_val_cluster_t0.05`.
 
 - 7, 8, 9 setup (all submitted 2026-09-29): back to the
   exp 2 recipe, hedges only, no lidar, 26,902 train crops, and one change each.

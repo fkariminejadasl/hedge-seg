@@ -34,6 +34,8 @@ docs/experiments_log.md.
   0.691 / 0.761, so a new seed alone moves F1 by about 0.01. Exp 9 (backbone
   trained) 0.581 / 0.721 / 0.779 at epoch 45, the first clear gain over
   exp 2, with far fewer wrong lines at t=0.05 (8.99 per crop against 12.63).
+- Longer training, exp 8 (exp 2 for 90 epochs) at t=0.90: 0.569 / 0.712 /
+  0.775, a little more than the seed gap and less than exp 9.
 - Buffered length at 10 m within exp 1: best_1.pt 0.75/0.52 (F1 0.614),
   1_150.pt 0.70/0.59 (F1 0.640). 1_150.pt wins at every buffer, so the
   checkpoint the eval loss calls overfit is the better detector. Rank by this
@@ -298,6 +300,8 @@ if __name__ == "__main__":
             root
             / "inference/best_9_val_cluster_t0.05",  # exp 9 ep 30, backbone trained
             root / "inference/9_val_cluster_t0.05",  # exp 9 ep 45, backbone trained
+            root / "inference/best_8_val_cluster_t0.05",  # exp 8 ep 70, 90 epochs
+            root / "inference/8_val_cluster_t0.05",  # exp 8 ep 90, 90 epochs
         ],
         # Which classes to score, each against its own labels. With
         # {0: "hedge", 1: "tree row"} the hedge row of a two-class run is

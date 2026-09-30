@@ -347,8 +347,7 @@ we were about to spend far more on the same idea.
    cell is 4 m, 16 pixels. The hedge is thinner than a single cell, so its
    shape is gone before the head sees it *(feature stride 16 to 8)*
 2. **Use the 2025 map**, so photos and labels are the same year
-3. **Train longer**, running now *(exp 8, 90 epochs)*
-4. **Lower resolution**, to see how much depends on 25 cm imagery
+3. **Lower resolution**, to see how much depends on 25 cm imagery
 
 ---
 
@@ -363,6 +362,7 @@ we were about to spend far more on the same idea.
 | 5 | tree rows as class 2, no laser | 0.689 |
 | 6 | laser, no tree rows | 0.703 |
 | 7 | exp 2 again, new random start | 0.691 |
+| 8 | exp 2 for 90 epochs | 0.712 |
 | 9 | image backbone trained too | **0.721** |
 
 Same 3,098 held-out crops; gaps under 0.02 do not count *(`exps/probe_polyline_pr.py`)*

@@ -1079,6 +1079,8 @@ Phase C — seed and backbone:
 - Exp 7 (exp 2, seed 43) measures the training luck: about 0.01 at 10 m.
 - Exp 9 (backbone trained at lr 1e-5) is the new best: hedge F1 0.721 at 10 m
   against 0.699, and 0.581 against 0.553 at 5 m.
+- Exp 8 (exp 2 for 90 epochs) gains 0.013 at 10 m, a little more than the
+  seed gap and below the 0.02 bar. Most of it is in by epoch 60.
 
 ## TODO
 
@@ -1105,8 +1107,9 @@ against 0.731 on crops with one). So the next runs should target perception.
   `/home/fatemeh/Downloads/hedge/Top10NL2025`. Keep it out of exp 4: changing
   the label year and adding a class at once cannot be read.
 
-- Exp 8, running: exp 2 for 90 epochs. If longer training helps, the next run
-  is exp 9 for longer.
+- Training longer helped exp 2 only a little (exp 8, +0.013 at 10 m). Exp 9
+  for longer might add the same small amount, but training the backbone is
+  where the gain was.
 
 Then, results-driven:
 

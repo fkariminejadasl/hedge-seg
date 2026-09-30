@@ -29,7 +29,15 @@ Result (2026-09-30, hedge against hedge, t=0.90):
     exp 9 ep 45 - 2   10 m   +0.023   +0.017 .. +0.028  0.003
     exp 9 ep 45 - 2   15 m   +0.012   +0.007 .. +0.017  0.003
 
-(exp 9 is best_9.pt, epoch 30; exp 9 ep 45 is 9.pt.)
+    exp 8 - exp 2      5 m   +0.003   -0.002 .. +0.009  0.003
+    exp 8 - exp 2     10 m   +0.006   +0.001 .. +0.011  0.003
+    exp 8 - exp 2     15 m   +0.003   -0.001 .. +0.007  0.002
+    exp 8 ep 90 - 2    5 m   +0.016   +0.010 .. +0.021  0.003
+    exp 8 ep 90 - 2   10 m   +0.013   +0.009 .. +0.018  0.002
+    exp 8 ep 90 - 2   15 m   +0.008   +0.004 .. +0.013  0.002
+
+(exp 9 is best_9.pt, epoch 30; exp 9 ep 45 is 9.pt. exp 8 is best_8.pt,
+epoch 70; exp 8 ep 90 is 8.pt.)
 
 - Picking the val crops again moves a gap by about 0.003 (one sd), so about
   0.005 either way covers 95% of draws.
@@ -108,6 +116,8 @@ if __name__ == "__main__":
             "exp 7": hedge / "best_7_val_cluster_t0.05",
             "exp 9": hedge / "best_9_val_cluster_t0.05",
             "exp 9 ep 45": hedge / "9_val_cluster_t0.05",
+            "exp 8": hedge / "best_8_val_cluster_t0.05",
+            "exp 8 ep 90": hedge / "8_val_cluster_t0.05",
         },
         pairs=[
             ("exp 6", "exp 2"),
@@ -115,6 +125,8 @@ if __name__ == "__main__":
             ("exp 7", "exp 2"),
             ("exp 9", "exp 2"),
             ("exp 9 ep 45", "exp 2"),
+            ("exp 8", "exp 2"),
+            ("exp 8 ep 90", "exp 2"),
         ],
         buffers=(5, 10, 15),
         score_thresh=0.90,  # the best threshold of exps 2, 5 and 6
