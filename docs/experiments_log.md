@@ -143,7 +143,62 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 7, 8, 9 (running, all submitted 2026-09-29): back to the
+- 9 scored, 2026-09-30. **Training the backbone helps: the first clear gain
+  since exp 2.** Hedge F1 at 10 m 0.721 against 0.699, at 5 m 0.581 against
+  0.553. That is about three times the gap a new seed gives (exp 7, 0.008).
+
+  Exp 2 with freeze_backbone=False and backbone_lr=1e-5 (the head stays at
+  1e-4). Job 27354321, A100, git a383742, 45 epochs in 12:59:37 (17:07 per
+  epoch, 1.2 times exp 2). `best_9.pt` is epoch 30, the lowest eval loss, and
+  `9.pt` epoch 45. Both scored.
+
+  Hedge F1, each run at its best threshold, t=0.90 (`exps/probe_polyline_pr.py`):
+
+  | run             | 5 m  | 10 m | 15 m | lines per crop |
+  | --------------- | ---- | ---- | ---- | -------------- |
+  | exp 2           | .553 | .699 | .767 | 3.23           |
+  | exp 7, seed 43  | .540 | .691 | .761 | 3.22           |
+  | exp 9, epoch 30 | .570 | .719 | .781 | 3.11           |
+  | exp 9, epoch 45 | .581 | .721 | .779 | 3.33           |
+
+  - Gaps to exp 2 at epoch 45, with the val crop luck
+    (`exps/probe_f1_gap_bootstrap.py`): +0.028 at 5 m (range +0.021 ..
+    +0.035), +0.023 at 10 m (+0.017 .. +0.028), +0.012 at 15 m.
+  - The biggest gain is at 5 m, so the lines sit closer to the hedges.
+  - Far fewer wrong lines: at t=0.05, 8.99 lines per crop against 12.63.
+  - It does not find more hedges in total: recall at t=0.05 is 0.838 against
+    0.840. It scores and places the ones it finds better.
+  - It gains in every crowding group at 10 m: 0.759 / 0.699 / 0.657 / 0.582
+    against 0.747 / 0.667 / 0.617 / 0.571 (crops with 1, 2-3, 4-6, 7+ hedges).
+  - It memorises more: train loss 0.99 against eval 1.23 at epoch 45 (exp 2:
+    1.18 against 1.21). Eval loss was lowest at epoch 30, but F1 is as good
+    or better at epoch 45, since eval loss does not rank checkpoints.
+
+  Inference runs kept at
+  `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/inference/{best_9,9}_val_cluster_t0.05`.
+
+- 7 scored, 2026-09-30. **The same recipe with another seed moves F1 by about
+  0.01.** Exp 2 with seed=43 and nothing else: hedge F1 0.540 / 0.691 / 0.761
+  at 5 / 10 / 15 m, against 0.553 / 0.699 / 0.767. Job 27354007, A100, git
+  9c149f7, 45 epochs in 11:04:43. Best and last checkpoint are the same,
+  epoch 45.
+
+  - The val crop bootstrap calls this gap real: at 10 m -0.008, range -0.013
+    .. -0.003. So the luck of training is larger than the luck of the val
+    crops, and the bootstrap alone cannot judge a gap.
+  - One pair of seeds is one measurement. As a rough yardstick, two runs of
+    the same recipe differ by about 0.01 at 10 m and a bit more at 5 m (0.008
+    and 0.013 here).
+  - This softens earlier readings. Exp 6 (+0.004 at 10 m), exp 5 (-0.010 at
+    10 m, -0.017 at 5 m) and exp 4 (-0.020 at 5 m) are all near this luck.
+
+  Inference run kept at
+  `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/inference/best_7_val_cluster_t0.05`.
+
+- 8 (running, job 27354074): exp 2 for 90 epochs, due about 12:50 on
+  2026-09-30. Setup in the next entry.
+
+- 7, 8, 9 setup (all submitted 2026-09-29): back to the
   exp 2 recipe, hedges only, no lidar, 26,902 train crops, and one change each.
   All three run at the same time, because the cluster is down on Thursday and
   Friday.

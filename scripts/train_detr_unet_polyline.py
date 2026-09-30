@@ -2577,6 +2577,9 @@ if __name__ == "__main__":
         #   exp 8        | n_epochs=90                             | F1 rose until the lr ran out
         #   exp 9 (here) | freeze_backbone=False, backbone_lr=1e-5 | backbone never trained here
         #
+        # Hedge F1 at 10 m, t=0.90: exp 7 0.691, so a new seed moves F1 by about
+        # 0.01; exp 9 0.721, the first clear gain (exps/probe_polyline_pr.py).
+        #
         #   run          | polyline dir                 | num_classes | lidar_path
         #   exp 2        | pdok_dataset3_polylines      | 1           | None
         #   exp 5        | pdok_dataset3_tree_polylines | 2           | None

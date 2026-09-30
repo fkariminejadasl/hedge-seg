@@ -8,27 +8,38 @@ same crops in every draw, so a crop that is hard for both does not count as a
 difference.
 
 This measures one source of noise only. The other, a different random start
-for training, needs a second training run with another seed and is not
-measured yet.
+for training, is measured by exp 7: exp 2 with only the seed changed.
 
-Result (2026-09-29, hedge against hedge, t=0.90):
+Result (2026-09-30, hedge against hedge, t=0.90):
 
-    runs           buffer  gap     95% range         sd of the gap
-    exp 6 - exp 2   5 m   -0.008   -0.014 .. -0.002  0.003
-    exp 6 - exp 2  10 m   +0.004   -0.001 .. +0.010  0.003
-    exp 6 - exp 2  15 m   +0.007   +0.002 .. +0.012  0.002
-    exp 5 - exp 2   5 m   -0.017   -0.022 .. -0.011  0.003
-    exp 5 - exp 2  10 m   -0.010   -0.015 .. -0.006  0.002
-    exp 5 - exp 2  15 m   -0.006   -0.010 .. -0.002  0.002
+    runs              buffer  gap     95% range         sd of the gap
+    exp 6 - exp 2      5 m   -0.008   -0.014 .. -0.002  0.003
+    exp 6 - exp 2     10 m   +0.004   -0.001 .. +0.010  0.003
+    exp 6 - exp 2     15 m   +0.007   +0.002 .. +0.012  0.002
+    exp 5 - exp 2      5 m   -0.017   -0.022 .. -0.011  0.003
+    exp 5 - exp 2     10 m   -0.010   -0.015 .. -0.006  0.002
+    exp 5 - exp 2     15 m   -0.006   -0.010 .. -0.002  0.002
+    exp 7 - exp 2      5 m   -0.013   -0.019 .. -0.007  0.003
+    exp 7 - exp 2     10 m   -0.008   -0.013 .. -0.003  0.003
+    exp 7 - exp 2     15 m   -0.006   -0.010 .. -0.001  0.002
+    exp 9 - exp 2      5 m   +0.018   +0.010 .. +0.025  0.004
+    exp 9 - exp 2     10 m   +0.020   +0.014 .. +0.026  0.003
+    exp 9 - exp 2     15 m   +0.014   +0.009 .. +0.019  0.003
+    exp 9 ep 45 - 2    5 m   +0.028   +0.021 .. +0.035  0.003
+    exp 9 ep 45 - 2   10 m   +0.023   +0.017 .. +0.028  0.003
+    exp 9 ep 45 - 2   15 m   +0.012   +0.007 .. +0.017  0.003
+
+(exp 9 is best_9.pt, epoch 30; exp 9 ep 45 is 9.pt.)
 
 - Picking the val crops again moves a gap by about 0.003 (one sd), so about
   0.005 either way covers 95% of draws.
-- Exp 6 against exp 2 at 10 m could be zero even before seed noise: the range
-  crosses 0.
-- The tree rows really cost hedges at 5 m (exp 5, -0.017): the whole range is
-  below zero, far outside this noise.
-- The 0.02 bar used since exp 4 is a chosen bar, not a measured one. It is
-  about seven times this noise. How much seed noise adds is still unknown.
+- Exp 7 is the same recipe as exp 2 with another seed, yet its gap lies
+  outside that range. So the luck of training is bigger than the luck of the
+  val crops, and this probe alone cannot judge a gap.
+- By the seed gap, about 0.01 at 10 m and 0.013 at 5 m, exps 5 and 6 are
+  within luck. Exp 9 is about three times it at 10 m.
+- The 0.02 bar used since exp 4 was chosen, not measured, but it is about
+  twice the seed gap at 10 m. It rests on one pair of seeds.
 
     /home/fatemeh/miniconda3/envs/hedge/bin/python exps/probe_f1_gap_bootstrap.py
 """
@@ -94,8 +105,17 @@ if __name__ == "__main__":
             "exp 2": hedge / "best_2_val_cluster_t0.05",
             "exp 5": tree / "best_5_val_t0.05",
             "exp 6": hedge / "best_6_val_cluster_t0.05",
+            "exp 7": hedge / "best_7_val_cluster_t0.05",
+            "exp 9": hedge / "best_9_val_cluster_t0.05",
+            "exp 9 ep 45": hedge / "9_val_cluster_t0.05",
         },
-        pairs=[("exp 6", "exp 2"), ("exp 5", "exp 2")],
+        pairs=[
+            ("exp 6", "exp 2"),
+            ("exp 5", "exp 2"),
+            ("exp 7", "exp 2"),
+            ("exp 9", "exp 2"),
+            ("exp 9 ep 45", "exp 2"),
+        ],
         buffers=(5, 10, 15),
         score_thresh=0.90,  # the best threshold of exps 2, 5 and 6
         n_boot=2000,

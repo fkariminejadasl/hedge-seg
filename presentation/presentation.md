@@ -56,11 +56,11 @@ that exist, how many we find. Both at a 10 m tolerance.
 | box detection | boxes | 0.70 | 0.60 |
 | pixel segmentation | mask | 0.60 | 0.40 |
 | shape segmentation | blobs | 0.80 | 0.70 |
-| **this model** | **lines** | **0.70** | **0.70** |
+| **this model** | **lines** | **0.71** | **0.73** |
 
 Other numbers came from a different measurement on an easier split.
 
-*(this model: exp 2 at cut-off 0.90, `exps/probe_polyline_pr.py`. Others: see
+*(this model: exp 9 at cut-off 0.90, `exps/probe_polyline_pr.py`. Others: see
 `docs/experiments_log.md`, detect_ultralytics 3 / seg_ultralytics 1 /
 semseg_unet 4)*
 
@@ -169,19 +169,38 @@ grid blurring a 3 m hedge.
 
 ---
 
-## The tree rows cost the detail, not the laser
+## Tree rows and laser: no help for hedges
 
 The same run with the laser switched off, and the laser without tree rows.
 
-**The drop stayed**, 0.536 at 5 m. So the tree rows did it.
+**Neither helps hedges.** Every version stays within 0.02 of the model without
+them *(10 m buffer)*.
 
-**The laser helps only a little.** Hedges 0.698 against 0.689 with tree rows,
-0.703 against 0.699 without. Both too small to count *(10 m buffer)*.
+**The 5 m drop may be luck.** Training the same model again, from a new random
+start, moved 5 m by 0.013 on its own.
 
-Our advance prediction matched the result and still blamed the wrong thing.
-One run that changes two things cannot say which one did it.
+Our advance prediction matched the result and still could not prove it. One
+run that changes two things cannot say which one did it.
 
-*(exps 4 to 6, `exps/probe_polyline_pr.py`)*
+*(exps 4 to 7, `exps/probe_polyline_pr.py`)*
+
+---
+
+## Letting the image part learn helps
+
+Until now the part that reads the photo was frozen. It learned from 4,000
+crops, for masks. Now it trains too, 10 times more slowly than the rest
+*(backbone learning rate 1e-5)*.
+
+**The first clear gain.** 0.699 to 0.721 at 10 m, 0.553 to 0.581 at 5 m.
+
+- Lines sit closer to the hedges, and there are far fewer wrong ones
+- It does not find more hedges: what it missed before, it still misses
+
+A new random start alone moves the score by about 0.01. This gain is twice that
+or more.
+
+*(exp 9 against exps 2 and 7, `exps/probe_polyline_pr.py`)*
 
 ---
 
@@ -305,6 +324,7 @@ one in four bends noticeably.
 - **More data.** 5,000 to 27,000 crops removed overfitting completely
   *(exp 1 to exp 2)*
 - **Cleaner labels.** Loops opened, short lines dropped
+- **Training the image backbone too.** 0.699 to 0.721 at 10 m *(exp 9)*
 
 ---
 
@@ -327,7 +347,7 @@ we were about to spend far more on the same idea.
    cell is 4 m, 16 pixels. The hedge is thinner than a single cell, so its
    shape is gone before the head sees it *(feature stride 16 to 8)*
 2. **Use the 2025 map**, so photos and labels are the same year
-3. **Train the image backbone**, which is frozen today
+3. **Train longer**, running now *(exp 8, 90 epochs)*
 4. **Lower resolution**, to see how much depends on 25 cm imagery
 
 ---
@@ -337,14 +357,15 @@ we were about to spend far more on the same idea.
 | exp | what changed | best F1 at 10 m |
 |---|---|---|
 | 1 | 5,000 crops, 150 epochs | 0.640 |
-| 2 | all 26,902 crops, 45 epochs | **0.699** |
+| 2 | all 26,902 crops, 45 epochs | 0.699 |
 | 3 | focal sigmoid score head | 0.664 |
 | 4 | tree rows as class 2, plus laser | 0.698 |
 | 5 | tree rows as class 2, no laser | 0.689 |
 | 6 | laser, no tree rows | 0.703 |
+| 7 | exp 2 again, new random start | 0.691 |
+| 9 | image backbone trained too | **0.721** |
 
-Exp 2 is 11 h on one A100. Gaps under 0.02 do not count. All scored on the
-same 3,098 held-out crops with `exps/probe_polyline_pr.py`.
+Same 3,098 held-out crops; gaps under 0.02 do not count *(`exps/probe_polyline_pr.py`)*
 
 - **More data buys precision, not recall.** Precision +0.08 in every crowding
   bucket, recall +0.02, nothing on crowded crops *(exp 1 to exp 2)*
