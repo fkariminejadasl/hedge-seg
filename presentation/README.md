@@ -9,6 +9,10 @@ Figures live in `/home/fatemeh/Downloads/hedge/screenshots/`, named
 
     detr_unet_polyline_<set>_<what>_val_cluster_t.90.png
 
+These were saved before the page number was added. A figure remade now is
+named `detr_unet_polyline_p1_<set>_<what>_val_cluster_t.90.png`, so update its
+path in `presentation.md` after remaking it.
+
 `<what>` is `gt` (the reference map) or `best_2` (the current model). Six sets,
 two figures each, 16 crops per figure, drawn at score threshold **0.90**, which
 is exp 2's own operating point and the one the reported numbers use.

@@ -263,21 +263,19 @@ threshold or each at its own optimum, never one of each.
 
 ## How big a gap has to be before it counts
 
-F1 runs from 0 to 1. A gap between two runs can come from two kinds of luck:
+A score can move by luck. There are two kinds:
 
-- **Which crops are in the val set.** Drawing the 3,098 crops again at random
-  moves a gap by about 0.003, so about 0.005 either way covers 95% of draws.
-- **The random start of training.** Exp 7 is exp 2 with only the seed
-  changed. It scores 0.008 lower at 10 m and 0.013 lower at 5 m. That is
-  bigger than the first kind, and the bootstrap even calls it real (range
-  -0.013 .. -0.003 at 10 m).
+- **Which crops are in the val set.** If we pick the 3,098 crops again at
+  random, a gap between two runs moves by about 0.005.
+- **The random start of training.** Exp 7 is exp 2 run again, with only the
+  random start (the seed) changed. It scores 0.008 lower at 10 m and 0.013
+  lower at 5 m.
 
-So the bootstrap alone cannot judge a gap: two runs of the same recipe
-already differ by about 0.01. The 0.02 bar, chosen before exp 4 without a
-measurement, turns out about right, twice the seed gap at 10 m. It rests on
-one pair of seeds, so treat it as rough. By this yardstick exp 9 (+0.023 at
-10 m) counts, and exps 4 to 6 do not. *(exps 2 and 7,
-`exps/probe_f1_gap_bootstrap.py`)*
+The second kind is bigger. So a gap of about 0.01 can appear with no real
+change at all. We ask for 0.02 before we call a run better. That bar was a
+guess at first, and exp 7 shows it is about right. Exp 9 (+0.023 at 10 m)
+passes it; exps 4 to 6 do not. It rests on one repeat, so it is rough.
+*(exps 2 and 7, `exps/probe_f1_gap_bootstrap.py`)*
 
 ## No cheap measure can rank two checkpoints, so build the real one
 
@@ -840,17 +838,16 @@ Three things worth keeping:
 Use the same Top10NL year as the hedge labels, 2023. Taking the tree rows from
 2025 would change the label year at the same time and confound the run.
 
-Cheap in data, but no help for the hedges. Exp 5 adds the tree rows and
-nothing else, and the hedge class scores a little lower at every buffer: F1
-0.536 against exp 2's 0.553 at 5 m, 0.689 against 0.699 at 10 m. A new seed
-alone moves those numbers by 0.013 and 0.008 (exp 7), so the tree rows cost a
-little or nothing, but they do not help. The tree row class itself reaches
-0.624 at 10 m, and 0.688 with the lidar added (exp 4).
+Cheap in data, but no help for the hedges. With tree rows added (exp 5), the
+hedge score is a little lower: 0.689 against 0.699 at 10 m, 0.536 against
+0.553 at 5 m. A new random start alone moves the score about as much (exp 7),
+so tree rows cost the hedges little or nothing. But they do not help either.
+The tree row class itself reaches 0.624 at 10 m, and 0.688 with the lidar
+(exp 4); these tree row scores are too high, see the TODO.
 
-Exp 4 had been read as: its tree rows are placed tightly (0.601 at 5 m
-against 0.533 for hedges), so they cannot be what costs the hedges. That
-reasoning does not hold. How well one class is placed says nothing about what
-it costs the other. *(exps 4, 5 and 7, `exps/probe_polyline_pr.py`)*
+One wrong idea to avoid: exp 4 placed its tree rows well, so we thought they
+could not hurt the hedges. How well one class is drawn says nothing about
+what it does to the other. *(exps 4, 5 and 7, `exps/probe_polyline_pr.py`)*
 
 ## Where the lidar is allowed to act
 
@@ -877,23 +874,22 @@ grounds that a 10 m grid could blur a thin line. Three reasons:
 - The limit is that too few correct lines are drawn at all. A class-only branch
   cannot change which lines are drawn, so it cannot touch that.
 
-**The old worry looked right, but the runs cannot show it.** The signature
-written down here before the run was hedge F1 at 5 m falling while 10 m holds.
-Exp 4 gave exactly that: 5 m 0.533 against exp 2's 0.553, 10 m 0.698 against
-0.699. But exp 5, the same run with the lidar off, falls just as far at 5 m
-(0.536), so the lidar is not the cause. And a new seed alone moves 5 m by
-0.013 (exp 7), so the drop may be mostly luck.
+**The old worry looked right, but the runs cannot show it.** Before exp 4 we
+wrote down what a blurring lidar would look like: the 5 m score falls while
+the 10 m score holds. Exp 4 showed exactly that (5 m 0.533 against 0.553).
+But exp 5, without lidar, fell just as far (0.536), so the lidar is not the
+cause. And a new random start alone moves the 5 m score by 0.013 (exp 7), so
+the drop may be mostly luck.
 
-The lidar helps hedges very little. With tree rows it adds 0.009 to hedge F1
-at 10 m (exp 4 against exp 5). Without them it adds 0.004 (exp 6 against
-exp 2). Both are too small to count, since we need 0.02. What it does every
-time is remove some wrong lines: at t=0.05, 10.70 lines per crop against
-12.00, and 11.83 against 12.63. It helps the tree row class more. So there is
-no reason to move it to the class head, and it is not a hedge win either.
+The lidar helps hedges very little: +0.009 at 10 m with tree rows (exp 4
+against exp 5), +0.004 without (exp 6 against exp 2). Both are below the 0.02
+we need. What it does every time is remove some wrong lines. It helps the
+tree row class more. So it is not worth moving it to the class head, and it
+is not a hedge win either.
 
-The lesson is about reading a run. A pattern predicted in advance is still not
-proof when the run changed two things at once, or when the gap is about the
-size of the seed luck. *(exps 4 to 7, `exps/probe_polyline_pr.py`)*
+The lesson: a result that matches a prediction is still not proof when the
+run changed two things at once, or when the gap is as small as the luck.
+*(exps 4 to 7, `exps/probe_polyline_pr.py`)*
 
 Two details that are not cosmetic. BatchNorm comes first because the six metrics
 are in different units, five band ratios in [0, 1] against `perc_95` reaching
@@ -979,25 +975,23 @@ stem that has no image or no lidar patch.
 
 ## Training the backbone is the first clear gain
 
-Up to exp 7 the backbone was frozen. It learned from 4,000 crops, for masks,
-and every later change touched only what comes after it. Exp 9 lets it train,
-at a learning rate 10 times below the rest (`backbone_lr=1e-5`,
-`build_optimizer` in `scripts/train_detr_unet_polyline.py`).
+The backbone is the part that reads the photo. Until exp 9 it was frozen: it
+had learned from 4,000 crops, for another task (masks), and never changed
+again. Exp 9 lets it learn too, 10 times more slowly than the rest
+(`backbone_lr=1e-5`, `build_optimizer` in
+`scripts/train_detr_unet_polyline.py`).
 
-Hedge F1 at t=0.90, epoch 45: 0.581 / 0.721 / 0.779 at 5 / 10 / 15 m, against
-exp 2's 0.553 / 0.699 / 0.767. At 10 m that is about three times the seed
-luck.
+Hedge F1 went from 0.699 to 0.721 at 10 m, and from 0.553 to 0.581 at 5 m
+(t=0.90). That is more than twice the luck of a new random start.
 
-What changed, and what did not:
+- Lines lie closer to the hedges. The gain is biggest at 5 m.
+- There are far fewer wrong lines.
+- It does not find more hedges. Hedges the model missed before, it still
+  misses.
 
-- Lines sit closer to the hedges. The gain is biggest at 5 m, +0.028.
-- Far fewer wrong lines: 8.99 per crop at t=0.05 against 12.63.
-- It does not find more hedges. Recall at t=0.05 stays at 0.84, so the hedges
-  the model misses entirely are still missed.
-- It memorises more (train loss 0.99 against eval 1.23), yet F1 at epoch 45 is
-  as good as at epoch 30, where eval loss was lowest.
-
-*(exp 9, `exps/probe_polyline_pr.py`, `exps/probe_f1_gap_bootstrap.py`)*
+The backbone really changed: 66 of its 86 weight tensors moved, against none
+in exp 2 (`exps/probe_backbone_trained.py`). *(exp 9,
+`exps/probe_polyline_pr.py`)*
 
 ## Done
 
@@ -1100,6 +1094,11 @@ against 0.731 on crops with one). So the next runs should target perception.
   and `up3` (stride 16) today, so this means adding the next UNet decoder
   stage at stride 8. Memory is available: batch 16 uses 5.8 of 40 GB, and
   stride 8 is 4x the tokens. This is the most direct attack on the real limit.
+
+- Fix the tree row score. It counts a crop with no tree row, and no tree row
+  drawn, as a perfect score. That is 40% of the val crops, so every tree row
+  number so far is too high (exps 4 and 5). Hedge scores are not affected:
+  every val crop but one has a hedge.
 
 - Labels from Top10NL2025 instead of 2023, a separate conversion. It closes
   the three-year image/label gap at no imagery cost, since the crops are

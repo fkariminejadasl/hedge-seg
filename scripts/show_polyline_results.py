@@ -15,9 +15,11 @@ once at 0.05 and pick the operating point here. It is not one value for all
 runs: the exp 1 optimum is 0.95 and the exp 2 optimum is 0.90.
 
 `save` writes each figure to `save_dir` as
-`<model>_<run>_<split>_t<thresh>.png`, for example
-`detr_unet_polyline_best_2_val_cluster_t.95.png`, with the ground truth as
-`detr_unet_polyline_gt_val_cluster_t.95.png`.
+`<model>_p<page>_<tag>_<run>_<split>_t<thresh>.png`, for example
+`detr_unet_polyline_p1_best_2_val_cluster_t.90.png`, with the ground truth as
+`detr_unet_polyline_p1_gt_val_cluster_t.90.png`. The page counts from 1 and
+goes up each time `n` is pressed, so no page overwrites another. The tag is
+left out when it is empty.
 
 Each line is coloured by its class, hedges blue and tree rows orange, with a
 legend when both are drawn. `class_id` shows one class only.
@@ -74,14 +76,19 @@ def split_run_name(run_dir: Path):
     return stem, "unknown"
 
 
-def figure_path(cfg, run_dir: Path, what: str):
-    """`<model>_<what>_<split>_t<thresh>.png`, threshold without the leading 0."""
+def figure_path(cfg, run_dir: Path, what: str, page: int = 0):
+    """
+    `<model>_p<page>_<tag>_<what>_<split>_t<thresh>.png`, threshold without the
+    leading 0. The page counts from 1, so paging with `n` does not overwrite
+    the figures already saved. An empty tag is left out.
+    """
     if not cfg.save:
         return None
     _, split = split_run_name(run_dir)
     thresh = f"{cfg.score_thresh:.2f}".lstrip("0")
-    tag = f"{cfg.tag}_" if cfg.get("tag") else ""
-    return Path(cfg.save_dir) / f"{cfg.model}_{tag}{what}_{split}_t{thresh}.png"
+    tag = f"_{cfg.tag}" if cfg.get("tag") else ""
+    name = f"{cfg.model}_p{page + 1}{tag}_{what}_{split}_t{thresh}.png"
+    return Path(cfg.save_dir) / name
 
 
 def main(cfg):
@@ -113,7 +120,7 @@ def main(cfg):
                 ids=ids,
                 n=cfg.n,
                 title="GT",
-                save_path=figure_path(cfg, run_dirs[0], "gt"),
+                save_path=figure_path(cfg, run_dirs[0], "gt", page),
                 class_id=cfg.class_id,
             )
         ]
@@ -127,7 +134,7 @@ def main(cfg):
                     n=cfg.n,
                     title=f"{name} t{cfg.score_thresh}",
                     score_thresh=cfg.score_thresh,
-                    save_path=figure_path(cfg, run_dir, name),
+                    save_path=figure_path(cfg, run_dir, name, page),
                     class_id=cfg.class_id,
                 )
             )
@@ -145,9 +152,9 @@ if __name__ == "__main__":
         # Use the t0.05 runs: they hold every prediction, so score_thresh below
         # picks the operating point without re-running inference.
         run_dirs=[
-            # inference / "best_2_val_cluster_t0.05",
-            tree_inference
-            / "best_5_val_t0.05",
+            inference / "9_val_cluster_t0.05",
+            inference / "best_9_val_cluster_t0.05",
+            # tree_inference / "best_5_val_t0.05",
         ],
         image_dir=DATA_ROOT / "pdok_dataset3/images",
         score_thresh=0.95,  # exp 1 optimum 0.95, exps 2, 4 and 5 optimum 0.90

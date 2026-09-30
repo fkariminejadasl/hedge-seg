@@ -152,18 +152,35 @@ blocks)*
 
 ---
 
+## Six more runs, one change each
+
+| what we changed | hedge score at 10 m | did it help? |
+|---|---|---|
+| nothing: our first good model | 0.70 | starting point |
+| + tree rows + laser | 0.70 | no |
+| + tree rows | 0.69 | no |
+| + laser | 0.70 | no |
+| nothing, only a new random start | 0.69 | shows the luck |
+| train twice as long | 0.71 | a little |
+| let the image part learn too | **0.72** | **yes** |
+
+A gap below 0.02 is too small to trust: the same model trained twice already
+differs by 0.01. *(exps 2, 4 to 9, `exps/probe_polyline_pr.py`)*
+
+---
+
 ## We tried both, and the hedges did not improve
 
 Tree rows as a second class and the laser data, together in one run.
 
-**Tree rows worked.** We draw them as their own class now, about as well as we
-draw hedges *(F1 0.69 at 10 m)*.
+**Hedges did not move.** 0.699 to 0.698. At the tightest tolerance a little
+worse, 0.553 to 0.533 *(5 m buffer)*.
 
-**Hedges did not move.** 0.699 to 0.698. At the tightest tolerance they got a
-little worse, 0.553 to 0.533 *(5 m buffer)*.
+**Tree rows:** the model now draws them as their own class, but misses many.
+Our first score for them was too high, and is being fixed.
 
-That drop looked like the sign we had written down in advance: a 10 m laser
-grid blurring a 3 m hedge.
+That 5 m drop looked like what we had predicted: a 10 m laser grid blurring a
+3 m hedge.
 
 *(exp 4, `exps/probe_polyline_pr.py`)*
 
@@ -171,18 +188,30 @@ grid blurring a 3 m hedge.
 
 ## Tree rows and laser: no help for hedges
 
-The same run with the laser switched off, and the laser without tree rows.
+We then tried tree rows alone, and laser alone.
 
-**Neither helps hedges.** Every version stays within 0.02 of the model without
-them *(10 m buffer)*.
+**Neither helps hedges.** All scores stay within 0.02 of the first model
+*(10 m buffer)*.
 
-**The 5 m drop may be luck.** Training the same model again, from a new random
-start, moved 5 m by 0.013 on its own.
+**The 5 m drop may be luck.** The same model, trained again from a new random
+start, moved 0.013 at 5 m by itself.
 
-Our advance prediction matched the result and still could not prove it. One
-run that changes two things cannot say which one did it.
+A result that matches our prediction is still no proof when one run changes
+two things at once.
 
 *(exps 4 to 7, `exps/probe_polyline_pr.py`)*
+
+---
+
+## Luck, and training longer
+
+**Luck.** We trained the first model again and changed only the random start.
+The score moved by 0.01. So we trust a gain only above 0.02 *(exp 7)*.
+
+**Training twice as long:** 0.699 to 0.712 at 10 m. A little. Most of it is
+there by epoch 60 of 90 *(exp 8)*.
+
+*(exps 7 and 8, `exps/probe_polyline_pr.py`, `exps/probe_f1_by_epoch.py`)*
 
 ---
 
