@@ -1079,6 +1079,22 @@ Phase C — seed and backbone:
 - Exp 8 (exp 2 for 90 epochs) gains 0.013 at 10 m, a little more than the
   seed gap and below the 0.02 bar. Most of it is in by epoch 60.
 
+All runs from exp 2 on, hedge against hedge on the same 3,098 val crops, at
+t=0.90, the best threshold of every run. Each cell is precision / recall / F1.
+Exps 8 and 9 are their last epoch (`8.pt`, `9.pt`).
+
+| exp | what changed from exp 2       | 5 m                | 10 m               | 15 m               | did it help?      |
+| --- | ----------------------------- | ------------------ | ------------------ | ------------------ | ----------------- |
+| 2   | nothing                       | .549 / .557 / .553 | .701 / .696 / .699 | .767 / .767 / .767 | starting point    |
+| 4   | tree rows + lidar             | .523 / .545 / .533 | .693 / .703 / .698 | .767 / .779 / .773 | no                |
+| 5   | tree rows                     | .532 / .540 / .536 | .692 / .686 / .689 | .762 / .759 / .761 | no                |
+| 6   | lidar                         | .534 / .556 / .545 | .698 / .709 / .703 | .767 / .782 / .774 | no                |
+| 7   | nothing, new random start     | .530 / .550 / .540 | .687 / .694 / .691 | .756 / .766 / .761 | shows the luck    |
+| 8   | 90 epochs instead of 45       | .563 / .575 / .569 | .709 / .715 / .712 | .769 / .781 / .775 | a little          |
+| 9   | backbone trained too, lr 1e-5 | .569 / .593 / .581 | .710 / .733 / .721 | .764 / .794 / .779 | yes, new baseline |
+
+*(`exps/probe_polyline_pr.py`)*
+
 ## TODO
 
 Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:

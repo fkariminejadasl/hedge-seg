@@ -401,6 +401,24 @@ Same 3,098 held-out crops; gaps under 0.02 do not count *(`exps/probe_polyline_p
 
 ---
 
+## Backup: precision, recall and F1
+
+Each cell: precision / recall / F1, at cut-off 0.90, on the same 3,098 held-out crops.
+
+| what we changed | 5 m | 10 m | 15 m |
+|---|---|---|---|
+| our first good model | .549 / .557 / .553 | .701 / .696 / .699 | .767 / .767 / .767 |
+| + tree rows + laser | .523 / .545 / .533 | .693 / .703 / .698 | .767 / .779 / .773 |
+| + tree rows | .532 / .540 / .536 | .692 / .686 / .689 | .762 / .759 / .761 |
+| + laser | .534 / .556 / .545 | .698 / .709 / .703 | .767 / .782 / .774 |
+| new random start only | .530 / .550 / .540 | .687 / .694 / .691 | .756 / .766 / .761 |
+| train twice as long | .563 / .575 / .569 | .709 / .715 / .712 | .769 / .781 / .775 |
+| image part learns too | .569 / .593 / .581 | .710 / .733 / .721 | .764 / .794 / .779 |
+
+*(exps 2, 4 to 9, `exps/probe_polyline_pr.py`)*
+
+---
+
 ## Backup: measurement traps we hit
 
 - **Half of the hedges we thought we found were never found.** At the low
