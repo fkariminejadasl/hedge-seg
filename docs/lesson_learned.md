@@ -764,14 +764,17 @@ of the predicted length that matches no label is within 10 m of a tree line**,
 and only 1.2% is near another hedge, so this is not the crop clipping losing
 labels. The sanity check passes: 100% of the training GT sits on the heg layer.
 
-Exp 2 precision at 10 m is 0.783, so 0.217 of predicted length is unmatched and
-24.3% of that is 0.053. That is the measured size of the prize for adding tree
-lines as a second class, and it is why the reported precision is a lower bound
-on hedgerow performance rather than an honest error rate.
+What that is worth: exp 2 at t=0.95 has a precision of 0.783 at 10 m. So
+78.3% of the length it draws lies on a labelled hedge, and 21.7% counts as
+wrong. A quarter of that wrong part (24.3%) lies on a tree row, which is 5.3%
+of all the drawn length (0.243 x 0.217 = 0.053). If tree rows did not count as
+wrong, precision would be about 0.836 instead of 0.783. That 0.053 is what we
+hoped to win by adding tree rows as a second class. It is also why the
+precision we report is lower than the model's real skill.
 
-Exp 5 did not collect it. With tree rows as a second class, hedge precision at
-10 m went down, not up: 0.777 against 0.783 at t=0.95, and 0.692 against 0.701
-at t=0.90. *(exp 5, `exps/probe_polyline_pr.py`)*
+Exp 5 did not win it. With tree rows as a second class, hedge precision went
+down a little, not up: 0.777 against 0.783 at t=0.95. *(exp 5,
+`exps/probe_polyline_pr.py`)*
 
 This reverses an earlier call. Tree lines were ranked low because the worst
 crops looked like campsites rather than tree rows. The worst crops are not the
