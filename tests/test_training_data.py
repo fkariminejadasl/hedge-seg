@@ -103,41 +103,26 @@ def _assert_close_pngs(gt_dir: Path, gen_dir: Path, sub: str, stems: list[str]) 
         assert_images_close(a, b, max_abs_diff=20, max_bad_px_frac=9e-3)
 
 
-@pytest.mark.local
-@pytest.mark.parametrize(
-    "label_mode,use_osm,out_size_px",
-    [
-        ("both", True, None),
-        # ("both", True, None),
-        # ("both", True, 512),
-    ],
-)
-def test_generate_dataset_matches_ground_truth(
-    tmp_path: Path, label_mode: str, use_osm: bool, out_size_px: int | None
-):
-    """
-    Regression test: compare a freshly generated mini dataset against a ground truth folder.
-    """
-    base_dir = Path("/home/fatemeh/Downloads/hedge")
-    gt_dir = (base_dir / "results/test_mini_gt").resolve()
+GT_DIR = Path("/home/fatemeh/Downloads/hedge/results/test_mini_gt")
 
-    # Use a temp output directory for the generated data
-    gen_dir = tmp_path / "gen"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Generated dataset will be in: {gen_dir}")
+# label_mode, use_osm, out_size_px of the reference in GT_DIR.
+# OSM is off: the OpenStreetMap tile server now answers with a 403 "blocked"
+# tile instead of a map, and no script uses OSM any more.
+CASE = ("both", False, None)
 
-    # Use the exact same inputs and parameters you used to create gt_mini
-    shp_path = Path(
-        "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
-    )
-    tif_path = Path(
-        "/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
-    )
 
+def _generate(
+    out_dir: Path, label_mode: str, use_osm: bool, out_size_px: int | None
+) -> None:
+    """The one place the inputs and parameters of the reference are set."""
     generate_dataset(
-        shp_path=shp_path,
-        tif_path=tif_path,
-        out_dir=gen_dir,
+        shp_path=Path(
+            "/home/fatemeh/Downloads/hedge/Topo10NL2023/Hedges_polylines/Top10NL2023_inrichtingselementen_lijn_heg.shp"
+        ),
+        tif_path=Path(
+            "/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4/ahn4_10m_perc_95_normalized_height.tif"
+        ),
+        out_dir=out_dir,
         n_pos=10,
         n_neg=0,
         seed=123,
@@ -149,6 +134,27 @@ def test_generate_dataset_matches_ground_truth(
         band=1,
         line_width_px=2,
     )
+
+
+@pytest.mark.local
+@pytest.mark.parametrize("label_mode,use_osm,out_size_px", [CASE])
+def test_generate_dataset_matches_ground_truth(
+    tmp_path: Path, label_mode: str, use_osm: bool, out_size_px: int | None
+):
+    """
+    Regression test: compare a freshly generated mini dataset against a ground truth folder.
+
+    After an intended change to generate_dataset, rebuild the reference with
+    PYTHONPATH=. python tests/test_training_data.py
+    """
+    gt_dir = GT_DIR
+
+    # Use a temp output directory for the generated data
+    gen_dir = tmp_path / "gen"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Generated dataset will be in: {gen_dir}")
+
+    _generate(gen_dir, label_mode, use_osm, out_size_px)
 
     # Compare labels first, since they define the ids
     stems = _assert_same_file_set(gt_dir, gen_dir, "labels", ".json")
@@ -177,3 +183,10 @@ def test_generate_dataset_matches_ground_truth(
         assert osm_stems == stems
         # osm images may differ slightly
         _assert_close_pngs(gt_dir, gen_dir, "osm", osm_stems)
+
+
+if __name__ == "__main__":
+    # generate_dataset appends to a directory that already has crops, with a
+    # different seed, so the old reference has to be moved away first.
+    assert not GT_DIR.exists(), f"Move the old reference away first: {GT_DIR}"
+    _generate(GT_DIR, *CASE)

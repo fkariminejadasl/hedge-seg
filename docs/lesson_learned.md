@@ -919,6 +919,24 @@ with the same weights and compare the tensors
 from a git revision). Comparing NPZs from two GPU runs on different days
 answers a different question.
 
+## A reference test must be rebuilt when the output changes on purpose
+
+`tests/test_training_data.py` compares 10 freshly built lidar crops with a
+saved copy, `test_mini_gt`, made on 2026-03-03. Commits from 2026-03-11 to
+2026-03-18 changed the labels on purpose: points are floored instead of
+rounded, lines under 10 px are dropped, and `n_lines` counts stored lines (31
+became 19 on one crop). The copy was not rebuilt, so the test failed from then
+on. The March code still reproduces the copy exactly, so those commits were
+the only cause.
+
+The test matters more than its name says. `make_polylines_for_chip` in
+`hedge_seg/pdok_training_data.py` makes every hedge and tree row label with the
+same helpers. Rebuild the copy in the commit that changes the output:
+`PYTHONPATH=. python tests/test_training_data.py`.
+
+OSM is off in the test. The OpenStreetMap tile server now sends a 403
+"blocked" tile instead of a map, so a copy built with it would store that.
+
 ## A split can be pinned to a stem list
 
 The geographic split depends on where the conversion runs, because

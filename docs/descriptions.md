@@ -59,7 +59,7 @@ Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of pol
 
 ### Core Library Modules
 
-- `hedge_seg/training_data.py`: generates images and labels from a local hedge shapefile plus a local GeoTIFF raster, currently used for LiDAR-derived training data.
+- `hedge_seg/training_data.py`: generates images and labels from a local hedge shapefile plus a local GeoTIFF raster, currently used for LiDAR-derived training data. Its line helpers (`lines_in_bbox`, `geom_to_lines`, `clip_px_point`, ...) also make every PDOK label, through `make_polylines_for_chip` in `hedge_seg/pdok_training_data.py`. `tests/test_training_data.py` checks them against a saved 10-crop copy in `test_mini_gt`; after an intended change, rebuild that copy with `PYTHONPATH=. python tests/test_training_data.py`.
 - `hedge_seg/label_postprocess.py`: resamples polylines to equidistant points and adds derived per-segment annotations (e.g. bounding boxes) as a post-processing pass over generated labels.
 - `hedge_seg/embeddings_and_pack.py`: computes DINOv3 image embeddings (sequential or batched) and packs them together with (post-processed) labels into the `embs_*` datasets consumed by the DETR-from-embeddings training scripts.
 - `hedge_seg/pdok_training_data.py`: generates images and labels by requesting aerial imagery directly from PDOK WMS and combining it with the hedge shapefile.
