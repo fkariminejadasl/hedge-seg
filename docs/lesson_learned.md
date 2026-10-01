@@ -934,14 +934,17 @@ The test matters more than its name says. `make_polylines_for_chip` in
 same helpers. Rebuild the copy in the commit that changes the output:
 `PYTHONPATH=. python tests/test_training_data.py`.
 
-OSM is off in the test. The OpenStreetMap tile server blocks contextily's
-default User-Agent, the name a program sends to say who it is
+OSM chips had a second, silent fault. The OpenStreetMap tile server blocks
+contextily's default User-Agent, the name a program sends to say who it is
 (`contextily-<random hex>`, which names no app). It still answers HTTP 200,
-with an image that says "Access blocked", so nothing raises and a copy built
-with it stores the notice as a map. The same tile asked for under a name for
-this project comes back as the map, so the block is on the name, not the
-address. No account is needed to fix it, only a `headers` argument to
-`ctx.bounds2img`. *(`exps/probe_osm_user_agent.py`)*
+with an image that says "Access blocked", so nothing raised and OSM chips
+built after the block were the notice. The same tile asked for under a name for this project comes
+back as the map, so the block is on the name, not the address. Fixed:
+`save_osm_chip` in `hedge_seg/training_data.py` now sends `OSM_USER_AGENT`. No
+account is needed. *(`exps/probe_osm_user_agent.py`)*
+
+OSM stays off in the test anyway. Volunteers edit the map every day, so tiles
+drift away from any saved copy, and the test would need the network.
 
 ## A split can be pinned to a stem list
 

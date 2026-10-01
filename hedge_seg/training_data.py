@@ -30,6 +30,11 @@ from rasterio.windows import bounds as win_bounds
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 
+# The name sent with every OSM tile request. The OSM server blocks contextily's
+# default name and answers with an "Access blocked" image instead of the map
+# (exps/probe_osm_user_agent.py).
+OSM_USER_AGENT = "hedge-seg research"
+
 # ----------------------------
 # Utils
 # ----------------------------
@@ -271,6 +276,7 @@ def save_osm_chip(
         maxy_m,
         zoom=zoom,
         source=ctx.providers.OpenStreetMap.Mapnik,
+        headers={"user-agent": OSM_USER_AGENT},
         ll=False,
     )
 
