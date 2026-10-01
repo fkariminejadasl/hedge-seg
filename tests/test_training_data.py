@@ -106,8 +106,9 @@ def _assert_close_pngs(gt_dir: Path, gen_dir: Path, sub: str, stems: list[str]) 
 GT_DIR = Path("/home/fatemeh/Downloads/hedge/results/test_mini_gt")
 
 # label_mode, use_osm, out_size_px of the reference in GT_DIR.
-# OSM is off: the OpenStreetMap tile server now answers with a 403 "blocked"
-# tile instead of a map, and no script uses OSM any more.
+# OSM is off: the OpenStreetMap tile server blocks contextily's default
+# User-Agent. It answers HTTP 200 with an image that says Access blocked, so
+# nothing raises (exps/probe_osm_user_agent.py). No script uses OSM any more.
 CASE = ("both", False, None)
 
 

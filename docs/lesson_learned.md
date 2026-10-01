@@ -934,8 +934,14 @@ The test matters more than its name says. `make_polylines_for_chip` in
 same helpers. Rebuild the copy in the commit that changes the output:
 `PYTHONPATH=. python tests/test_training_data.py`.
 
-OSM is off in the test. The OpenStreetMap tile server now sends a 403
-"blocked" tile instead of a map, so a copy built with it would store that.
+OSM is off in the test. The OpenStreetMap tile server blocks contextily's
+default User-Agent, the name a program sends to say who it is
+(`contextily-<random hex>`, which names no app). It still answers HTTP 200,
+with an image that says "Access blocked", so nothing raises and a copy built
+with it stores the notice as a map. The same tile asked for under a name for
+this project comes back as the map, so the block is on the name, not the
+address. No account is needed to fix it, only a `headers` argument to
+`ctx.bounds2img`. *(`exps/probe_osm_user_agent.py`)*
 
 ## A split can be pinned to a stem list
 
