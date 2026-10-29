@@ -68,7 +68,6 @@ Parameter counts:
 
 - ResNet18: 11.7 M
 - ResNet18-UNet: 14.4 M
-- Polyline total: 7.9 M (encoder 3.2 M, decoder 4.2 M, rest 0.6 M)
 - Diffusion: 6.1 M
 
 MapTR image/feature/BEV grid sizes:

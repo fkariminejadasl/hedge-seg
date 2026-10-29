@@ -8,7 +8,35 @@ Lowres LiDAR height data: In 256 x 256 image the max number of polylines are 441
 
 There are 691,006 polylines and 4121 closed shape, which some are not originally closed but start and end are closeby, e.g. test_256_None.
 
-Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of polylines 50. 106,812 polylines in 30,000 images, e.g. pdok_dataset3. Crops are sampled per polyline, so 72.6% of crops overlap at least one other crop (up to 41 neighbors); a naive random 80/20 split would leak 68.5% of val crops into training. `scripts/data/convert_pdok_polylines_to_detr_polyline.py` fixes this with a geographic block split (verified zero overlap by construction), opens closed rings (0.45% of raw polylines, 302/67,430), and drops polylines under 10 m (3.16% of raw polylines, 3,378/106,812), giving 103,434 training polylines. The split depends on where the conversion runs, because `avoid_label_dirs` sees 10 pdok_dataset2 labels locally and 5,000 on the cluster: locally train=24,253 / val=5,747, on the cluster train=26,902 / val=3,098. The cluster split is the operative one, since it is what every cluster run trained against. A checkpoint must only be scored on the val stems of the conversion that produced it.
+### Aerial images (pdok_dataset3)
+
+The data of every polyline run.
+
+- 30,000 crops of 1000 x 1000 px at 25 cm per pixel, so 250 m x 250 m on the ground. One crop per sampled hedge polyline.
+- 106,812 hedge polylines, at most 50 per crop. `scripts/data/convert_pdok_polylines_to_detr_polyline.py` opens closed rings (0.45% of raw polylines, 302/67,430) and drops polylines under 10 m (3.16%, 3,378/106,812), leaving 103,434.
+- Crops overlap. 72.6% of crops overlap at least one other crop, up to 41. A random 80/20 split would put 68.5% of val crops on top of a training crop (`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`).
+
+### Train/val split
+
+Split by location, in `spatial_train_val_split` of `scripts/data/convert_pdok_polylines_to_detr_polyline.py`:
+
+1. The country is cut into 5 km x 5 km blocks. A seeded hash puts 20% of the blocks in val and the rest in train.
+1. Crops that overlap are joined into groups. A group goes to val only if every crop in it lies in a val block and none overlaps the pdok_dataset2 crops the UNet backbone was trained on. Otherwise the whole group goes to train.
+1. An assert checks that no val crop overlaps a train crop.
+
+This gives train 26,902 and val 3,098 crops. Every run is scored on these 3,098.
+
+The split guarantees no overlap, not a distance. Because whole groups go to train, train crops also sit inside val blocks: 235 of the 285 blocks that hold val crops also hold train crops. The gap from a val crop to its nearest train crop, edge to edge, is 593 m at the median. 5% are under 50 m, 95% under 2.1 km, and the largest is 4.5 km. 3 val crops touch a train crop. So val is ground the model has not seen, but mostly nearby ground, not a distant region (`exps/probe_split_gap.py`).
+
+## Model
+
+`scripts/train_detr_unet_polyline.py` as in exp 9, the best run. 20.2 M parameters (`exps/probe_model_size.py`):
+
+- Backbone, ResNet18-UNet: 14.4 M. The model reads its features at up3, so 13.5 M are used. The other 0.85 M (up2, up1, up0 and the segmentation head) are carried along and never used.
+- Polyline head: 5.8 M. Transformer encoder (1 layer) 0.8 M, decoder (4 layers) 4.2 M, the rest (input projection, queries, point refinement, class head) 0.8 M.
+- Input: the crop padded with black to 1024 x 1024, on the bottom and right, so it divides by the backbone stride of 16. The backbone turns it into 64 x 64 = 4,096 tokens of 256 numbers.
+- Output: 60 polylines of 20 points, each with a hedge score.
+- Exps 1 to 8 froze the backbone, so only the 5.8 M head trained. Exp 9 trains all of it, the backbone at a 10x lower learning rate (`backbone_lr=1e-5`).
 
 ## Overview
 
@@ -37,7 +65,7 @@ Highres aerial image: 25 cm per pixel, 1000 x 1000 image crop. Max number of pol
   Not tried yet:
 
   - LiDAR only, aerial only, and the tree/lidar ablations after exp 4
-  - Different backbone/embeddings: DINOv3 sat, Google Satellite embeddings
+  - Different backbone/embeddings: DINOv3 sat, Google Satellite embeddings, SkySense
 
 ### Key Findings
 
@@ -130,6 +158,8 @@ One-off probes are named `probe_*.py` and each one records what it found in its 
 - `exps/probe_batch_size.py`: finds the largest batch size that fits on the current GPU by running real training steps. `FROZEN=False` measures a run that trains the backbone too: on the laptop that costs about 0.83 GB per image against 0.35, and about 1.3 times the time per image.
 - `exps/dataset_stats.py`: per-dataset counts (crops, polylines, rings opened, short polylines dropped) used to fill the numbers in this file and in `docs/experiments_log.md`.
 - `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`: measures how much crops overlap geographically and how much a naive random split would leak, via `hedge_seg.utils.geographic_overlap_stats`. This is the evidence for the block split.
+- `exps/probe_split_gap.py`: how far each val crop is from the nearest train crop, edge to edge, and how many 5 km val blocks also hold train crops. Run on the cluster; on the laptop point it at `polylines/val_cluster`.
+- `exps/probe_model_size.py`: parameter count of the exp 9 model, per part. Loads `best_9.pt` with `strict=True`, so it counts the model that ran.
 - `exps/smoke_test_train_detr_unet_polyline.py`: fast end-to-end check of `train_detr_unet_polyline.py` (a few steps on a handful of crops) to catch breakage before a cluster job.
 - `exps/data.py`: raster/vector helpers (load GeoTIFF, clip/window a raster to a bbox, rasterize hedge polylines) shared by the training-data workflows.
 - `exps/basic_data.py`: early scratch helpers for loading and inspecting the raw hedge shapefile and rasters, superseded by `exps/data.py`.
