@@ -24,7 +24,7 @@ Split by location, in `spatial_train_val_split` of `scripts/data/convert_pdok_po
 1. Crops that overlap are joined into groups. A group goes to val only if every crop in it lies in a val block and none overlaps the pdok_dataset2 crops the UNet backbone was trained on. Otherwise the whole group goes to train.
 1. An assert checks that no val crop overlaps a train crop.
 
-This gives train 26,902 and val 3,098 crops. Every run is scored on these 3,098.
+This gives train 26,902 and val 3,098 crops. Val is 10.3%, not 20%, because groups that overlap the backbone's crops go to train. Every run is scored on these 3,098.
 
 The split guarantees no overlap, not a distance. Because whole groups go to train, train crops also sit inside val blocks: 235 of the 285 blocks that hold val crops also hold train crops. The gap from a val crop to its nearest train crop, edge to edge, is 593 m at the median. 5% are under 50 m, 95% under 2.1 km, and the largest is 4.5 km. 3 val crops touch a train crop. So val is ground the model has not seen, but mostly nearby ground, not a distant region (`exps/probe_split_gap.py`).
 

@@ -129,14 +129,22 @@ fix, versus 12 before.
 
 ## Why block_m = 5000 m for the geographic split
 
-The block size only has to satisfy two things: much larger than the 250 m
-crop, so blocks and overlap groups do not fight each other, and small enough
-that there are many blocks to hash, so the achieved val fraction lands near
-the target. At 30k crops spread over the Netherlands, 5 km blocks give 19.1%
-val against a 20% target, which is close enough
-(`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`). There is no optimum here; if
-the exact fraction ever matters, the fix is to retry seeds until the achieved
-fraction is within a tolerance, not to tune the block size.
+The block size has two jobs. It must be much larger than the 250 m crop, so
+most overlap groups fit inside one block. And it must be small enough that
+there are many blocks to hash, so the val fraction lands near the target.
+Without the backbone filter, 5 km blocks give 19.1% val against a 20% target
+(`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`, run on the laptop
+conversion). The cluster split is 10.3% val, because groups that overlap the
+pdok_dataset2 crops the backbone was trained on go to train.
+
+The blocks set the val fraction, not the distance to train. A group that
+reaches into a train block, or overlaps the backbone's crops, goes to train
+whole, even where it lies in a val block. So 235 of the 285 blocks that hold
+val crops also hold train crops, and the median val crop is 593 m from the
+nearest train crop (`exps/probe_split_gap.py`).
+
+There is no optimum here. If the exact fraction ever matters, retry seeds
+until it is within a tolerance; do not tune the block size.
 
 ## Length filters must be checked on the stored polyline
 
