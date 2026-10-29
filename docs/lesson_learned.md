@@ -1,0 +1,1186 @@
+## MapTR lessons
+
+BEV resolution: MapTR-tiny uses a 30 cm BEV cell size over a (30 x 60) m area, giving a (100 x 200) BEV grid (`projects/configs/maptr/maptr_tiny_r50_24e.py`). MapTR-nano uses 75 cm cells, giving a (40 x 80) grid.
+
+The decoder uses self-attention among hierarchical instance and point queries, and deformable cross-attention from these queries to the BEV features.
+
+A coarse BEV token may summarize several nearby polylines. The important factor is the spatial granularity of the BEV features. If downsampling removes the polylines’ relative positions, and that information is not retained in the feature channels, the decoder cannot reliably separate or localize them.
+
+Having more polylines than BEV tokens is not inherently a problem because there is no one-token-per-polyline assignment. Each hierarchical point query can sample multiple BEV locations, and multiple queries can use overlapping BEV features. The polylines remain distinguishable only if those features preserve enough spatial information about them.
+
+## Why extra losses cause a zigzag (and why only poly + class overfits)
+
+The problem: the model predicts 20 points per line, but the points come out in the
+wrong order, so the line looks like a zigzag around the right place.
+
+Main idea: only the ordered point loss (poly L1) knows which point is point 0, point 1,
+and so on. All the other losses do not care about the order of the points. A zigzag makes them just as happy as a straight line. So the other losses cannot fix the order, and their gradients cover up the one loss that can.
+
+Think of 20 numbered beads that should sit on a straight wire, in order.
+
+| Loss                          | What it checks                               | Effect on a zigzag                                                                                                                                                        |
+| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Ordered L1** (poly)         | each bead k must go to its own target spot k | the only loss that cares about order. On its own it fixes the line, so the model overfits.                                                                                |
+| **Box** (L1 / gIoU)           | the outer rectangle around the points        | does not care about order. Any shape that fills the same rectangle gets the same score, and it only moves the corner points. This is the main cause (removing it helped). |
+| **Length**                    | the distance between neighbor points         | any zigzag with the right spacing scores zero. Early in training it spreads the points in random directions, which starts the zigzag.                                     |
+| **Direction** (1 - cos angle) | the angle of each small piece                | if fully satisfied it gives a straight line, so it does not prefer a zigzag. It is not a main cause (changing it did not help).                                           |
+
+## Why the ordered loss cannot fix the zigzag
+
+The box and length losses are happy with a zigzag, so the ordered loss is the only one
+that complains, and it gets outvoted:
+
+- Forward/backward switching: A line has two ends, and reading its points from
+  either end describes the same line. So the loss matches the prediction to the ground
+  truth read forward or read backward, whichever is closer. A clean line clearly matches
+  one way, so the choice is stable. A zigzag sits evenly on both sides of the true line,
+  so both readings are about equally close and the model keeps switching. Each switch
+  sends a point's target to the opposite end of the line. Point 3 is told "go to the top"
+  one step and "go to the bottom" the next step, so the two orders cancel and every point
+  drifts to the middle. The order never settles.
+
+- Gradient clipping: When two points sit almost on top of each other, the direction
+  loss gradient becomes very large. The gradient clipping then shrinks the whole gradient, including the ordered loss that would fix the order. This is why the loss keeps going down very slowly for thousands of epochs but never finishes.
+
+Note: the direction loss has zero gradient when a piece points exactly forward (0 degrees) or exactly backward (180 degrees). That is true for the formula, but it only happens at those exact angles. Real zigzag pieces sit at in-between angles where the gradient is fine, so this is not the real cause here.
+
+## The rule
+
+The order of the points can only come from a loss that checks each point by its number.
+The box, length, and direction losses do not check the order, so they should only be small
+extra helpers on top of a strong ordered loss, never large.
+
+MapTR agrees. Its recipe is: class loss plus ordered point loss at weight 5.0, direction
+at a tiny 0.005, and no length or box loss at all. This matches the experiments: poly plus
+class (plus aux) overfits, and adding box or length brings back the zigzag.
+
+## What makes MapTR-style point queries work
+
+Two more lessons, both confirmed in the code:
+
+- Per-layer reference-point refinement plus dynamic query position: Each decoder layer
+  does not predict the points from scratch. It starts from the current reference points and
+  predicts a small correction, so the points get sharper layer by layer. At each layer the
+  query position is rebuilt from the current reference point, so the attention knows where
+  each point sits right now. This is the main reason MapTR-style point queries learn fast.
+
+- The query content is learned, not only the query position: Each query has two learned
+  parts: one for position (query_pos) and one for content (query_content, the starting input
+  to the decoder). In plain DETR the content input starts at zero and only the position is
+  learned. In MapTR both are learned (see `_build_hierarchical_queries`, where the query
+  embedding is split into query_pos and query_content).
+
+  This may help because the learned content gives each point query a starting hint
+  about which point it is and how it relates to the other points in the same line,
+  instead of starting from a zero vector.
+
+## Converting the polyline loss into meters
+
+- The polyline loss is an average L1 error per coordinate, taken over every point of
+  every matched line. Points are normalized to [0,1] by the padded image size
+  (pad_to - 1 = 1023), so multiplying the loss by 1023 turns it back into pixels.
+  A loss of 0.004 is therefore about 4 pixels of error per coordinate, which at
+  25 cm per pixel is about 1 meter on the ground (`meters_to_px` in
+  `hedge_seg/metrics.py`). Note this is per coordinate, with
+  x and y averaged separately, so the real distance from a predicted point to its
+  target is somewhat larger, up to about 1.4 times.
+
+## A zigzag early in training that fixes itself is normal
+
+Seen in the working UNet runs: the lines look like a zigzag in the first epochs, then
+become clean later. This is expected and is not a problem.
+
+- At the start, all 20 points of a line begin near the same reference point, in no real
+  order, so the first predictions look tangled.
+- The ordered point loss plus the per-layer refinement then sort the points into order,
+  and the zigzag goes away.
+
+This is different from the old broken zigzag, which never went away. That one was held in
+place because the box and length losses were happy with a zigzag. In these runs all the
+geometric losses are set to 0 (only class + point L1 + aux are on), so nothing holds a
+zigzag, and any early one clears up.
+
+So the length loss idea is not the cause. The early zigzag is just the starting
+state before the order is learned. A zigzag only becomes a real problem when a loss that
+does not care about point order is strong enough to keep it.
+
+## Why ordered L1 is preferable to a tolerance loss
+
+With approximately 100,000 polylines (`exps/dataset_stats.py`) whose ground-truth noise is mostly unbiased, L1 regression learns the conditional median. Random annotation errors therefore tend to average out, and the model may predict the true visible hedge location more accurately than some individual labels.
+
+A tolerance band, where the loss becomes zero within ±ε, does not correct a systematic offset in the ground truth. It only declares a range of positions acceptable. It also removes the gradient near the target, exactly where the model is refining point placement and point ordering. Since ordered point loss is the main signal that teaches each predicted point its correct position in the sequence, weakening it may leave small zigzags, swapped points, or imprecise geometry.
+
+Therefore, keep the standard ordered L1 loss for training. During inference and evaluation, compare predictions using buffered precision and recall at several tolerances, such as 1 m, 5 m, 10 m, and 15 m. This allows the evaluation to account for annotation uncertainty without weakening the training signal.
+
+## A closed ring can have a near-duplicate point right after the start too
+
+Opening a closed ring by dropping only the last point assumes the ring is
+otherwise clean. In pdok_dataset3, 14 of 302 closed rings (4.6%) also have a
+near-duplicate point right after the start (or before the end), e.g.
+`[p0, p0+eps, ..., pN-eps, p0]`. Dropping only the last point still leaves a
+near-zero-length first segment, which behaves like the box/length-loss
+failure mode: a degenerate segment with an almost-undefined direction.
+
+Fix: collapse consecutive near-duplicate points (within closed_eps_px) before
+checking whether the ring is closed, then drop the last point
+(`open_closed_ring` in `scripts/data/convert_pdok_polylines_to_detr_polyline.py`).
+Verified on the full dataset: 0 rings left with a near-zero segment after the
+fix, versus 12 before.
+
+## Why block_m = 5000 m for the geographic split
+
+The block size has two jobs. It must be much larger than the 250 m crop, so
+most overlap groups fit inside one block. And it must be small enough that
+there are many blocks to hash, so the val fraction lands near the target.
+Without the backbone filter, 5 km blocks give 19.1% val against a 20% target
+(`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`, run on the laptop
+conversion). The cluster split is 10.3% val, because groups that overlap the
+pdok_dataset2 crops the backbone was trained on go to train.
+
+The blocks set the val fraction, not the distance to train. A group that
+reaches into a train block, or overlaps the backbone's crops, goes to train
+whole, even where it lies in a val block. So 235 of the 285 blocks that hold
+val crops also hold train crops, and the median val crop is 593 m from the
+nearest train crop (`exps/probe_split_gap.py`).
+
+There is no optimum here. If the exact fraction ever matters, retry seeds
+until it is within a tolerance; do not tune the block size.
+
+## Length filters must be checked on the stored polyline
+
+The converter first filters raw polylines by length, then resamples them to
+20 equidistant points. `resample_polyline_equidistant` rounds coordinates to
+0.1 px, so a polyline sitting right on the threshold (40.006 px) can end up a
+hair below it (39.9997 px) after resampling. Two polylines in pdok_dataset3
+did exactly this and were stored despite being under the threshold.
+
+Fix: re-check the length after resampling, since the resampled polyline is
+what training actually sees (`scripts/data/convert_pdok_polylines_to_detr_polyline.py`). Border clipping was verified not to change
+lengths (0 of 13,416 polylines), so the check after resampling is enough.
+
+## Regenerating a split must delete the old outputs
+
+The converter writes `polylines/{train,val}/*.npz`. Re-running it with
+different split settings (for example after enabling `avoid_label_dirs`) can
+move a crop from val to train, but the stale copy in the other directory
+survives, so the same image ends up in both splits. This is silent: 30,004
+files were written for 30,000 images, with 4 stems duplicated.
+
+Fix: delete existing NPZs in both split directories before writing. This was
+caught by `verify_no_split_overlap` in `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`,
+which is a good argument for keeping such checks as asserts in the analysis
+scripts rather than as one-off manual checks.
+
+## The largest batch that fits is not the batch size to use
+
+Probed on an A100-40GB with `exps/probe_batch_size.py` (real train step:
+forward, loss, backward, optimizer, since backward dominates peak memory):
+
+| batch | peak GB | s/step | s/image |
+| ----- | ------- | ------ | ------- |
+| 4     | 1.55    | 0.123  | 0.0307  |
+| 16    | 5.76    | 0.445  | 0.0278  |
+| 32    | 11.41   | 0.861  | 0.0269  |
+| 64    | 22.67   | 1.678  | 0.0262  |
+
+Memory is linear in batch size (about 0.354 GB per 1024x1024 image), so 40 GB
+would fit roughly 100 images. But time per image is already flat at batch 16:
+going from 16 to 64 saves 6% per image while cutting optimizer steps per epoch
+by 4 (313 to 78 for a 5,000 image epoch). The GPU is saturated well before it
+is full, so the extra memory buys steps, not speed.
+
+Consequences:
+
+- Pick the batch size where s/image stops improving, not the one that fills
+  the GPU. Here that is 16, which also matches the effective batch size DETR's
+  lr=1e-4 is tuned for.
+- Headroom left over is useful for other things: a larger model, a finer
+  feature stage (`up3` -> stride 8), or unfreezing the backbone.
+- num_workers has to account for persistent workers on both the train and the
+  eval loader: 8 workers means 16 processes, which is right for the 18 CPUs
+  that come with one A100.
+
+## A slurm log begins with the source code, so do not grep the whole file
+
+The slurm script cats `paths.py`, the data scripts and the whole training
+script into the `.out` file, so the log documents the run on its own. That means
+the first few thousand lines are Python, not output. Grepping the file for
+`Error` or `Traceback` matches error-handling code in the source and reports a
+failure on a healthy job. It happened on exp 5, on a run that was training fine.
+
+Cut to the run output first, then search:
+
+```
+sed -n '/^start training/,$p' <n>_<jobid>.out | grep ...
+```
+
+The same trap hides real information. A config that is off shows up in the
+dumped source as well as in the output, so a grep for a setting returns both
+and the source copy is the one that is always there.
+
+## A slurm log that stops updating is usually just buffering
+
+In the first cluster run the .out file stopped at "Epoch 005 starting" while
+nvtop showed the GPU busy, tensorboard showed 26 epochs, and best_1.pt was an
+hour newer than the log. Nothing was wrong: Python block buffers stdout (8 KB)
+when it is a file rather than a terminal, and one epoch prints about 330
+bytes, so roughly 25 epochs accumulate before each flush. Tensorboard is
+unaffected because SummaryWriter flushes on its own timer, and checkpoints are
+written directly.
+
+Fix: run the training script with `python -u` in the slurm script. Before
+concluding a cluster job is stuck, compare the log timestamp against the
+checkpoint mtime and the job state, not the log alone.
+
+## A frozen run with the GPU idle is a DataLoader worker hang
+
+Symptom: the log stops, but the main process spins at ~100% CPU while the GPU
+sits at 0%, and (in a laptop run) the machine still feels busy. This is not
+slow training, it is a hang. It froze the 5000-image laptop run at epoch 11,
+right after the first eval (eval was epoch 10).
+
+Cause: to load images fast, the DataLoader starts a few worker processes. There
+are different ways to start them: fork (old, simple) and forkserver (newer).
+Python 3.14 changed the default to forkserver, which deadlocks with persistent
+workers across the eval to train transition: after the eval epoch the workers
+respawn and the main process gets stuck coordinating with them.
+
+Fix: force the fork start method for the DataLoader
+(`multiprocessing_context="fork"`, done via `_mp_context` in
+`scripts/train_detr_unet_polyline.py`). fork is safe here because the workers do
+no CUDA work. The cluster was never affected (its Python defaults to fork, and
+the cluster run passed many eval transitions), but the fix protects both.
+
+How to tell a hang from slow training: check GPU utilization (nvtop), not just
+the log. 0% GPU with a busy CPU means a worker hang; a busy GPU means it is just
+slow. `exps/smoke_test_train_detr_unet_polyline.py` reproduces the eval to
+train transitions quickly and fails if this regresses.
+
+## A score is meaningless without the threshold it was read at
+
+Exp 2 is on record as F1 0.699 at 10 m and 0.547 at 5 m. Those are two different
+thresholds: 0.699 is at t=0.90 and 0.547 is at t=0.95. At its own best threshold
+exp 2 scores 0.553 at 5 m, not 0.547. Comparing exp 4 against the pair as if it
+were one operating point makes the 5 m loss look like 0.014 when it is 0.020.
+
+The optimum also moves with the model, so it has to be re-swept every time
+(exp 1 peaked at 0.95, exps 2 and 4 at 0.90, exp 3 at 0.40). Quote the
+threshold beside every number, and compare two runs either at one shared
+threshold or each at its own optimum, never one of each.
+*(`exps/probe_polyline_pr.py`)*
+
+## How big a gap has to be before it counts
+
+A score can move by luck. There are two kinds:
+
+- **Which crops are in the val set.** If we pick the 3,098 crops again at
+  random, a gap between two runs moves by about 0.005.
+- **The random start of training.** Exp 7 is exp 2 run again, with only the
+  random start (the seed) changed. It scores 0.008 lower at 10 m and 0.013
+  lower at 5 m.
+
+The second kind is bigger. So a gap of about 0.01 can appear with no real
+change at all. We ask for 0.02 before we call a run better. That bar was a
+guess at first, and exp 7 shows it is about right. Exp 9 (+0.023 at 10 m)
+passes it; exps 4 to 6 do not. It rests on one repeat, so it is rough.
+*(exps 2 and 7, `exps/probe_f1_gap_bootstrap.py`)*
+
+## No cheap measure can rank two checkpoints, so build the real one
+
+Cluster run 1, two checkpoints, same cluster-val crops at threshold 0.95. Three
+cheap rankings gave three answers: eval loss picked `best_1.pt` (epoch 65),
+mean lines per image picked `1_150.pt`, mean error per image picked `best_1.pt`
+again. The mean count is the trap: per image `1_150.pt` predicts nothing on two
+crops that have hedges and 16 lines on a crop that has 3, and those cancel.
+
+Buffered length over all 3,098 val crops settled it (`exps/probe_polyline_pr.py`).
+`1_150.pt` wins at every buffer, F1 0.640 against 0.614 at 10 m. So the checkpoint the eval loss calls
+overfit is the better detector, and its advantage is recall.
+
+Two rules follow. Do not report eval loss as a result, and do not early-stop on
+it. Aggregate per image and then average, never as a ratio of two totals,
+because errors of opposite sign cancel in a total.
+
+## Chamfer plus Hungarian is the wrong metric for polylines
+
+The obvious detection metric is to pair each prediction with one GT line, the
+way a box detector pairs by IoU, and call the pair a hit if the chamfer
+distance is under 5, 10 or 15 m. It gives F1 0.41 where buffered length gives
+0.64, on the same predictions, and the figures agree with 0.64.
+
+Two ordinary cases break the pairing:
+
+- A hedge that turns a corner is one L-shaped GT line. A prediction covering
+  one leg is half right, but chamfer averages over the whole GT line, so the
+  far leg pushes the average to about 17 m and the pair fails at every
+  threshold. The correct half is thrown away.
+- A hedge stored as three overlapping GT lines can be paired with only one of
+  them. The other two count as misses even though the hedge was covered.
+
+Buffered length never pairs anything. It asks how much of the drawn length lies
+within r of a real hedge, and how much of the real hedge length has something
+drawn within r of it. Both cases then score honestly. Use `buffered_length_pr`
+in `hedge_seg/metrics.py`; `matched_pr` is kept there only to reproduce this.
+
+## Most of the recall at a low threshold is clutter, not lost hedges
+
+This corrects the central claim of the last two months of work. "Recall is 0.84
+at t=0.05, so the model finds the hedges and the score throws them away" was
+wrong, and it cost an 11 hour run (exp 3) to find out.
+
+The hole in it: at t=0.05 the model draws about 13 lines per image against 2.1
+labelled lines. Buffered recall asks how much labelled length has *any*
+prediction within 10 m, and with 13 lines on a 250 m crop a lot of that happens
+by luck. `exps/probe_recall_null_model.py` measures the luck by scoring each
+crop's predictions against a *different* crop's labels, so the number, length
+and orientation of the lines are unchanged and only the link to the image is
+broken:
+
+| threshold | pred/img | real recall | null recall | skill     |
+| --------- | -------- | ----------- | ----------- | --------- |
+| 0.05      | 12.6     | 0.840       | 0.379       | 0.461     |
+| 0.40      | 7.9      | 0.805       | 0.334       | 0.471     |
+| 0.90      | 3.2      | 0.696       | 0.266       | **0.431** |
+| 0.95      | 1.9      | 0.608       | 0.228       | 0.380     |
+
+Nearly half of the celebrated 0.84 is what another crop's predictions would
+score.
+
+How to read the table. Exp 2 runs at t=0.90. The score head cannot draw a new
+line, it only keeps or drops lines the model already drew, so the best it could
+ever do is move exp 2 to another row of this table. Judged by real recall,
+going from t=0.90 to t=0.05 gains 0.840 - 0.696 = 0.14. Judged by skill, going
+from t=0.90 to t=0.40 gains 0.471 - 0.431 = 0.04. The 0.04 is the real gain.
+The 0.14 counts luck as a gain.
+
+What this means. The model did learn to find hedges. Shuffle the picture and
+the same lines score 0.379 instead of 0.840, and that gap can only come from
+having seen the image. What it did not do is find as many as it appeared to.
+The hedges it misses are missing because it never drew a line there, not
+because the score buried the line. So the score head is closed as a line of
+work, worth 0.04, and everything after this targets perception: draw more of
+the right lines in the first place.
+
+Two rules. Any metric that rewards drawing more lines needs a null model before
+it is used to justify a run. And a threshold sweep is not evidence of headroom:
+falling precision as the threshold drops is the same fact as rising recall.
+
+The threshold is still not a constant. It was 0.95 for exp 1, 0.90 for exp 2
+and 0.40 for exp 3. Re-sweep after any change and record the value.
+
+## The score ranks lines by how straight they are, not by whether they are right
+
+Measured on exp 2 `best_2.pt`, all 3,098 val crops from the t=0.05 run. A
+prediction counts as correct if at least 80% of its length is within 10 m of a
+label. 7,956 of 39,104 predictions are correct.
+
+| straightness      | median score, correct | median score, wrong |
+| ----------------- | --------------------- | ------------------- |
+| < 0.85 (bent)     | **0.453**             | 0.216               |
+| 0.85 to 0.95      | 0.883                 | 0.690               |
+| 0.95 to 0.99      | 0.951                 | 0.868               |
+| > 0.99 (straight) | 0.974                 | **0.957**           |
+
+A correct bent line scores 0.45 and a wrong straight one scores 0.96, so no
+single threshold can keep both. At t=0.95 only 9% of correct bent predictions
+survive against 74% of correct straight ones. The score's AUC for correct
+against wrong is 0.767 overall but only 0.618 inside the bent group, so most of
+its apparent skill is straightness acting as a proxy.
+
+Two earlier readings were wrong because of this, and both are corrected above:
+
+- "Exp 2 draws straighter lines than the labels" was a thresholding artifact.
+  The model draws bends. At t=0.80 predicted straightness is 0.908 against
+  0.909 in the labels, an almost exact match. Only the 0.95 cut makes it 0.942.
+- The bends problem and the recall problem are one problem, not two.
+
+Exp 3 tried to fix this with a focal sigmoid head and failed. The ranking did
+not improve: AUC 0.742 against exp 2's 0.767 overall, and 0.648 against 0.618
+inside the bent group. The scores did not spread, they clumped: a mass near 0.2
+and a spike above 0.98 where correct and wrong straight lines sit together at
+0.983 and 0.979.
+
+So the classification *loss* is not the problem. The class head reads the mean
+of the 20 point features (`class_embed(hs_poly.mean(dim=3))`) and never sees how
+well those points fit the image, so no reweighting of that head's loss can make
+its output track geometric quality. Changing what the head is told, rather than
+how it is scored, is the only version of this idea left, and after the null
+model above it is worth much less than it looked.
+
+Reproduce with `exps/probe_score_quality.py`, which prints exp 2 and exp 3 side
+by side.
+
+## What 5.4x the data actually bought
+
+Exp 2 is exp 1 with the full 26,902 train crops instead of 5,000, nothing else
+changed. F1 at 10 m went 0.640 to 0.685, and at 5 m 0.489 to 0.547.
+
+The split of that gain is the useful part. Precision rose about 0.08 in every
+density bucket. Recall rose about 0.02 and did not move at all on the crowded
+crops, where it is worst (0.372 on crops with 7+ hedges). So more data makes
+the model surer about the lines it already draws, and does not make it find
+more lines in a busy crop. Do not expect a third dataset increase to fix
+recall; that is the score head's job.
+
+Overfitting did vanish. The train-eval gap went from 0.29 to 0.03 and eval loss
+was still falling at the last epoch, so 45 epochs was short rather than long.
+
+The apparent straightness regression was not one. Predicted straightness at
+t=0.95 rose to 0.942 against 0.909 in the labels, but that is the threshold
+selecting straight lines, not the model losing bends. At t=0.80 it is 0.908.
+See "The score ranks lines by how straight they are" above.
+
+## Check an overlay with a shift test, not with your eyes
+
+Before lidar can be an input, the crop-to-raster maths has to be right, and a
+one-cell error is 10 m. Looking at the overlay is not enough: the first crops
+tried were the ones with the most labelled hedge, which are so cluttered that
+something bright sits near every line whether the maths is right or wrong.
+
+Two changes made it decisive.
+
+- **Pick uncluttered crops to look at.** One long hedge across an empty field
+  shows a shift immediately. `pick_ids(..., max_lines=2)`.
+- **Measure it.** Sample the metric in the cells the hedges pass through, minus
+  the cells they do not, then repeat at whole-cell offsets. On `perc_95` over
+  40 crops the peak is at offset (0, 0) at 1.35 m, with every neighbour lower
+  (0.89 to 1.00). So the maths is right, and this now regression-tests itself.
+
+`exps/probe_lidar_crop_alignment.py`. It also writes `crop_footprints.geojson`
+so the same crops can be checked in QGIS against the uncropped layers.
+
+Two things this turned up in passing. Drawing the patch with nearest-neighbour
+interpolation matters, because smoothing hides exactly the half-cell shift being
+looked for. And in some crops the bright band follows the woody line visible in
+the photo while the label sits a little to one side of it, which is the 2014
+digitising accuracy showing up directly.
+
+## Why the lidar is not upsampled to the image size
+
+The obvious way to add lidar is to blow the 25x25 patch up to 1000x1000, then
+flip, rotate and pad it exactly like the image. Same code, nothing new to think
+about. It was not done that way, for one reason:
+
+| how the lidar is carried                 | size per crop | per batch of 16 |
+| ---------------------------------------- | ------------- | --------------- |
+| upsampled to the padded image, 1024x1024 | 28.7 MB       | **470 MB**      |
+| on the token grid, 64x64                 | 112 KB        | 1.8 MB          |
+
+470 MB per batch would go through the DataLoader, which sends every batch
+between worker processes, and it buys nothing. Upsampling adds no information:
+one lidar cell is 40x40 image pixels, so each value would simply be stored
+1,600 times. The model then reduces it to the token grid anyway, so the whole
+round trip is up and straight back down.
+
+The cost of not doing it is one function, `_lidar_on_padded_grid`. It samples
+each output cell by where its centre falls rather than resizing, which is what
+keeps the mapping exact: 1024/16 is 64 output cells over a 25 cell patch that
+covers only 1000 of the 1024 pixels, so no whole-number scale factor exists.
+
+One simpler option does exist and was rejected: pad the patch to 26x26, since
+26 cells of 40 pixels covers 1040 and the canvas is 1024. That is exact too and
+needs no sampling, but it leaves the model to work out that the last cell is
+mostly padding. Doing it in the dataset keeps that knowledge in one place.
+
+## Test an augmentation by making two code paths agree
+
+The second half of the lidar check was the dangerous one. The dataset flips and
+rotates the image and the polylines before padding, so a lidar array added
+there has to go through the same steps, and if it misses one **nothing raises**:
+the shapes stay right and only the content is wrong. It would have shown up as
+a slightly worse run, months later, with no obvious cause.
+
+What makes it testable is that the polylines and the lidar are augmented by
+separate lines of code. So instead of checking either against the truth, check
+them against each other: the presence channel says where the laser found
+vegetation, and it should be high in the cells the hedges pass through and low
+elsewhere, whether or not augmentation is on.
+
+|             | under hedges | elsewhere | gap        |
+| ----------- | ------------ | --------- | ---------- |
+| augment off | 0.924        | 0.467     | +0.457     |
+| augment on  | 0.921        | 0.467     | **+0.453** |
+
+The gap survives, so both paths agree.
+
+Then break it on purpose. Take out the lidar rotation and the gap falls to
+**+0.187**. That is the important step. Without it, the test might be passing
+because it cannot fail.
+
+`augmentation_test` in `exps/probe_lidar_crop_alignment.py`.
+
+## Nodata in the AHN4 metrics means no vegetation, not missing data
+
+24 of the 25 metrics are computed from vegetation returns only, so a cell with
+nothing woody in it has no value at all.
+
+|                              | nodata share |
+| ---------------------------- | ------------ |
+| all cells                    | 46.2%        |
+| cells a hedge passes through | **6.7%**     |
+| every other cell             | 49.6%        |
+
+So an empty cell is telling you something, not hiding something. Two things
+follow. Filling the metrics with 0 is right rather than a fudge, because no
+vegetation is zero density and ground-level height. And the presence channel is
+not bookkeeping. It is probably the most useful of the seven channels, since
+"is anything growing here" is most of what a 10 m grid can say about a 3 m
+hedge.
+
+`exps/probe_lidar_nodata_vs_hedge.py`.
+
+## The images are three years newer than the labels, not ten
+
+Two facts, both checked:
+
+- `Actueel_ortho25` is bit-identical to `2025_ortho25`: 0.00 mean pixel
+  difference on a test crop, against 29.51 for `2022_ortho25`, the year the
+  labels come from. `pdok_dataset3` was downloaded 2026-04-29, so the crops are
+  **2025** imagery.
+- Top10NL2023 was "herzien op basis van luchtfoto 2022"
+  (`BRT_Actualiteitskaart_april_2023.pdf`), so the labels are **2022**.
+
+Both numbers from `exps/probe_image_label_dates.py`.
+
+So the gap is about three years.
+
+An earlier note here called it ten years, from `bronactual` sitting in 2014 or
+2015 for 75.3% of the 62,415 hedge features. That read the field wrong.
+`bronactualiteit` is the currency of the source used for the last edit of that
+feature, not the last time the map was checked. Top10NL is revised for the
+whole country every year, and changes are trigger-based: two years of photos
+are compared and only a detected difference causes an edit. A hedge with
+`bronactual` 2015 was therefore re-confirmed as unchanged many times since. The
+residual worry is positional rather than existential: those geometries have not
+been redrawn in a decade, so they carry 2014 digitising accuracy.
+
+The cheap fix is not a re-download. Top10NL2025 was revised on 2024 and 2025
+photos, so taking the 2025 labels against the existing 2025 crops closes the
+gap to about zero and touches no imagery. Re-downloading crops at
+`2022_ortho25` to match the 2023 labels is the other direction and costs 47 GB.
+
+## Read the label definition before choosing a feature
+
+Top10NL does not separate hedges from tree rows by height. It separates them by
+whether the vegetation blocks the view at about eye level
+(https://kadaster.github.io/imbrt/):
+
+- bomenrij: at least 3 trees in a row, spaced so that "tot manshoogte geen
+  zichtbelemmering" (up to man-height it does **not** block the view).
+- heg, haag: a row of trees, with or without shrubs, spaced or under-grown so
+  that "tot minstens manshoogte het zicht belemmerd wordt" (up to at least
+  man-height it **does** block the view).
+
+So a tall row of trees is a heg when it has understory and a bomenrij when it
+does not. Height was never the criterion, and a first pass here that tested
+`perc_95` height alone concluded "lidar cannot separate them" at balanced
+accuracy 0.638. That conclusion was wrong, and it was wrong because the metric
+was chosen before the definition was read.
+
+## LiDAR structure does separate hedges from tree rows
+
+All 25 AHN4 metrics, 2,000 features per layer, split by 5 km geographic blocks
+so nearby features cannot straddle train and test:
+
+| features used                      | balanced accuracy | AUC       |
+| ---------------------------------- | ----------------- | --------- |
+| height p95 only, 1 metric          | 0.601             | 0.649     |
+| all **7** height metrics           | 0.709             | 0.771     |
+| the other **18**, no height at all | **0.765**         | **0.844** |
+| all 25, gradient boosting          | **0.778**         | **0.852** |
+
+(7 height metrics, not 8, as an earlier version of this table said. The paper
+lists max, mean, median and the 25th, 50th, 75th and 95th percentiles, and
+median and perc_50 are the same quantity in two identical rasters, so there are
+really only 6 distinct ones.)
+
+Structure alone beats every height metric put together. The best single metric
+is the share of vegetation returns between 1 and 2 m, which is a literal
+measurement of the rule above:
+
+| metric                 | heg   | bomenrij | best single cut |
+| ---------------------- | ----- | -------- | --------------- |
+| BR_1_2 (returns 1-2 m) | 0.079 | 0.008    | 0.739           |
+| BR_2_3 (returns 2-3 m) | 0.066 | 0.007    | 0.701           |
+| BR_above_3             | 0.686 | 0.933    | 0.696           |
+| height p95             | 8.0 m | 12.1 m   | 0.635           |
+
+A hedge puts ten times as much of its return profile in the 1-2 m layer as a
+tree row does. Two details worth keeping:
+
+- `pulse_penetration_ratio` is nearly useless here (0.526) despite measuring
+  openness, because it is ground returns over **all** returns in a 10 m cell,
+  and a linear feature covers only part of a cell, so the surrounding field
+  dominates. The band ratios use vegetation returns only, which normalizes that
+  away. Pick the metric whose denominator matches the thing being measured.
+- Each raster carries its own nodata value, and the band ratios use +3.4e38
+  while the height rasters use -3.4e38 or -99999. A single `value < -100` filter
+  silently keeps the positive sentinels.
+
+This is per-feature classification given that a line is already there, so it is
+an upper bound on what a 10 m grid can contribute, not a detector result. At
+10 m a 250 m crop is only 25x25 cells, so the natural role is a side branch,
+which is what exp 4 does. Whether it may also touch the geometry is decided in
+"Where the lidar is allowed to act" below.
+
+Reproduce with `exps/probe_lidar_hedge_vs_tree.py`.
+
+## Exp 3: the focal head made it worse, and that was informative
+
+Exp 2 with the softmax class head swapped for a focal sigmoid, MapTR weights,
+nothing else changed. Best F1 at 10 m fell from **0.699 to 0.664**.
+
+Each run at its own best threshold, so neither is handicapped. Exp 3's better
+checkpoint is the last epoch (`3.pt`, F1 0.664); `best_3.pt` gives 0.660.
+
+|                             | exp 2 `best_2.pt`   | exp 3 `3.pt`    |
+| --------------------------- | ------------------- | --------------- |
+| best F1 at 10 m             | **0.699** at t=0.90 | 0.664 at t=0.40 |
+| P / R there                 | 0.701 / 0.696       | 0.779 / 0.578   |
+| pred per image there        | 3.2                 | 1.6             |
+| recall at t=0.05            | 0.840               | 0.845           |
+| score AUC, correct vs wrong | 0.767               | 0.739           |
+| same, inside the bent group | 0.618               | 0.642           |
+
+(The AUC rows are `3.pt`. For `best_3.pt` they are 0.742 and 0.648.)
+
+Perception did not change: recall at t=0.05 is the same to three decimals, so
+the model draws the same lines. The head just became more decisive about the
+wrong thing. Precision rose to 0.84 and recall collapsed to 0.51, and the score
+went bimodal rather than calibrated.
+
+Three things to take from it:
+
+- A more expressive loss on a head that cannot see the evidence does not make
+  it better informed. The class head averages the 20 point features and never
+  compares them to the image.
+- Focal's prior at p=0.01 plus normalisation by matched-target count makes the
+  head very reluctant. With 60 queries and 2.1 real lines, "predict almost
+  nothing" is a good place to sit.
+- The A/B was worth running even though it lost, because it is what forced the
+  null model above, and that overturned a bigger and older claim.
+
+## A checkpoint has to be evaluated on the split it was trained against
+
+Run 1 trained on the cluster conversion of pdok_dataset3 (26,902 / 3,098). The
+local conversion is 24,257 / 5,743, because `avoid_label_dirs` sees 10
+pdok_dataset2 labels locally and 5,000 on the cluster
+(`scripts/data/convert_pdok_polylines_to_detr_polyline.py`, counts from
+`exps/dataset_stats.py`). Same seed and blocks, so
+the cluster val set is a subset: all 3,098 stems were found locally. About 46%
+of the local val crops were cluster training images, so scoring a cluster
+checkpoint on the local val directory shows training images half the time.
+
+The split is part of the run, like the weights. Keep the val stem list with the
+checkpoint, and do not assume two conversions of the same dataset agree.
+
+## The "nothing found" branch is the one that breaks
+
+Raising `infer_score_thresh` to 0.95 made some crops return no prediction, and
+inference stopped with "can't convert cuda:0 device type tensor to numpy".
+
+Predictions are made on the GPU. numpy only reads CPU memory, so they must be
+copied over with `.cpu()` before saving. The normal path does that. The
+separate early-return path for "nothing passed the threshold" builds empty
+tensors with `new_zeros` and returns straight away, and we forgot the `.cpu()`
+there. `new_zeros` keeps the device of the tensor it came from, which is its
+documented job, so those empty tensors stayed on the GPU.
+
+Ours, not PyTorch's. PyTorch never moves data between GPU and CPU by itself; a
+hidden copy would be slow and would hide exactly this kind of mistake.
+
+At threshold 0.5 every crop had a prediction, so the branch never ran. The empty branch is exercised by running `mode="infer"` at a threshold above every score. When a
+change makes empty results possible, look there first.
+
+## Output directories should name themselves after what produced them
+
+Comparing two checkpoints used to mean editing two paths, running, renaming the
+old ground-truth directory, re-running a symlink loop by hand, then editing
+paths in the plotting code. A figure could not be traced back to what made it,
+and re-running overwrote the previous result.
+
+Now `infer` writes to `<root>/<ckpt stem>_<split dir>_t<threshold>/` and links
+the ground truth of exactly those crops into `gt/` beside the predictions. Runs
+cannot collide, and the two figures cannot disagree about which images they
+show.
+
+Settings stay in the committed cfg block. Command-line overrides were tried and
+removed: they make a run depend on something the file does not show.
+
+## Two label artifacts, one real and one that turned out not to matter
+
+Both are visible by eye in the run 1 figures, but only one survives measurement.
+
+- One hedge split into several overlapping polylines: **not a problem**.
+  Merging GT lines within 10 m of each other removes 0.8% of GT lines and moves
+  F1 by 0.001 (the `merge_gt` option of `exps/probe_polyline_pr.py`). Buffered length is immune to it anyway, since it measures length
+  covered rather than lines matched. Do not spend more time on it.
+- Woody lines missing from the labels: **measured, and a quarter of it is tree
+  rows**. See the next section. The reported precision is a lower bound.
+
+The general rule stands: measure the artifact before designing around it. The
+first one cost a paragraph of worry and was worth 0.001.
+
+## Top10NL says itself that both layers are incomplete
+
+The specification (https://kadaster.github.io/imbrt/, extracted into
+`/home/fatemeh/Downloads/hedge/Top10NL/Top10NL Metadata.docx`) marks both heg
+and bomenrij "Volledigheid: Beperkt", limited completeness, and says in the heg
+collection criteria:
+
+> "Wordt niet opgenomen binnen bebouwd gebied en tussen tennisbanen. Een heg,
+> haag op of rondom een erf wordt niet ingewonnen, tenzij deze zich voortzet
+> voorbij het erf."
+
+Plainly: a hedge is not recorded inside a built-up area, or between tennis
+courts, and a hedge on or around an *erf* is not recorded unless it continues
+past it. An *erf* is the plot or grounds belonging to a house or farm, not a
+farmyard specifically, so this excludes ordinary garden and property
+boundaries as well as agricultural ones.
+
+The nominal minimum length is 100 m for both classes, but 18.0% of heg features
+(11,208 of 62,415) and 16.9% of bomenrij features (45,028 of 266,783) are
+shorter, because segments split at a road or a watercourse are exempt. Measured
+with `geometry.length` on the shapefiles in EPSG:28992, where the unit is
+metres.
+
+This is the authoritative version of a thing already measured from the other
+side: reported precision is a lower bound, because the model is penalised for
+finding woody lines that the map excludes by rule.
+
+It is tempting to go one step further and say this is *why* built-up and
+campsite crops top the false-positive ranking. Do not. Two things are known
+separately, that the rules exclude those areas and that those crops score
+worst, and nothing yet connects them. Sparser labels there could equally come
+from the mapper skipping cluttered scenes, or from those crops being genuinely
+harder. Testing it means checking whether the unmatched predictions in those
+crops sit on woody lines the rules exclude, the way
+`exps/probe_treeline_overlap.py` did for tree rows. Until then this is
+consistent, not shown.
+
+## A quarter of the false positives are tree rows, not mistakes
+
+Top10NL splits linear woody features into two layers. Training uses only
+`inrichtingselementen_lijn_heg`. Tree rows are a separate layer,
+`inrichtingselementen_lijn_bomenrij`, with 266,783 features against 62,415
+hedges, and they are not in the labels at all. From above a tree row looks much
+like a hedgerow, so the model draws it and every metre counts as a false
+positive.
+
+`exps/probe_treeline_overlap.py` measures it. On 300 random val crops, **24.3%
+of the predicted length that matches no label is within 10 m of a tree line**,
+and only 1.2% is near another hedge, so this is not the crop clipping losing
+labels. The sanity check passes: 100% of the training GT sits on the heg layer.
+
+What that is worth: exp 2 at t=0.95 has a precision of 0.783 at 10 m. So
+78.3% of the length it draws lies on a labelled hedge, and 21.7% counts as
+wrong. A quarter of that wrong part (24.3%) lies on a tree row, which is 5.3%
+of all the drawn length (0.243 x 0.217 = 0.053). If tree rows did not count as
+wrong, precision would be about 0.836 instead of 0.783. That 0.053 is what we
+hoped to win by adding tree rows as a second class. It is also why the
+precision we report is lower than the model's real skill.
+
+Exp 5 did not win it. With tree rows as a second class, hedge precision went
+down a little, not up: 0.777 against 0.783 at t=0.95. *(exp 5,
+`exps/probe_polyline_pr.py`)*
+
+This reverses an earlier call. Tree lines were ranked low because the worst
+crops looked like campsites rather than tree rows. The worst crops are not the
+typical crops: campsite exclusion moved F1 by 0.011, while tree rows account
+for a quarter of all unmatched length. Rank a fix by its share of the total,
+not by how bad the worst examples look.
+
+## The worst crops were campsites, and filtering them out is not worth it
+
+Ranking val crops by false-positive length put the same thing on top every
+time: rows of identical chalets on small plots, each plot ringed by a clipped
+hedge. Not housing estates, which is what they look like. Top10NL lists 6
+building footprints in one whole 250 m crop and calls the ground grassland,
+because a chalet is not a registered building, so a built-up or building
+filter misses them entirely. The layer that finds them is
+`functioneel_gebied_vlak`, field `typefunctioneelgebied`, values camping,
+vakantiepark, bungalowpark, caravanpark. On 13 crops sorted by eye the
+separation was clean, 8 of 8 bad and 0 of 5 good.
+
+Then measuring killed the idea. Those crops are 315 of 3,098, 10.2%. Excluding
+them moves F1 from 0.640 to 0.652. They really are harder, 0.542 against 0.652,
+but 10% of crops cannot move a per-image average much.
+
+Two lessons. A crop that looks urban may be a campsite, and the layer that
+identifies a land use is not always the obvious one. And an exclusion can
+always be tested by dropping crops at scoring time
+(`exps/probe_recreation_crops.py` writes the stem list) before anyone touches
+the dataset. That test cost an afternoon and saved a reconversion.
+
+## Tree rows cost nothing to add, because the crops already exist
+
+Adding Top10NL `bomenrij` as class 1 needs no new imagery and no new crops. The
+converter clips the layer to each existing crop with the same function that made
+the hedge labels (`scripts/data/convert_pdok_polylines_to_detr_polyline.py`),
+which takes about a minute for 30,000 crops.
+
+What that gives, over the whole dataset:
+
+|                        | hedges only | with tree rows   |
+| ---------------------- | ----------- | ---------------- |
+| lines                  | 103,432     | 103,432 + 44,435 |
+| lines per crop, mean   | 3.45        | 4.93             |
+| **max lines per crop** | **49**      | **49**           |
+| crops with a tree row  | 0           | 18,061 (60.2%)   |
+
+All of it from `exps/probe_tree_dataset_stats.py`, which compares the two
+datasets crop by crop.
+
+Three things worth keeping:
+
+- **The query budget does not change.** The crowded crop already had 49 lines,
+  so 60 queries are still enough and `num_polylines` stays at 60. This was worth
+  checking before anything else, since a second class competing for queries
+  would have been a real cost.
+- **The hedge half is untouched.** The stored class 0 arrays are bit-identical
+  to `pdok_dataset3_polylines` on all 30,000 crops, so any change in the hedge
+  score comes from the model, not from the data.
+- **The classes blur at 10 m.** 12.2% of tree length is within 10 m of the heg
+  layer and 11.0% of hedge length within 10 m of bomenrij, against 2.4% and 1.7%
+  at 5 m (`exps/probe_tree_class_labels.py`). So read the 5 m buffered score as
+  the cleaner class separation, and the 10 m one as partly forgiving of a
+  confusion between the two.
+
+Use the same Top10NL year as the hedge labels, 2023. Taking the tree rows from
+2025 would change the label year at the same time and confound the run.
+
+Cheap in data, but no help for the hedges. With tree rows added (exp 5), the
+hedge score is a little lower: 0.689 against 0.699 at 10 m, 0.536 against
+0.553 at 5 m. A new random start alone moves the score about as much (exp 7),
+so tree rows cost the hedges little or nothing. But they do not help either.
+The tree row class itself reaches 0.624 at 10 m, and 0.688 with the lidar
+(exp 4); these tree row scores are too high, see the TODO.
+
+One wrong idea to avoid: exp 4 placed its tree rows well, so we thought they
+could not hurt the hedges. How well one class is drawn says nothing about
+what it does to the other. *(exps 4, 5 and 7, `exps/probe_polyline_pr.py`)*
+
+## Where the lidar is allowed to act
+
+The backbone turns the image into a 64x64 grid of feature vectors, one per
+token, and the dataset puts the lidar patch on that same grid. So the lidar can
+enter in two places:
+
+- **In the tokens.** Add a learned lidar vector to each image token. Everything
+  downstream sees image and lidar mixed, so the lidar can change the class and
+  the point positions.
+- **In the class head only.** Sample the lidar under each predicted line and
+  give it only to the head that says hedge or tree. It can rename a line but
+  never move one.
+
+Exp 4 uses the first, although an earlier note here argued for the second on the
+grounds that a 10 m grid could blur a thin line. Three reasons:
+
+- It is far less code: an addition after `input_proj`, against sampling at each
+  predicted point plus a wider head.
+- `LidarTokenEncoder`'s last layer is zero-initialised, so at step 0 the model
+  is exactly the no-lidar model. The lidar only moves the geometry if the
+  gradient says that helps, and a lidar run and a no-lidar run start from the
+  same place.
+- The limit is that too few correct lines are drawn at all. A class-only branch
+  cannot change which lines are drawn, so it cannot touch that.
+
+**The old worry looked right, but the runs cannot show it.** Before exp 4 we
+wrote down what a blurring lidar would look like: the 5 m score falls while
+the 10 m score holds. Exp 4 showed exactly that (5 m 0.533 against 0.553).
+But exp 5, without lidar, fell just as far (0.536), so the lidar is not the
+cause. And a new random start alone moves the 5 m score by 0.013 (exp 7), so
+the drop may be mostly luck.
+
+The lidar helps hedges very little: +0.009 at 10 m with tree rows (exp 4
+against exp 5), +0.004 without (exp 6 against exp 2). Both are below the 0.02
+we need. What it does every time is remove some wrong lines. It helps the
+tree row class more. So it is not worth moving it to the class head, and it
+is not a hedge win either.
+
+The lesson: a result that matches a prediction is still not proof when the
+run changed two things at once, or when the gap is as small as the luck.
+*(exps 4 to 7, `exps/probe_polyline_pr.py`)*
+
+Two details that are not cosmetic. BatchNorm comes first because the six metrics
+are in different units, five band ratios in [0, 1] against `perc_95` reaching
+56 m with a standard deviation of 6, so without it one channel dominates the
+sum. And `lidar_stride` has to equal the feature stride, or the lidar grid and
+the token grid are different sizes; `main` asserts it.
+
+## A GPU run does not come back bitwise months later
+
+Re-inferring exp 2 with the current code gave the same number of predictions on
+every crop, but coordinates up to 0.19 px different from the run stored in July,
+which is 4.7 cm on the ground. That looks like a regression and is not one.
+
+The code is equivalent. With lidar off, the new model produces bitwise identical
+logits, polylines and boxes to the version at the previous commit, on CPU, with
+the real best_2.pt weights. The GPU is deterministic within a session, two runs
+came out bitwise equal, but GPU and CPU differ by 0.64 px on the same weights
+and input, because cuDNN TF32 is on. A driver or library change since July is
+enough to move the last bits.
+
+So to check that a refactor left a model alone, run the two code paths on CPU
+with the same weights and compare the tensors
+(`exps/probe_refactor_equivalence.py`, which imports the old script straight
+from a git revision). Comparing NPZs from two GPU runs on different days
+answers a different question.
+
+## A reference test must be rebuilt when the output changes on purpose
+
+`tests/test_training_data.py` compares 10 freshly built lidar crops with a
+saved copy, `test_mini_gt`, made on 2026-03-03. Commits from 2026-03-11 to
+2026-03-18 changed the labels on purpose: points are floored instead of
+rounded, lines under 10 px are dropped, and `n_lines` counts stored lines (31
+became 19 on one crop). The copy was not rebuilt, so the test failed from then
+on. The March code still reproduces the copy exactly, so those commits were
+the only cause.
+
+The test matters more than its name says. `make_polylines_for_chip` in
+`hedge_seg/pdok_training_data.py` makes every hedge and tree row label with the
+same helpers. Rebuild the copy in the commit that changes the output:
+`PYTHONPATH=. python tests/test_training_data.py`.
+
+OSM chips had a second, silent fault. The OpenStreetMap tile server blocks
+contextily's default User-Agent, the name a program sends to say who it is
+(`contextily-<random hex>`, which names no app). It still answers HTTP 200,
+with an image that says "Access blocked", so nothing raised and OSM chips
+built after the block were the notice. The same tile asked for under a name for this project comes
+back as the map, so the block is on the name, not the address. Fixed:
+`save_osm_chip` in `hedge_seg/training_data.py` now sends `OSM_USER_AGENT`. No
+account is needed. *(`exps/probe_osm_user_agent.py`)*
+
+OSM stays off in the test anyway. Volunteers edit the map every day, so tiles
+drift away from any saved copy, and the test would need the network.
+
+## A split can be pinned to a stem list
+
+The geographic split depends on where the conversion runs, because
+`avoid_label_dirs` sees 10 pdok_dataset2 labels locally and 5,000 on the
+cluster. That trap cost a val set once and is why `polylines/val_cluster`
+exists.
+
+`val_stems_file` in the converter takes the split from an existing run's val
+stem list instead of recomputing it. Pointed at the 3,098 stems of cluster run
+2, the new tree dataset came out at exactly train 26,902 / val 3,098 on the
+laptop, so a new dataset can be built on either machine and still be scored
+against an old checkpoint. The rule stays the same: the split is part of the
+run, so keep the stem list with the checkpoint.
+
+It pins the split, not the stem set. The train half is still recomputed from
+whatever labels the converting machine has, which is how exp 4 failed. See the
+next section.
+
+## Two builds of the same dataset are not the same crops
+
+`pdok_dataset3` was downloaded twice, once on the laptop and once on the
+cluster. Both hold exactly 30,000 crops, which is why the count never looked
+wrong. They are not the same 30,000:
+
+|         | laptop                                | cluster                                                |
+| ------- | ------------------------------------- | ------------------------------------------------------ |
+| range   | `pos_000000` .. `pos_029999`, no gaps | `pos_000000` .. `pos_030003`, four gaps                |
+| missing | none                                  | `pos_029989`, `pos_029998`, `pos_030000`, `pos_030001` |
+
+Four PDOK WMS requests failed during the cluster download, so it ran on past
+`pos_029999` to reach 30,000. Crops are sampled one per polyline, so a failure
+shifts the numbering and nothing downstream notices.
+
+This killed exp 4 three minutes into epoch 1 with "No image for pos_029989".
+Exps 1 to 3 never hit it because `pdok_dataset3_polylines` was converted **on
+the cluster**, from the cluster's own labels, so its stems match the cluster
+images by construction. `pdok_dataset3_tree_polylines` was built on the laptop
+and copied over, so it carried two crops the cluster does not have.
+
+The same thing is true of `lidar_patches.npy`, built on the laptop: it has no
+patch for `pos_030002` or `pos_030003`. The tree dataset does not contain those
+stems, so exp 4 was unaffected, but `pdok_dataset3_polylines` does, so the
+lidar-only ablation has to drop them or build the two patches first.
+
+Two rules. A dataset built on one machine has to be checked against the images
+on the machine it runs on, not assumed to match a dataset of the same name.
+And that check belongs at dataset construction, not at the first batch:
+`DetrPolylineImageDataset.__init__` in
+`scripts/train_detr_unet_polyline.py` now lists the image directory once and
+names every missing crop before the GPU is touched, the way the lidar check
+already did. Getting this wrong costs a queue slot and an hour of waiting to
+learn about a two-file mismatch.
+
+Run `exps/probe_dataset_stem_mismatch.py` on both machines before using a
+dataset across them. It prints the numbering with its gaps and every polyline
+stem that has no image or no lidar patch.
+
+## Training the backbone is the first clear gain
+
+The backbone is the part that reads the photo. Until exp 9 it was frozen: it
+had learned from 4,000 crops, for another task (masks), and never changed
+again. Exp 9 lets it learn too, 10 times more slowly than the rest
+(`backbone_lr=1e-5`, `build_optimizer` in
+`scripts/train_detr_unet_polyline.py`).
+
+Hedge F1 went from 0.699 to 0.721 at 10 m, and from 0.553 to 0.581 at 5 m
+(t=0.90). That is more than twice the luck of a new random start.
+
+- Lines lie closer to the hedges. The gain is biggest at 5 m.
+- There are far fewer wrong lines.
+- It does not find more hedges. Hedges the model missed before, it still
+  misses.
+
+The backbone really changed: 66 of its 86 weight tensors moved, against none
+in exp 2 (`exps/probe_backbone_trained.py`). *(exp 9,
+`exps/probe_polyline_pr.py`)*
+
+## Done
+
+Phase A — data + split:
+
+- Converter opens closed rings (with the near-duplicate-point fix above) and
+  raises min_length_px to 40 px (10 m).
+- Geographic train/val split from center_world: crops grouped into 5 km
+  blocks, blocks hashed into train/val, connected components of overlapping
+  crops assigned as a whole, KDTree-verified zero overlap. Rationale for
+  needing this: pdok_dataset3 crops are sampled per polyline, so 72.6% of
+  crops overlap at least one other crop, and a naive random 80/20 split lets
+  68.5% of val crops overlap a training crop (`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`).
+- Training script reads train/val from the split directories instead of an
+  internal random split.
+- Converted dataset3 (30k images). The operative cluster split (avoid_label_dirs
+  sees all 5,000 pdok_dataset2 labels) is train=26,902, val=3,098 (10.3%),
+  103,414 polylines, 302 rings opened, 0 val-train overlap; enforcing backbone
+  avoidance halves the val set because 40% of crops sit near semseg areas. The
+  local dry-run (only 10 pdok_dataset2 labels available) was 24,257 / 5,743.
+  Stats reproducible with `exps/dataset_stats.py` and
+  `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`; per-run numbers in
+  `docs/experiments_log.md`.
+- `hedge_seg/paths.py` resolves DATA_ROOT / EXP_ROOT / CLUSTER_EXP_ROOT from
+  a filesystem marker, so scripts no longer need path edits when moving
+  between the local machine and the cluster.
+
+Phase B — training half:
+
+- Cluster job 24799874 (exp 1) finished, 150 epochs in 7 h on a 5k
+  spatially-blocked train subset, frozen backbone up3, augment on, scheduler
+  on, eval_every=5. First run whose predictions sit on real hedgerows in
+  images the model never saw.
+- Inference re-run on the cluster val split only, using `polylines/val_cluster`
+  (commands in `docs/experiments_log.md`). The local val directory is a
+  different split, about 46% of it was in the cluster's training set, so
+  figures taken from it were not the baseline.
+- `infer_score_thresh` raised from 0.5 to 0.95 on line count, then confirmed by
+  sweep: 0.95 is the optimum for `1_150.pt`.
+- Inference made reproducible: self-naming run directories, ground truth
+  linked next to the predictions, no manual steps.
+
+Phase B — measurement half. All of it, and it needed no training run:
+
+- `hedge_seg/metrics.py` and `exps/probe_polyline_pr.py`: buffered-length
+  precision and recall per image at 5, 10 and 15 m, plus the stratification,
+  the threshold sweep, the GT merge test and the geometry check.
+- Baseline on the 3,098 cluster val crops at 10 m: `1_150.pt` 0.70 precision,
+  0.59 recall, F1 0.640. At 15 m 0.78 / 0.67. It beats `best_1.pt` at every
+  buffer, so the ranking is settled and the eval loss was wrong.
+- Rough placement against YOLO-seg (80% precision, 70% recall): close on
+  precision at 15 m, behind on recall. Not the same measurement, so it is a
+  placement and not a parity claim.
+- Chamfer plus Hungarian rejected, with the reason recorded.
+- GT merging measured and dropped. Campsite exclusion measured and dropped.
+- Straightness and length checked: predictions match the labels below the
+  reporting threshold, so the "the model only draws straight lines" worry from
+  the figures is the threshold, not the model.
+
+Phase C — the score head, closed:
+
+- Recall was traced to the score head rather than to perception. **That was
+  wrong.** Exp 3's focal head lost (F1 0.699 -> 0.664), and the null model then
+  showed that half of the recall it was chasing is clutter. Both sections
+  above. Perception, not ranking, is the limit.
+
+Phase C — tree rows and lidar:
+
+- Exp 4 (tree rows and lidar) and exp 5 (tree rows only) scored. Neither beats
+  exp 2 on hedges: F1 at 10 m 0.698 and 0.689 against 0.699. The tree rows cost
+  0.017 at 5 m. The lidar gives back 0.009 at 10 m and adds 0.064 to the tree
+  row class. See "Tree rows cost nothing to add" and "Where the lidar is allowed
+  to act".
+- Exp 6 (lidar only) scores 0.703 at 10 m against exp 2's 0.699. The gap is
+  too small to count, so the lidar does not make hedges better on its own.
+
+Phase C — seed and backbone:
+
+- Exp 7 (exp 2, seed 43) measures the training luck: about 0.01 at 10 m.
+- Exp 9 (backbone trained at lr 1e-5) is the new best: hedge F1 0.721 at 10 m
+  against 0.699, and 0.581 against 0.553 at 5 m.
+- Exp 8 (exp 2 for 90 epochs) gains 0.013 at 10 m, a little more than the
+  seed gap and below the 0.02 bar. Most of it is in by epoch 60.
+
+All runs from exp 2 on, hedge against hedge on the same 3,098 val crops, at
+t=0.90, the best threshold of every run. Each cell is precision / recall / F1.
+Exps 8 and 9 are their last epoch (`8.pt`, `9.pt`).
+
+| exp | what changed from exp 2       | 5 m                | 10 m               | 15 m               | did it help?      |
+| --- | ----------------------------- | ------------------ | ------------------ | ------------------ | ----------------- |
+| 2   | nothing                       | .549 / .557 / .553 | .701 / .696 / .699 | .767 / .767 / .767 | starting point    |
+| 4   | tree rows + lidar             | .523 / .545 / .533 | .693 / .703 / .698 | .767 / .779 / .773 | no                |
+| 5   | tree rows                     | .532 / .540 / .536 | .692 / .686 / .689 | .762 / .759 / .761 | no                |
+| 6   | lidar                         | .534 / .556 / .545 | .698 / .709 / .703 | .767 / .782 / .774 | no                |
+| 7   | nothing, new random start     | .530 / .550 / .540 | .687 / .694 / .691 | .756 / .766 / .761 | shows the luck    |
+| 8   | 90 epochs instead of 45       | .563 / .575 / .569 | .709 / .715 / .712 | .769 / .781 / .775 | a little          |
+| 9   | backbone trained too, lr 1e-5 | .569 / .593 / .581 | .710 / .733 / .721 | .764 / .794 / .779 | yes, new baseline |
+
+*(`exps/probe_polyline_pr.py`)*
+
+## TODO
+
+Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
+
+Exp 3 lost (0.664). Exps 4 to 6 did not beat exp 2 by the 0.02 bar
+(0.698, 0.689, 0.703); exp 9 did (0.721). See "How big a gap has to be before
+it counts". Exp 9 `9.pt` at t=0.90 is the new baseline.
+
+The bottleneck is that the model does not draw enough correct lines, worst
+where crops are crowded (exp 2 recall 0.372 on crops with 7+ labelled lines
+against 0.731 on crops with one). So the next runs should target perception.
+
+- Exp 4: finer features. `feature_stage="up3"` is stride 16, so a 1024 px crop
+  becomes a 64x64 grid and a 3 m hedge is 12 px, under one feature cell. Thin
+  structures cannot survive that. `FEATURE_STAGES` only has `enc4` (stride 32)
+  and `up3` (stride 16) today, so this means adding the next UNet decoder
+  stage at stride 8. Memory is available: batch 16 uses 5.8 of 40 GB, and
+  stride 8 is 4x the tokens. This is the most direct attack on the real limit.
+
+- Fix the tree row score. It counts a crop with no tree row, and no tree row
+  drawn, as a perfect score. That is 40% of the val crops, so every tree row
+  number so far is too high (exps 4 and 5). Hedge scores are not affected:
+  every val crop but one has a hedge.
+
+- Labels from Top10NL2025 instead of 2023, a separate conversion. It closes
+  the three-year image/label gap at no imagery cost, since the crops are
+  already 2025. Both shapefiles are downloaded, in
+  `/home/fatemeh/Downloads/hedge/Top10NL2025`. Keep it out of exp 4: changing
+  the label year and adding a class at once cannot be read.
+
+- Training longer helped exp 2 only a little (exp 8, +0.013 at 10 m). Exp 9
+  for longer might add the same small amount, but training the backbone is
+  where the gain was.
+
+Then, results-driven:
+
+- Image resolution. Everything so far is 25 cm. Downsampling to 50 cm or 1 m
+  costs nothing to try and would say how much of the result depends on
+  resolution, which matters for applying this outside PDOK coverage. Not urgent.
+- Border filtering. Polylines are clipped to the crop bounds, so a hedge
+  crossing the edge becomes a truncated line the model is asked to predict
+  exactly. Nothing drops or down-weights them. Still untested rather than
+  dismissed.
+
+Dropped, with the reason:
+
+- The score head, after exp 3. See above.
+- Bends as a separate work item. They are the threshold's doing, not the
+  geometry's.
+- A date-matched rebuild on `2016_ortho25`. 2016 imagery matches nothing here;
+  the labels are 2022 and the crops are 2025.
+
+Note: the spatial split makes val numbers look worse than a random split would.
+That is expected; they are the real baseline to improve from.

@@ -1,9 +1,106 @@
+import json
 from pathlib import Path
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
+
+
+def yolo_cxcywh_to_xyxy(cx, cy, w, h, img_w, img_h):
+    return (
+        (cx - w / 2.0) * img_w,
+        (cy - h / 2.0) * img_h,
+        (cx + w / 2.0) * img_w,
+        (cy + h / 2.0) * img_h,
+    )
+
+
+def draw_yolo_bounding_box_on_image(main_path, num, folder="val"):
+    image_path = main_path / f"images/{folder}/pos_{num:06d}.png"
+    label_path = main_path / f"labels/{folder}/pos_{num:06d}.txt"
+
+    img_bgr = cv2.imread(str(image_path))
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+    labels = np.loadtxt(label_path, ndmin=2)
+
+    fig, ax = plt.subplots()
+    ax.imshow(img_rgb)
+    for row in labels:
+        class_id, cx, cy, w, h = row
+        img_h, img_w = img_rgb.shape[:2]
+        xmin, ymin, xmax, ymax = yolo_cxcywh_to_xyxy(cx, cy, w, h, img_w, img_h)
+
+        # Rectangle expects bottom-left corner in data coords (x, y) with y increasing downward in images
+        rect = Rectangle(
+            (xmin, ymin),
+            xmax - xmin,
+            ymax - ymin,
+            fill=False,
+            linewidth=2,
+            edgecolor="red",
+        )
+        ax.add_patch(rect)
+
+    ax.axis("off")
+    plt.show(block=False)
+    return ax
+
+
+def read_yolo_seg_labels(label_path):
+    labels = []
+
+    with open(label_path, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if not parts:
+                continue
+
+            class_id = int(parts[0])
+            coords = np.array([float(x) for x in parts[1:]], dtype=float)
+
+            if len(coords) % 2 != 0:
+                print(f"Skipping malformed row with odd number of coords: {label_path}")
+                continue
+
+            coords = coords.reshape(-1, 2)
+            labels.append((class_id, coords))
+
+    return labels
+
+
+def draw_yolo_segmentation_on_image(main_path, num, folder="val"):
+    stem = f"pos_{num:06d}"
+    image_path = main_path / "images" / folder / f"{stem}.png"
+    label_path = main_path / "labels" / folder / f"{stem}.txt"
+    if not image_path.exists():
+        image_path = main_path / f"{stem}.png"
+    if not label_path.exists():
+        label_path = main_path / f"{stem}.txt"
+
+    img_bgr = cv2.imread(str(image_path))
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+    labels = read_yolo_seg_labels(label_path)
+
+    fig, ax = plt.subplots()
+    ax.imshow(img_rgb)
+
+    img_h, img_w = img_rgb.shape[:2]
+
+    for class_id, coords in labels:
+        xs = coords[:, 0] * img_w
+        ys = coords[:, 1] * img_h
+
+        ax.fill(xs, ys, alpha=0.25, color="red")
+        ax.plot(np.r_[xs, xs[0]], np.r_[ys, ys[0]], linewidth=2, color="red")
+        ax.plot(xs, ys, "*", color="red", markersize=4)
+
+    ax.axis("off")
+    plt.show(block=False)
+    return ax
 
 
 def draw_rectangle_on_image(image_path, xmin, ymin, xmax, ymax):
@@ -23,13 +120,434 @@ def draw_rectangle_on_image(image_path, xmin, ymin, xmax, ymax):
     return ax
 
 
+def draw_polylines_on_image(image_path, json_path):
+    img_bgr = cv2.imread(str(image_path))
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    if json_path.suffix == ".json":
+        polylines = json.load(open(json_path))["polylines_px"]
+    if json_path.suffix == ".npz":
+        polylines = np.load(json_path)["polylines"]
+
+    fig, ax = plt.subplots()
+    ax.imshow(img_rgb)
+    for i in polylines:
+        i = np.array(i)
+        ax.plot(i[:, 0], i[:, 1])
+    plt.show(block=False)
+
+
+def visualize_sample(
+    main_path, num, folder="test_256_None", label_folder="labels", label_prefix="json"
+):
+    """
+    label_folder: "labels" or "embs_polylines"
+    label_prefix: "json" or "npz"
+    """
+    image_path = main_path / f"{folder}/images/pos_{num:06d}.png"
+    json_path = main_path / f"{folder}/{label_folder}/pos_{num:06d}.{label_prefix}"
+    draw_polylines_on_image(image_path, json_path)
+
+
+def show_image_with_mask(image, mask, alpha=0.25):
+    """
+    Plot a red transparent mask over an image.
+
+    image: HxW or HxWx3 array
+    mask:  HxW array, boolean or numeric
+    """
+    mask_bool = mask > 0
+
+    overlay = np.zeros((*mask.shape, 4))  # RGBA
+    overlay[mask_bool] = [1, 0, 0, alpha]  # red with transparency
+
+    plt.figure()
+    plt.imshow(image)
+    plt.imshow(overlay)
+    plt.axis("off")
+    plt.show(block=False)
+
+
+# One colour per class, so a hedge is the same colour in every figure. Blue and
+# orange stay apart for colour-blind readers and against green vegetation.
+CLASS_COLORS = {0: "#2a78d6", 1: "#eb6834"}
+CLASS_NAMES = {0: "hedge", 1: "tree row"}
+
+
+def _read_polylines(polyline_path, score_thresh=None, class_id=None):
+    """
+    Read one polyline file. Returns (polylines, labels), one class id per line.
+    A file without labels is a one-class file, so every line gets class 0.
+
+    `score_thresh` keeps only predictions scoring at or above it, so a run
+    inferred at 0.05 can be viewed at any higher threshold without running
+    inference again. Ground truth has no scores and is returned whole.
+
+    `class_id` keeps one class of a multi-class file, for example only the
+    hedges (0) of a run that also predicts tree rows (1), so its figure can be
+    compared with a hedge-only run. None keeps every line.
+    """
+    polyline_path = Path(polyline_path)
+
+    if polyline_path.suffix == ".json":
+        data = json.load(open(polyline_path))
+        key = (
+            "polylines_px_resampled"
+            if "polylines_px_resampled" in data
+            else "polylines_px"
+        )
+        polylines = np.asarray(data[key], dtype=float)
+        return polylines, np.zeros(len(polylines), dtype=int)
+
+    data = np.load(polyline_path)
+    polylines = data["polylines"] if "polylines" in data else data["polylines_px"]
+    labels = data["labels"] if "labels" in data else np.zeros(len(polylines), int)
+    keep = np.ones(len(polylines), dtype=bool)
+    if score_thresh is not None and "scores" in data:
+        keep &= data["scores"] >= score_thresh
+    if class_id is not None:
+        keep &= labels == class_id
+    return polylines[keep], labels[keep]
+
+
+def _sample_id_from_path(path):
+    digits = "".join(ch for ch in Path(path).stem if ch.isdigit())
+    if not digits:
+        raise ValueError(f"Could not parse sample id from {path}")
+    return int(digits[-6:])
+
+
+def _polyline_files(polyline_dir, polyline_pattern):
+    if polyline_pattern is not None:
+        suffix = Path(polyline_pattern.format(0)).suffix
+        files = sorted(polyline_dir.glob(f"*{suffix}"))
+        if files:
+            return files
+
+    return sorted([*polyline_dir.glob("*.npz"), *polyline_dir.glob("*.json")])
+
+
+def _polyline_path_for_id(polyline_dir, sample_id, polyline_pattern):
+    candidates = []
+    if polyline_pattern is not None:
+        candidates.append(polyline_dir / polyline_pattern.format(sample_id))
+    candidates.extend(
+        [
+            polyline_dir / f"pos_{sample_id:06d}.npz",
+            polyline_dir / f"pos_{sample_id:06d}.json",
+        ]
+    )
+
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
+
+
+def show_polyline_grid(
+    image_dir,
+    polyline_dir,
+    ids=None,
+    n=16,
+    image_pattern="pos_{:06d}.png",
+    polyline_pattern=None,
+    linewidth=1.5,
+    seed=42,
+    title="GT",
+    score_thresh=None,
+    save_path=None,
+    class_id=None,
+):
+    image_dir = Path(image_dir)
+    polyline_dir = Path(polyline_dir)
+
+    if ids is None:
+        files = _polyline_files(polyline_dir, polyline_pattern)
+        if len(files) == 0:
+            raise RuntimeError(f"No polylines found in {polyline_dir}")
+        rng = np.random.default_rng(seed)
+        files = rng.choice(files, size=min(n, len(files)), replace=False)
+        ids = [_sample_id_from_path(p) for p in files]
+    else:
+        ids = ids[:n]
+
+    fig, axes = plt.subplots(4, 4, figsize=(10.8, 10.8))
+    axes = axes.ravel()
+
+    for ax in axes:
+        ax.axis("off")
+
+    drawn = set()  # class ids drawn anywhere in the figure, for the legend
+    for ax, i in zip(axes, ids):
+        image_path = image_dir / image_pattern.format(i)
+        polyline_path = _polyline_path_for_id(polyline_dir, i, polyline_pattern)
+
+        image = cv2.imread(str(image_path))
+        if image is None:
+            ax.set_title(f"missing pos_{i:06d}", fontsize=8, pad=0)
+            continue
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        ax.imshow(image)
+        if polyline_path.exists():
+            polylines, labels = _read_polylines(polyline_path, score_thresh, class_id)
+            for polyline, label in zip(polylines, labels):
+                polyline = np.asarray(polyline)
+                ax.plot(
+                    polyline[:, 0],
+                    polyline[:, 1],
+                    "o-",
+                    color=CLASS_COLORS[int(label)],
+                    alpha=0.65,
+                    markersize=2,
+                    linewidth=linewidth,
+                )
+                drawn.add(int(label))
+
+        ax.set_title(f"pos_{i:06d}", fontsize=8, pad=0)
+
+    if class_id is not None:
+        title = f"{title}, {CLASS_NAMES[class_id]} only"
+    fig.suptitle(title, fontsize=9)
+    # A legend only when the colour has to tell two classes apart. A one-class
+    # figure is named by its title.
+    if len(drawn) > 1:
+        handles = [
+            Line2D([], [], color=CLASS_COLORS[c], linewidth=2, label=CLASS_NAMES[c])
+            for c in sorted(drawn)
+        ]
+        fig.legend(
+            handles=handles,
+            loc="upper right",
+            ncol=len(handles),
+            fontsize=8,
+            frameon=False,
+        )
+    fig.subplots_adjust(
+        left=0.01, right=0.99, bottom=0.01, top=0.96, wspace=0.01, hspace=0.05
+    )
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=110)
+        print(f"Saved {save_path}")
+    plt.show(block=False)
+    return fig
+
+
+def show_polyline_single(
+    image_path,
+    polylines=None,
+    overlay=None,
+    alpha=0.5,
+    cmap="viridis",
+    clip_percentiles=(2, 98),
+    linewidth=1.5,
+    title=None,
+    save_path=None,
+):
+    """
+    One crop, full size, with optional polylines and an optional raster overlay.
+
+    The grid view is for comparing many crops; this is for looking hard at one,
+    which is what checking an overlay lines up needs.
+
+    overlay is any 2D array covering exactly the same ground as the image, at
+    any resolution. It is stretched to the image with `extent`, so a 25x25
+    lidar patch over a 1000x1000 crop needs no resampling here.
+    `interpolation="nearest"` keeps the cell edges visible, which is the point:
+    a half-cell shift is obvious, a smoothed one is not.
+    """
+    image = cv2.imread(str(image_path))
+    if image is None:
+        raise FileNotFoundError(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    h, w = image.shape[:2]
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.imshow(image)
+
+    if overlay is not None:
+        overlay = np.asarray(overlay, dtype=float)
+        # Clip the colour range, or one building sends everything else to the
+        # bottom of the colormap and the pattern under the lines disappears.
+        finite = overlay[np.isfinite(overlay)]
+        vmin, vmax = (
+            np.percentile(finite, clip_percentiles) if finite.size else (None, None)
+        )
+        ax.imshow(
+            overlay,
+            extent=[0, w, h, 0],
+            alpha=alpha,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            interpolation="nearest",
+        )
+
+    for polyline in np.asarray(polylines) if polylines is not None else []:
+        polyline = np.asarray(polyline)
+        ax.plot(
+            polyline[:, 0],
+            polyline[:, 1],
+            "o-",
+            color="red",
+            markersize=2,
+            linewidth=linewidth,
+        )
+
+    ax.set_xlim(0, w)
+    ax.set_ylim(h, 0)
+    ax.axis("off")
+    if title:
+        ax.set_title(title, fontsize=9)
+    fig.tight_layout(pad=0.2)
+
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=110, bbox_inches="tight")
+        print(f"Saved {save_path}")
+    plt.close(fig)
+    return fig
+
+
+def show_mask_grid(
+    image_dir,
+    mask_dir,
+    ids=None,
+    n=16,
+    image_pattern="pos_{:06d}.png",
+    mask_pattern="pos_{:06d}.png",
+    alpha=0.25,
+    color=(1, 0, 0),
+    seed=42,
+    title="GT",
+):
+    image_dir = Path(image_dir)
+    mask_dir = Path(mask_dir)
+
+    if ids is None:
+        files = sorted(image_dir.glob("*.png"))
+        rng = np.random.default_rng(seed)
+        files = rng.choice(files, size=n, replace=False)
+        ids = [int(p.stem.split("_")[-1]) for p in files]
+    else:
+        ids = ids[:n]
+
+    fig, axes = plt.subplots(4, 4, figsize=(10.8, 10.8))
+
+    for ax, i in zip(axes.ravel(), ids):
+        image_path = image_dir / image_pattern.format(i)
+        mask_path = mask_dir / mask_pattern.format(i)
+
+        image = cv2.imread(str(image_path))
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        mask_bool = mask > 0
+
+        overlay = np.zeros((*mask.shape, 4))
+        overlay[mask_bool] = (*color, alpha)
+
+        ax.imshow(image)
+        ax.imshow(overlay)
+        ax.set_title(f"pos_{i:06d}", fontsize=8, pad=0)
+        ax.axis("off")
+
+    fig.suptitle(title, fontsize=9)
+    fig.subplots_adjust(
+        left=0.01, right=0.99, bottom=0.01, top=0.96, wspace=0.01, hspace=0.05
+    )
+    plt.show(block=False)
+
+
+# To view an inference run of scripts/train_detr_unet_polyline.py, use
+# scripts/show_polyline_results.py <run_dir>. It takes the run directory, which
+# holds both the predictions and the matching ground truth, and draws both grids
+# over the same crops. Do not put show_polyline_grid calls at module level here:
+# they would run on every `import hedge_seg.visualization`.
+
 """
+from pathlib import Path
+main_path = Path(f"/home/fatemeh/Downloads/hedge/results")
+visualize_sample(main_path, num=1, folder="pdok_dataset") # test_256_dino256
+for i in range(359,1000):
+    folder= "pdok_dataset"
+    visualize_sample(main_path, num=i, folder=folder)
+    plt.savefig(main_path/f"{folder}/tmp/pos_{i:06d}.png")
+    plt.close()
+print("Done")
+
+# visualize yolo bounding boxes and segmentations
+from pathlib import Path
+main_path = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset_yolo_bbox2")
+draw_yolo_bounding_box_on_image(main_path, 9, folder="train")
+main_path = Path("/home/fatemeh/Downloads/hedge/results/pdok_dataset_yolo_seg2")
+draw_yolo_segmentation_on_image(main_path, 9, folder="train")
+print("Done")
+
 a = np.array([[106, 99], [104, 104], [102, 106], [119, 108], [128, 109]])
 xmin, ymin, xmax, ymax = 102, 99, 128, 109
 image_path = Path(
-    "/home/fatemeh/Downloads/hedg/results/test_dataset_with_osm/images/pos_000000.png"
+    "/home/fatemeh/Downloads/hedge/results/test_dataset_with_osm/images/pos_000000.png"
 )
 ax = draw_rectangle_on_image(image_path, xmin, ymin, xmax, ymax)
 ax.plot(a[:, 0], a[:, 1], "*r")
 plt.show(block=False)
+
+# visualize semantic segmentation masks
+image = cv2.imread("/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/images/train/pos_000000.png")
+mask = cv2.imread("/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/inference/masks/pos_000000.png", cv2.IMREAD_GRAYSCALE)
+show_image_with_mask(image, mask)
+mask = cv2.imread("/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg2_1image/masks/train/pos_000000.png", cv2.IMREAD_GRAYSCALE)
+show_image_with_mask(image, mask)
+
+# visualize a grid of masks
+# ids=[6712, 2591, 18168, 18742, 1050, 10454, 28379, 17717, 9641, 28365, 5019, 26894, 8816, 13029, 4124, 24082],
+for seed in [42, 123, 456]:
+    image_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/images/val"
+    mask_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/masks/val"
+    show_mask_grid(
+        image_dir=image_dir,
+        mask_dir=mask_dir,
+        seed=seed,
+    )
+
+    image_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/images/val"
+    mask_dir = "/home/fatemeh/Downloads/hedge/results/pdok_dataset_semseg3/inference/masks"
+    show_mask_grid(
+        image_dir=image_dir,
+        mask_dir=mask_dir,
+        seed=seed,
+        title="Inference",
+    )
+
+# visualize a grid of polylines from data generated from scripts/train_detr_maptr_polyline.py
+show_polyline_grid(
+    image_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/images",
+    polyline_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/inference/polylines",
+    title="Inference",
+)
+show_polyline_grid(
+    image_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/images",
+    polyline_dir="/home/fatemeh/Downloads/hedge/results/test_256_dino256/labels_processed",
+    title="GT",
+)
+
+# visualize a grid of polylines from data generated from scripts/train_detr_unet_polyline.py
+show_polyline_grid(
+    image_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2/images",
+    polyline_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2_detr/polylines",
+    title="GT",
+)
+show_polyline_grid(
+    image_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2/images",
+    polyline_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2_detr/inference_final_unet2/polylines",
+    title="Inference (final epoch-2000 ckpt, unet2)",
+)
+show_polyline_grid(
+    image_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2/images",
+    polyline_dir="/home/fatemeh/Downloads/hedge/results/pdok_dataset2_detr/inference_final_unet3/polylines",
+    title="Inference (final epoch-2000 ckpt, unet3)",
+)
 """

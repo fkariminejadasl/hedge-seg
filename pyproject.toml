@@ -25,6 +25,7 @@ dependencies = [
     "opencv-python",
     "tqdm",
     "Pillow",
+    "pytest",
 
     # --- deep-learning
     "torch",
@@ -33,8 +34,12 @@ dependencies = [
     "omegaconf",
     "transformers",
     "accelerate",
+    "datasets",
+    "albumentations",
+    "torchmetrics", # torchmetrics[detection]
     "wandb",
     "tensorboard",
+    "huggingface_hub",
 
     # --- geospatial
     "rasterio",
@@ -62,7 +67,15 @@ notebook = [
 # testing extras
 # pip install .[test]
 test = [
+    "black",
+    "isort",
+    "pyflakes",
     "pytest",
+    # markdown formatter for docs/. mdformat-gfm adds the GitHub syntax,
+    # including the pipe-table alignment (mdformat-tables was archived in
+    # October 2025 and folded into mdformat-gfm).
+    "mdformat",
+    "mdformat-gfm",
     # "pytest-cov",
 ]
 
@@ -100,5 +113,6 @@ markers = [
 
 
 # add linters
-# pip install black isort pyflakes
+# pip install black isort pyflakes mdformat mdformat-gfm
 # for i in hedge_seg exps scripts;do echo $i; black $i -l 88; isort $i --profile black; pyflakes $i;done
+# mdformat docs/
