@@ -533,10 +533,11 @@ hedge.
 
 Two facts, both checked:
 
-- `Actueel_ortho25` is bit-identical to `2025_ortho25`: 0.00 mean pixel
-  difference on a test crop, against 29.51 for `2022_ortho25`, the year the
-  labels come from. `pdok_dataset3` was downloaded 2026-04-29, so the crops are
-  **2025** imagery.
+- The crops are **2025** imagery. Stored crops differ from a fresh
+  `2025_ortho25` download by 5.6 to 13 mean pixel value, against 21 to 41 for
+  `2024_ortho25`. Not 0, so even the year layer does not return the stored
+  files byte for byte. `2025_ortho25` itself differs from `2022_ortho25`, the
+  year the labels come from, by 29.51 on a test crop.
 - Top10NL2023 was "herzien op basis van luchtfoto 2022"
   (`BRT_Actualiteitskaart_april_2023.pdf`), so the labels are **2022**.
 

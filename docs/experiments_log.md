@@ -14,14 +14,14 @@ Which script built which directory, and from what. Kept here rather than only
 in the script docstrings, because datasets get deleted to free inodes and then
 have to be rebuilt from nothing but this table. Sizes are on the cluster.
 
-| dataset                                     | built by                                                     | from                                                                                                              | size                 |
-| ------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `pdok_dataset3` (30,000 crops, 46 GB)       | `scripts/data/build_pdok_wms_dataset.py`                     | PDOK WMS layer `Actueel_ortho25` plus `Top10NL2023_..._heg.shp`, 250 m crops at 1000 px, sampled one per polyline | 46 GB, 60,000 files  |
-| `pdok_dataset3_polylines`                   | `scripts/data/convert_pdok_polylines_to_detr_polyline.py`    | `pdok_dataset3/labels/*.json`                                                                                     | small                |
-| `pdok_dataset3_polylines/lidar_patches.npy` | `scripts/data/build_lidar_patches.py`                        | the 6 AHN4 metric GeoTIFFs in `/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4`, 16 GB, laptop only              | 450 MB, 2 files      |
-| `pdok_dataset3_tree_polylines` (2026-09-16) | same converter, with `treeline_shp` and `val_stems_file` set | `pdok_dataset3/labels/*.json` plus `Top10NL2023_..._bomenrij.shp`                                                 | 144 MB, 30,000 files |
-| `pdok_dataset_semseg3`                      | `scripts/data/convert_pdok_polylines_to_semseg.py`           | `pdok_dataset3`                                                                                                   | 511 MB               |
-| `pdok_dataset_yolo`                         | `scripts/data/convert_pdok_polylines_to_yolo_{bbox,seg}.py`  | `pdok_dataset`                                                                                                    | 1.6 GB               |
+| dataset                                     | built by                                                     | from                                                                                                                                                         | size                 |
+| ------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- |
+| `pdok_dataset3` (30,000 crops, 46 GB)       | `scripts/data/build_pdok_wms_dataset.py`                     | PDOK WMS layer `Actueel_ortho25` (2025 photos; rebuild with `2025_ortho25`) plus `Top10NL2023_..._heg.shp`, 250 m crops at 1000 px, sampled one per polyline | 46 GB, 60,000 files  |
+| `pdok_dataset3_polylines`                   | `scripts/data/convert_pdok_polylines_to_detr_polyline.py`    | `pdok_dataset3/labels/*.json`                                                                                                                                | small                |
+| `pdok_dataset3_polylines/lidar_patches.npy` | `scripts/data/build_lidar_patches.py`                        | the 6 AHN4 metric GeoTIFFs in `/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4`, 16 GB, laptop only                                                         | 450 MB, 2 files      |
+| `pdok_dataset3_tree_polylines` (2026-09-16) | same converter, with `treeline_shp` and `val_stems_file` set | `pdok_dataset3/labels/*.json` plus `Top10NL2023_..._bomenrij.shp`                                                                                            | 144 MB, 30,000 files |
+| `pdok_dataset_semseg3`                      | `scripts/data/convert_pdok_polylines_to_semseg.py`           | `pdok_dataset3`                                                                                                                                              | 511 MB               |
+| `pdok_dataset_yolo`                         | `scripts/data/convert_pdok_polylines_to_yolo_{bbox,seg}.py`  | `pdok_dataset`                                                                                                                                               | 1.6 GB               |
 
 Things that are not in the script docstrings and cost a day each when
 forgotten:
@@ -41,11 +41,13 @@ forgotten:
   trained on 26,900 crops. On 2026-09-29 they were moved back for exps 7 to 9,
   which have no lidar, so the split is 26,902 again, exactly exp 2's. A lidar
   run needs them moved out again.
-- `Actueel_ortho25` is not a fixed layer. It is bit-identical to
-  `2025_ortho25` today and will silently become 2026 imagery later. **Rebuilding
-  `pdok_dataset3` from `Actueel_ortho25` will not reproduce it.** Use
-  `2025_ortho25` to reproduce, `Actueel_ortho25` only for a deliberately new
-  dataset.
+- `pdok_dataset3` was downloaded from `Actueel_ortho25`, which is not a fixed
+  layer: it serves the newest flight, the 2025 photos today, and will become
+  2026 later. The builder now asks for `2025_ortho25`. **Even that does not
+  give back the stored images byte for byte:** four stored crops differ from a
+  fresh `2025_ortho25` download by 5.6 to 13 mean pixel value, against 21 to
+  41 for `2024_ortho25` (`exps/probe_image_label_dates.py`). So a rebuild gets
+  the same photos, not the same files. Keep the images.
 - The train/val split depends on where the conversion runs, because
   `avoid_label_dirs` sees 10 pdok_dataset2 labels locally and 5,000 on the
   cluster. The cluster split (26,902 / 3,098) is the operative one. Keep the
