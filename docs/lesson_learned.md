@@ -1150,6 +1150,13 @@ against 0.731 on crops with one). So the next runs should target perception.
   stage at stride 8. Memory is available: batch 16 uses 5.8 of 40 GB, and
   stride 8 is 4x the tokens. This is the most direct attack on the real limit.
 
+- Exp 10: hedges and tree rows as one woody line class, on the exp 9 recipe.
+  The tree row dataset with `merge_classes=True` in
+  `scripts/train_detr_unet_polyline.py`, so no new dataset. Top10NL separates
+  the two by undergrowth, which a photo from above barely shows, and exp 5's
+  two classes cost the hedges a little. How to read it is in
+  `docs/experiments_log.md`.
+
 - Fix the tree row score. It counts a crop with no tree row, and no tree row
   drawn, as a perfect score. That is 40% of the val crops, so every tree row
   number so far is too high (exps 4 and 5). Hedge scores are not affected:

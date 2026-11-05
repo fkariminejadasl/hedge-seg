@@ -144,6 +144,40 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
+- 10 setup, 2026-11-05, not yet submitted. **Hedges and tree rows as one
+  class, a woody line.** Exp 9 with one change: the tree row dataset, read with
+  `merge_classes=True`, which sets every label to 0. No new dataset. On the
+  cluster that is 26,900 train crops against exp 9's 26,902, the two crops
+  missing there, and the same 3,098 val crops.
+
+  Why: Top10NL tells the two apart by undergrowth at eye level, which a photo
+  from above barely shows. Exp 5 taught them as two classes and the hedges got
+  a little worse. One class drops the distinction instead of learning it.
+
+  How to read it, written before the run:
+
+  - Headline: woody line F1 at 10 m, every predicted line against both label
+    layers (`classes={None: ...}` in `exps/probe_polyline_pr.py`), at its own
+    best threshold. No earlier run was trained for this. Exp 5 scored the
+    same way is a reference, not a baseline, since its backbone was frozen.
+  - Hedges: recall at 10 m against hedge labels only, against exp 9's 0.733.
+    Compare skill, real recall minus null recall, not raw recall. The labels
+    hold 1.4 times as many lines with tree rows (4.93 against 3.45 per crop),
+    so the model will draw more, and that alone raises recall.
+    `exps/probe_recall_null_model.py` needs a class option for this first.
+  - Hedge precision is not comparable: a drawn tree row counts as wrong.
+
+  Expect a little noise in the labels: 2.4% of tree row length lies within
+  5 m of a hedge (`exps/probe_tree_class_labels.py`), so in places one woody
+  line now has two labels on top of each other.
+
+  Checks, on the laptop. `exps/smoke_test_train_detr_unet_polyline.py` passes
+  on the merged data: on `pos_005001` (1 hedge, 4 tree rows) every label is 0
+  after the merge and the polylines are unchanged, and reading the tree data
+  with one class and no merge raises. Then 6 epochs, 3 eval-to-train
+  switches, 48 s. Backbone frozen in the smoke test; the trained-backbone
+  path is exp 9's, unchanged.
+
 - 9 scored, 2026-09-30. **Training the backbone helps. The first clear gain
   since exp 2.** Hedge F1 0.721 at 10 m against 0.699, and 0.581 at 5 m
   against 0.553. The gain is more than twice what a new random start gives
