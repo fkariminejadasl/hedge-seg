@@ -144,7 +144,8 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 10 setup, 2026-11-05, not yet submitted. **Hedges and tree rows as one
+- 10 submitted, 2026-11-05: job 28924884, gpu_a100, git a67418c,
+  --time=24:00:00, about 13 h like exp 9. **Hedges and tree rows as one
   class, a woody line.** Exp 9 with one change: the tree row dataset, read with
   `merge_classes=True`, which sets every label to 0. No new dataset. On the
   cluster that is 26,900 train crops against exp 9's 26,902, the two crops
