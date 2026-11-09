@@ -99,8 +99,11 @@ escape.
   Write `cls_loss=focal`, not `` `cls_loss="focal"` ``. Say "the 0.05
   threshold" as: the 0.05 threshold. Blank lines between paragraphs are fine
   inside the quotes, so a multi-paragraph message still works with one `-m`.
-- Give it in a copyable block as the full command, `git commit -m "..."`, not
-  as bare text the user has to wrap themselves.
+- Give one copyable block with three commands in order: `git add` with the
+  files of that commit, `git commit -m "..."`, and `git push origin <branch>`
+  for the current branch. Name the files; never `git add -A` or `git add .`,
+  which would also take untracked files like `.vscode/`. Writing the push
+  command for the user to run is not running it.
 
 ## Documentation layout
 
