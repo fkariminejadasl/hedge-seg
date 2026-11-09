@@ -397,25 +397,40 @@ we were about to spend far more on the same idea.
 
 ---
 
-## Backup: the runs
+## Backup: the runs, 1 to 5
 
-| exp | what changed | best F1 at 10 m |
-|---|---|---|
-| 1 | 5,000 crops, 150 epochs | 0.640 |
-| 2 | all 26,902 crops, 45 epochs | 0.699 |
-| 3 | focal sigmoid score head | 0.664 |
-| 4 | tree rows as class 2, plus laser | 0.698 |
-| 5 | tree rows as class 2, no laser | 0.689 |
-| 6 | laser, no tree rows | 0.703 |
-| 7 | exp 2 again, new random start | 0.691 |
-| 8 | exp 2 for 90 epochs | 0.712 |
-| 9 | image backbone trained too | **0.721** |
-| 10 | hedges and tree rows as one class | 0.722 *(woody lines)* |
+<style scoped>table { font-size: 22px; }</style>
 
-Same 3,098 held-out crops; gaps under 0.02 do not count *(`exps/probe_polyline_pr.py`)*
+| exp | what changed | best cut-off | precision | recall | F1 |
+|---|---|---|---|---|---|
+| 1 | 5,000 crops, 150 epochs | 0.95 | 0.702 | 0.589 | 0.640 |
+| 2 | all 26,902 crops, 45 epochs | 0.90 | 0.701 | 0.696 | 0.699 |
+| 3 | focal sigmoid score head | 0.40 | 0.779 | 0.578 | 0.664 |
+| 4 | tree rows as class 2, plus laser | 0.90 | 0.693 | 0.703 | 0.698 |
+| 5 | tree rows as class 2, no laser | 0.90 | 0.692 | 0.686 | 0.689 |
+
+At 10 m on the same 3,098 crops; gaps under 0.02 do not count *(`exps/probe_polyline_pr.py`)*
 
 - **More data buys precision, not recall.** Precision +0.08 in every crowding
   bucket, recall +0.02, nothing on crowded crops *(exp 1 to exp 2)*
+
+---
+
+## Backup: the runs, 6 to 10
+
+<style scoped>table { font-size: 22px; }</style>
+
+| exp | what changed | best cut-off | precision | recall | F1 |
+|---|---|---|---|---|---|
+| 6 | laser, no tree rows | 0.90 | 0.698 | 0.709 | 0.703 |
+| 7 | exp 2 again, new random start | 0.90 | 0.687 | 0.694 | 0.691 |
+| 8 | exp 2 for 90 epochs | 0.90 | 0.709 | 0.715 | 0.712 |
+| 9 | image backbone trained too | 0.90 | 0.710 | 0.733 | **0.721** |
+| 10 | hedges and tree rows as one class | 0.90 | 0.683 | 0.765 | 0.722 *(woody lines)* |
+
+At 10 m on the same 3,098 crops; gaps under 0.02 do not count *(`exps/probe_polyline_pr.py`)*
+
+Exp 10 is scored on hedges and tree rows together, the others on hedges only.
 
 ---
 
