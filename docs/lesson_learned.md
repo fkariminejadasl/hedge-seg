@@ -1195,26 +1195,32 @@ In the order suggested:
    the laptop gets a full copy of the cluster versions, in the places the code
    already reads.
 
-   - Done 2026-10-29: `/home/fatemeh/Downloads/hedge/snellius_backup/` holds
-     every cluster run and the cluster-only data, checked by checksum. Its
-     `README.txt` says what each folder is. Exp 10 came later and is complete
-     in `/home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/10/`. A
-     new cluster run is copied back the same way, with its script and log
-     (`CLAUDE.md`, "Bringing a cluster run back to the laptop").
+   - Done 2026-11-09: the cluster data and runs are on the laptop, in the
+     places the code reads, checked by md5. After the checks, the laptop
+     backup `snellius_backup` was deleted, and so were the laptop files the
+     cluster versions replaced, including the 10 laptop `pdok_dataset2`
+     images and the laptop-only `pos_029989` and `pos_029998`. A new cluster
+     run is copied back with its script and log (`CLAUDE.md`, "Bringing a
+     cluster run back to the laptop").
    - Data, each dataset once in `/home/fatemeh/Downloads/hedge/results/`, as
-     the cluster version. `pdok_dataset2/images` gets the cluster's 5,000 (the
-     laptop has 10; its labels are already all 5,000, identical to the
-     cluster). `pdok_dataset3` gains `pos_030002` and `pos_030003` and
-     loses `pos_029989` and `pos_029998`, but keeps the laptop's real photo of
-     `pos_001893`: the cluster copy is a solid blue failed download, 1 of
-     26,902 train crops. Both polyline datasets become the cluster versions,
-     so `val_cluster` equals `val`. `lidar_patches.npy` gains the two patches.
-   - Runs: merge `snellius_backup` into `/home/fatemeh/Downloads/hedge/snellius`,
-     the `CLUSTER_EXP_ROOT` the code uses. Keep the 9 files only the mirror
-     has.
-   - Check that `spatial_train_val_split` on the laptop gives exactly the
-     3,098 cluster val stems. Delete the laptop folder `snellius_backup`
-     only after both moves are checked; by then it is a second laptop copy.
+     the cluster version. Every file the two machines shared was already
+     identical; only the split and four crops differed. `pdok_dataset2/images`
+     holds the cluster's 5,000. `pdok_dataset3` gained `pos_030002` and
+     `pos_030003` and lost `pos_029989` and `pos_029998`, but keeps the
+     laptop's real photo of `pos_001893`: the cluster copy is a solid blue
+     failed download, 1 of 26,902 train crops, and the only one
+     (`exps/probe_failed_downloads.py`). Both polyline datasets are the
+     cluster versions, so `val_cluster` equals `val`. `lidar_patches.npy` was
+     rebuilt for the new crops with `scripts/data/build_lidar_patches.py`; the
+     cluster copy still lacks `pos_030002` and `pos_030003`.
+   - The laptop now computes the cluster split, train 26,902 / val 3,098
+     (`exps/probe_split_reproduces.py`).
+   - Runs: the backup was merged into
+     `/home/fatemeh/Downloads/hedge/snellius`, the `CLUSTER_EXP_ROOT`. A loose
+     `<n>.sh` or `<n>_<jobid>.out` now sits inside its run folder `<n>/`.
+     Where the two copies differed (two ultralytics `results.csv` and the
+     `semseg_unet` 5 log), both are kept, the cluster one with `_cluster` in
+     the name.
    - Repo: retire `val_cluster`. 19 files name it, including
      `tests/test_show_polyline_results.py` and the talk; keep the names of
      existing inference outputs such as `best_9_val_cluster_t0.05`, they record
@@ -1227,14 +1233,15 @@ In the order suggested:
      row to the dataset table in `docs/experiments_log.md`: the first 5,000 of
      the same sampling as pdok_dataset3, which trained the backbone through
      pdok_dataset_semseg2. Make the table's sizes laptop sizes. One line on the
-     blue `pos_001893`, with a small probe in `exps/`, run on the backup copy
-     before it is deleted.
+     blue `pos_001893`, citing `exps/probe_failed_downloads.py`.
    - Keep `CLAUDE.md`, the `/cluster-run` skill and `slurm/` as they are: the
      cluster is still in use.
    - Open, not urgent: the stored pdok_dataset3 crops differ from a fresh
      `2025_ortho25` download by 5.6 to 13 mean pixel value, while pdok_dataset2
      `pos_000000`, the same place, matches it exactly. Look at one crop side by
-     side: colour, sharpness or a small shift?
+     side: colour, sharpness or a small shift? Which pdok_dataset2 copy
+     matched is not recorded. The laptop and cluster copies differed, and
+     only the cluster one is left.
 
 1. **Look at the strange things in the figures.** In
    `/home/fatemeh/Downloads/hedge/screenshots/`, `exp2_8_9.png` shows exp 2
