@@ -2617,7 +2617,9 @@ if __name__ == "__main__":
         #
         # Exp 10 (here) is exp 9 with hedges and tree rows as one class, a woody
         # line. The tree row dataset already holds both, so merge_classes=True
-        # only relabels them and no new dataset is needed.
+        # only relabels them and no new dataset is needed. Woody line F1 at
+        # 10 m 0.722 at t=0.90, against 0.676 for exp 9; hedge recall skill
+        # unchanged (exps/probe_polyline_pr.py, exps/probe_recall_null_model.py).
         #
         #   run          | polyline dir                 | num_classes | lidar_path
         #   exp 2        | pdok_dataset3_polylines      | 1           | None
@@ -2748,13 +2750,15 @@ if __name__ == "__main__":
         # CLUSTER_EXP_ROOT, not EXP_ROOT: cluster runs write here, and locally
         # it points at the scp'd mirror, so this path needs no editing when
         # running inference on a cluster checkpoint from either machine.
-        # exp 2 is the best run, and it is a "ce" checkpoint, so it matches the
-        # cls_loss above. To infer an exp 3 checkpoint (3/best_3.pt or 3/3.pt)
-        # set cls_loss="focal" as well, or the head is the wrong width and the
-        # load fails.
-        infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/2/best_2.pt",
-        infer_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val_cluster",
-        infer_out_dir=DATA_ROOT / "pdok_dataset3_polylines/inference",
+        # The head width must match the checkpoint: num_classes=2 for exps 4
+        # and 5, cls_loss="focal" for exp 3. The tree row val folder links both
+        # label classes into gt/, so a one-class model can be scored as a
+        # woody line model there; the hedges folder is val_cluster.
+        infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/10/10.pt",
+        # infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/10/best_10.pt",
+        # infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/9/9.pt",
+        infer_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
+        infer_out_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/inference",
         # 0.05, not 0.95: a focal sigmoid score is not on the same scale as the
         # old softmax one, so 0.95 would be an arbitrary cut. A run saved at
         # 0.05 keeps everything and can be swept in both directions afterwards.

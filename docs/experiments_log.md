@@ -144,40 +144,75 @@ bbox 3900/903.
 
 ## detr_unet_polyline (ResNet18-UNet backbone, image input)
 
-- 10 submitted, 2026-11-05: job 28924884, gpu_a100, git a67418c,
-  --time=24:00:00, about 13 h like exp 9. **Hedges and tree rows as one
-  class, a woody line.** Exp 9 with one change: the tree row dataset, read with
-  `merge_classes=True`, which sets every label to 0. No new dataset. On the
-  cluster that is 26,900 train crops against exp 9's 26,902, the two crops
-  missing there, and the same 3,098 val crops.
+- 10 scored, 2026-11-09. **One woody line class gives the best woody line
+  map, and the hedges are unchanged.** Woody line F1 at 10 m 0.722, against
+  0.676 for exp 9 and 0.654 for exp 5. Hedge recall skill 0.483 against exp
+  9's 0.473, inside the luck of a new seed.
+
+  Setup: exp 9 with one change, the tree row dataset read with
+  `merge_classes=True`, which sets every label to 0. No new dataset. Job
+  28924884, A100, git a67418c, 45 epochs in 12:59, 17:07 per epoch like exp 9.
+  26,900 train crops (the two the cluster lacks), the same 3,098 val crops.
+  `best_10.pt` is epoch 35, the lowest eval loss; `10.pt` is epoch 45. Both
+  scored, and they tie (0.720 against 0.722).
 
   Why: Top10NL tells the two apart by undergrowth at eye level, which a photo
   from above barely shows. Exp 5 taught them as two classes and the hedges got
   a little worse. One class drops the distinction instead of learning it.
 
-  How to read it, written before the run:
+  How it was to be read, written before the run: woody line F1 as the
+  headline, with exp 5 as a reference only (frozen backbone); hedge recall as
+  skill, real minus null, because the merged labels hold 1.4 times as many
+  lines and the model would draw more; hedge precision not comparable, since
+  a drawn tree row counts as wrong.
 
-  - Headline: woody line F1 at 10 m, every predicted line against both label
-    layers (`classes={None: ...}` in `exps/probe_polyline_pr.py`), at its own
-    best threshold. No earlier run was trained for this. Exp 5 scored the
-    same way is a reference, not a baseline, since its backbone was frozen.
-  - Hedges: recall at 10 m against hedge labels only, against exp 9's 0.733.
-    Compare skill, real recall minus null recall, not raw recall. The labels
-    hold 1.4 times as many lines with tree rows (4.93 against 3.45 per crop),
-    so the model will draw more, and that alone raises recall.
-    `exps/probe_recall_null_model.py` needs a class option for this first.
-  - Hedge precision is not comparable: a drawn tree row counts as wrong.
+  Woody line, every line against both label layers, 10 m, each run at its
+  best threshold (`exps/probe_polyline_pr.py`):
 
-  Expect a little noise in the labels: 2.4% of tree row length lies within
-  5 m of a hedge (`exps/probe_tree_class_labels.py`), so in places one woody
-  line now has two labels on top of each other.
+  | run                               | best t | P    | R    | F1       |
+  | --------------------------------- | ------ | ---- | ---- | -------- |
+  | exp 10 `10.pt`, ep 45             | 0.90   | .683 | .765 | **.722** |
+  | exp 10 `best_10.pt`, ep 35        | 0.90   | .698 | .743 | .720     |
+  | exp 9, hedges only                | 0.70   | .690 | .663 | .676     |
+  | exp 5, two classes pooled, frozen | 0.90   | .678 | .632 | .654     |
 
-  Checks, on the laptop. `exps/smoke_test_train_detr_unet_polyline.py` passes
-  on the merged data: on `pos_005001` (1 hedge, 4 tree rows) every label is 0
-  after the merge and the polylines are unchanged, and reading the tree data
-  with one class and no merge raises. Then 6 epochs, 3 eval-to-train
-  switches, 48 s. Backbone frozen in the smoke test; the trained-backbone
-  path is exp 9's, unchanged.
+  At t=0.90, F1 at 5 / 10 / 15 m: exp 10 .551 / .722 / .786, exp 9 .521 /
+  .661 / .724, exp 5 .489 / .654 / .736.
+
+  Hedges, hedge labels only, 10 m, t=0.90
+  (`exps/probe_recall_null_model.py`, now with a class option):
+
+  | run    | lines per crop | real R | null R | skill |
+  | ------ | -------------- | ------ | ------ | ----- |
+  | exp 9  | 3.33           | .733   | .260   | .473  |
+  | exp 10 | 5.76           | .795   | .311   | .483  |
+
+  Best skill over all thresholds: exp 9 .507, exp 10 .499. So the extra 0.06
+  of raw hedge recall is luck from drawing more lines, as predicted.
+
+  - Exp 10 against exp 9 on woody lines, +0.046, is expected: exp 9 never
+    learned tree rows. Against exp 5, +0.068, but exp 5's backbone was frozen,
+    and training it was worth 0.022 on hedges. At the same recall, 0.76, exp
+    10 is 0.13 more precise than exp 5 (exp 5 at t=0.80: P .554).
+  - Woody recall barely falls with crowding: .841 / .756 / .753 / .719 on
+    crops with 1 / 2-3 / 4-6 / 7+ woody lines, against exp 9's .812 / .609 /
+    .487 / .400. No null model per bucket, so a hint, not a finding.
+  - Geometry matches the labels: straightness .934 against .936, bent share
+    .119 against .155, median length 105 m against 113 m.
+  - Campsites still score worst: woody F1 .643 against .731 elsewhere.
+
+  Checks. Exp 9 inferred again on the tree row folder gives exactly its
+  recorded hedge numbers (.710 / .733 / .721), and exp 5 gives its own, so
+  the folders compare. The null-model probe with the class option gives
+  exactly the recorded exp 2 numbers. Both checkpoints copied back match the
+  cluster md5.
+
+  Before the run, `exps/smoke_test_train_detr_unet_polyline.py` passed on the
+  merged data: every label 0 after the merge on `pos_005001`, polylines
+  unchanged, and an unmerged one-class read raises.
+
+  Inference runs kept at
+  `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_tree_polylines/inference/{best_10,10,9}_val_t0.05`.
 
 - 9 scored, 2026-09-30. **Training the backbone helps. The first clear gain
   since exp 2.** Hedge F1 0.721 at 10 m against 0.699, and 0.581 at 5 m

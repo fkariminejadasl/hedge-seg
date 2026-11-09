@@ -233,6 +233,22 @@ or more.
 
 ---
 
+## Hedges and tree rows as one class
+
+The map tells them apart by what grows underneath, which a photo from above
+barely shows. So we stopped asking: one class, a *woody line*.
+
+**The best woody line map so far.** 0.72 at 10 m, against 0.68 for the
+hedge-only model and 0.65 for the older model with two classes.
+
+**Hedges: no better, no worse.** It covers more hedge length, 0.73 to 0.80,
+but only because it draws more lines. Corrected for luck *(null model)*, +0.01.
+
+*(exp 10 against exps 5 and 9, `exps/probe_polyline_pr.py`,
+`exps/probe_recall_null_model.py`)*
+
+---
+
 ## Hedges the map is missing entirely (High R, low P)
 
 ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_missing_labels_gt_val_cluster_t.90.png) ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_missing_labels_best_2_val_cluster_t.90.png)
@@ -354,6 +370,7 @@ one in four bends noticeably.
   *(exp 1 to exp 2)*
 - **Cleaner labels.** Loops opened, short lines dropped
 - **Training the image backbone too.** 0.699 to 0.721 at 10 m *(exp 9)*
+- **One class for hedges and tree rows**, for a woody line map: 0.72 *(exp 10)*
 
 ---
 
@@ -393,6 +410,7 @@ we were about to spend far more on the same idea.
 | 7 | exp 2 again, new random start | 0.691 |
 | 8 | exp 2 for 90 epochs | 0.712 |
 | 9 | image backbone trained too | **0.721** |
+| 10 | hedges and tree rows as one class | 0.722 *(woody lines)* |
 
 Same 3,098 held-out crops; gaps under 0.02 do not count *(`exps/probe_polyline_pr.py`)*
 

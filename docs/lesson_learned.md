@@ -861,6 +861,9 @@ One wrong idea to avoid: exp 4 placed its tree rows well, so we thought they
 could not hurt the hedges. How well one class is drawn says nothing about
 what it does to the other. *(exps 4, 5 and 7, `exps/probe_polyline_pr.py`)*
 
+Taught as one class instead of two, tree rows do pay, as a woody line map. See
+"One woody line class" below.
+
 ## Where the lidar is allowed to act
 
 The backbone turns the image into a 64x64 grid of feature vectors, one per
@@ -1032,6 +1035,42 @@ The backbone really changed: 66 of its 86 weight tensors moved, against none
 in exp 2 (`exps/probe_backbone_trained.py`). *(exp 9,
 `exps/probe_polyline_pr.py`)*
 
+## One woody line class: a better woody map, not a better hedge map
+
+Exp 10 trains hedges and tree rows as one class, on the exp 9 recipe. The tree
+row dataset already holds both, so `merge_classes=True` in
+`scripts/train_detr_unet_polyline.py` only relabels them.
+
+As a woody line detector it is the best model we have. F1 at 10 m, every line
+against both label layers, each run at its best threshold:
+
+| model                                      | F1    |
+| ------------------------------------------ | ----- |
+| exp 10, one woody class                    | 0.722 |
+| exp 9, hedges only                         | 0.676 |
+| exp 5, two classes pooled, frozen backbone | 0.654 |
+
+Exp 9 never learned tree rows, so beating it was expected. Exp 5 is the real
+alternative, two classes instead of one. At the same recall, 0.76, exp 10 is
+0.13 more precise. Part of the 0.068 gap is exp 5's frozen backbone, which was
+worth 0.022 on hedges, so the class choice itself is likely nearer 0.05. Still
+above the 0.02 bar, but one run each.
+
+It finds no more hedges. Its hedge recall rose from 0.733 to 0.795, but it
+draws 5.76 lines per crop against 3.33, and the null model takes all of that
+back: skill 0.483 against 0.473. That trap was written down before the run,
+and it held.
+
+So the choice is about what map we want, not about a better model. For woody
+lines, use exp 10. For hedges alone, exp 9 stays. Nothing here says the model
+tells the two apart better; it is simply no longer asked to.
+
+A hint, not a finding: woody recall barely falls on crowded crops, 0.84 with
+one woody line to 0.72 with seven or more, where hedge recall fell to 0.37. But
+it also draws more lines there, and no null model was run per crowding bucket,
+so this may be luck. Check it before it shapes a run.
+*(exp 10, `exps/probe_polyline_pr.py`, `exps/probe_recall_null_model.py`)*
+
 ## Done
 
 Phase A — data + split:
@@ -1115,6 +1154,12 @@ Phase C — seed and backbone:
 - Exp 8 (exp 2 for 90 epochs) gains 0.013 at 10 m, a little more than the
   seed gap and below the 0.02 bar. Most of it is in by epoch 60.
 
+Phase C — one woody class:
+
+- Exp 10 (exp 9 with hedges and tree rows as one class): woody line F1 0.722
+  at 10 m against 0.676 for exp 9 and 0.654 for exp 5. Hedge recall skill
+  unchanged, 0.483 against 0.473.
+
 All runs from exp 2 on, hedge against hedge on the same 3,098 val crops, at
 t=0.90, the best threshold of every run. Each cell is precision / recall / F1.
 Exps 8 and 9 are their last epoch (`8.pt`, `9.pt`).
@@ -1131,13 +1176,17 @@ Exps 8 and 9 are their last epoch (`8.pt`, `9.pt`).
 
 *(`exps/probe_polyline_pr.py`)*
 
+Exp 10 is not in this table: it draws woody lines, so its hedge precision
+counts every tree row as wrong. See "One woody line class".
+
 ## TODO
 
 Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
 
 Exp 3 lost (0.664). Exps 4 to 6 did not beat exp 2 by the 0.02 bar
 (0.698, 0.689, 0.703); exp 9 did (0.721). See "How big a gap has to be before
-it counts". Exp 9 `9.pt` at t=0.90 is the new baseline.
+it counts". Exp 9 `9.pt` at t=0.90 is the new baseline for hedges, and
+exp 10 `10.pt` at t=0.90 for woody lines.
 
 The bottleneck is that the model does not draw enough correct lines, worst
 where crops are crowded (exp 2 recall 0.372 on crops with 7+ labelled lines
@@ -1150,12 +1199,9 @@ against 0.731 on crops with one). So the next runs should target perception.
   stage at stride 8. Memory is available: batch 16 uses 5.8 of 40 GB, and
   stride 8 is 4x the tokens. This is the most direct attack on the real limit.
 
-- Exp 10: hedges and tree rows as one woody line class, on the exp 9 recipe.
-  The tree row dataset with `merge_classes=True` in
-  `scripts/train_detr_unet_polyline.py`, so no new dataset. Top10NL separates
-  the two by undergrowth, which a photo from above barely shows, and exp 5's
-  two classes cost the hedges a little. How to read it is in
-  `docs/experiments_log.md`.
+- Null model per crowding bucket for exp 10. Its woody recall barely falls on
+  crowded crops, which would say part of the crowding problem is the label
+  split. It also draws more lines there, so check before believing it.
 
 - Fix the tree row score. It counts a crop with no tree row, and no tree row
   drawn, as a perfect score. That is 40% of the val crops, so every tree row
