@@ -1181,42 +1181,103 @@ counts every tree row as wrong. See "One woody line class".
 
 ## TODO
 
-Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
+Exp 9 `9.pt` at t=0.90 is the baseline for hedges, and exp 10 `10.pt` at
+t=0.90 for woody lines. A run has to win by 0.02 to count (see "How big a gap
+has to be before it counts"). The limit is perception: the model does not draw
+enough correct lines, worst on crowded crops (exp 2 recall 0.372 on crops with
+7+ labelled lines against 0.731 on crops with one).
 
-Exp 3 lost (0.664). Exps 4 to 6 did not beat exp 2 by the 0.02 bar
-(0.698, 0.689, 0.703); exp 9 did (0.721). See "How big a gap has to be before
-it counts". Exp 9 `9.pt` at t=0.90 is the new baseline for hedges, and
-exp 10 `10.pt` at t=0.90 for woody lines.
+In the order suggested:
 
-The bottleneck is that the model does not draw enough correct lines, worst
-where crops are crowded (exp 2 recall 0.372 on crops with 7+ labelled lines
-against 0.731 on crops with one). So the next runs should target perception.
+1. **Make the laptop the only copy, in a simple layout.** Cluster access ends
+   (the account expires 2027-01-08), and every run trained on the cluster
+   data, so the laptop takes the cluster versions.
 
-- Exp 4: finer features. `feature_stage="up3"` is stride 16, so a 1024 px crop
-  becomes a 64x64 grid and a 3 m hedge is 12 px, under one feature cell. Thin
-  structures cannot survive that. `FEATURE_STAGES` only has `enc4` (stride 32)
-  and `up3` (stride 16) today, so this means adding the next UNet decoder
-  stage at stride 8. Memory is available: batch 16 uses 5.8 of 40 GB, and
-  stride 8 is 4x the tokens. This is the most direct attack on the real limit.
+   - Done 2026-10-29: `/home/fatemeh/Downloads/hedge/snellius_backup/` holds
+     every cluster run and the cluster-only data, checked by checksum. Its
+     `README.txt` says what each folder is. Exp 10 came later and is complete
+     in `/home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/10/`.
+   - Data, each dataset once in `/home/fatemeh/Downloads/hedge/results/`, as
+     the cluster version. `pdok_dataset2/images` gets the cluster's 5,000 (the
+     laptop has 10). `pdok_dataset3` gains `pos_030002` and `pos_030003` and
+     loses `pos_029989` and `pos_029998`, but keeps the laptop's real photo of
+     `pos_001893`: the cluster copy is a solid blue failed download, 1 of
+     26,902 train crops. Both polyline datasets become the cluster versions,
+     so `val_cluster` equals `val`. `lidar_patches.npy` gains the two patches.
+   - Runs: merge `snellius_backup` into `/home/fatemeh/Downloads/hedge/snellius`,
+     the `CLUSTER_EXP_ROOT` the code uses. Keep the 9 files only the mirror
+     has.
+   - Check that `spatial_train_val_split` on the laptop gives exactly the
+     3,098 cluster val stems. Delete `snellius_backup` only after both moves
+     are checked.
+   - Repo: retire `val_cluster`. 19 files name it, including
+     `tests/test_show_polyline_results.py` and the talk; keep the names of
+     existing inference outputs such as `best_9_val_cluster_t0.05`, they record
+     what ran. Remove the laptop-vs-cluster notes: the lines about 10 local
+     pdok_dataset2 labels, the lessons "Two builds of the same dataset are not
+     the same crops" and "A split can be pinned to a stem list", the laptop
+     note in `exps/probe_split_gap.py`, and `CLAUDE.md`. Add a pdok_dataset2
+     row to the dataset table in `docs/experiments_log.md`: the first 5,000 of
+     the same sampling as pdok_dataset3, which trained the backbone through
+     pdok_dataset_semseg2. Make the table's sizes laptop sizes. One line on the
+     blue `pos_001893`, with a small probe in `exps/`, run on the backup copy
+     before it is deleted.
+   - Later: `CLAUDE.md`, the `/cluster-run` skill and `slurm/` describe
+     Snellius.
+   - Open, not urgent: the stored pdok_dataset3 crops differ from a fresh
+     `2025_ortho25` download by 5.6 to 13 mean pixel value, while pdok_dataset2
+     `pos_000000`, the same place, matches it exactly. Look at one crop side by
+     side: colour, sharpness or a small shift?
 
-- Null model per crowding bucket for exp 10. Its woody recall barely falls on
-  crowded crops, which would say part of the crowding problem is the label
-  split. It also draws more lines there, so check before believing it.
+1. **Look at the strange things in the figures.** In
+   `/home/fatemeh/Downloads/hedge/screenshots/`, `exp2_8_9.png` shows exp 2
+   with the lowest val loss, but by eye exp 9 is better, and its last
+   checkpoint sometimes beats its best one. `strange_polylines1.png` (left
+   `best_9_val_cluster_t0.05`, right GT) and `strange_polylines2.png` (left
+   `9_val_cluster_t0.05`, middle `best_9_val_cluster_t0.05`, right GT) mark
+   with arrows lines that lie on no hedgerow. Also check the short side of an
+   L-shaped hedge being left out: if L shapes are rare, storing them as two
+   lines may be better. Draw more with `scripts/show_polyline_results.py`.
+   This may change what comes next.
 
-- Fix the tree row score. It counts a crop with no tree row, and no tree row
-  drawn, as a perfect score. That is 40% of the val crops, so every tree row
-  number so far is too high (exps 4 and 5). Hedge scores are not affected:
-  every val crop but one has a hedge.
+1. **Fix the tree row score.** `exps/probe_polyline_pr.py` gives a crop with
+   no tree row, and none drawn, a perfect 1.0, and 1,224 of the 3,098 val
+   crops have none. On the 1,874 that do, tree recall at 10 m is 0.280 for
+   exp 5 and 0.425 for exp 4 (`exps/probe_hedge_tree_confusion.py`). Score a
+   class only on crops where it appears, then correct the tree row numbers in
+   `docs/experiments_log.md` (exps 4 and 5), in this file (0.624 and 0.688),
+   in the `exps/probe_polyline_pr.py` docstring, and in the talk (the exp 4
+   slide says the score is being fixed). Hedge and woody line scores are not
+   affected: every val crop but one has a hedge.
 
-- Labels from Top10NL2025 instead of 2023, a separate conversion. It closes
-  the three-year image/label gap at no imagery cost, since the crops are
-  already 2025. Both shapefiles are downloaded, in
-  `/home/fatemeh/Downloads/hedge/Top10NL2025`. Keep it out of exp 4: changing
-  the label year and adding a class at once cannot be read.
+1. **Labels from Top10NL2025 instead of 2023.** The photos are 2025, the
+   labels 2023. Build 2025 labels for the same crops, pinning the split with
+   `val_stems_file`, and score the exp 2 and exp 9 predictions against them
+   before training anything. If they score clearly higher, the old labels
+   hold the number down. Both shapefiles are in
+   `/home/fatemeh/Downloads/hedge/Top10NL2025`. Keep the label year apart from
+   any other change, or the run cannot be read.
 
-- Training longer helped exp 2 only a little (exp 8, +0.013 at 10 m). Exp 9
-  for longer might add the same small amount, but training the backbone is
-  where the gain was.
+1. **Null model per crowding bucket for exp 10.** Its woody recall barely
+   falls on crowded crops, which would say part of the crowding problem is
+   the label split. It also draws more lines there, so check before believing
+   it.
+
+1. **Next GPU runs**, ideas, not decided:
+
+   - Finer features. `feature_stage="up3"` is stride 16, so a 3 m hedge,
+     12 px, is under one feature cell. `FEATURE_STAGES` only has `enc4`
+     (stride 32) and `up3` (stride 16), so this means adding the UNet decoder
+     stage at stride 8. Batch 16 uses 5.8 of 40 GB, and stride 8 is 4x the
+     tokens. The most direct attack on the limit.
+   - Exp 9 again with another seed, to confirm its +0.022.
+   - Exp 9 for longer. Exp 8 says longer adds only a little (+0.013).
+
+Clean-up, when you want: the cluster snapshots `<n>_<epoch>.pt`, 80 MB each.
+Those of exps 5 to 8 (21 files) exist only on the cluster and are fully
+scored, so they can go. Exp 9's and exp 10's four are also on the laptop; keep
+them until those runs are scored epoch by epoch. Keep `1_150.pt`, the exp 1
+result.
 
 Then, results-driven:
 
