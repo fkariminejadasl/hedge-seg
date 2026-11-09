@@ -1189,14 +1189,18 @@ enough correct lines, worst on crowded crops (exp 2 recall 0.372 on crops with
 
 In the order suggested:
 
-1. **Make the laptop the only copy, in a simple layout.** Cluster access ends
-   (the account expires 2027-01-08), and every run trained on the cluster
-   data, so the laptop takes the cluster versions.
+1. **Back up the cluster on the laptop, in a simple layout.** The cluster
+   stays in use until the credit runs out (the account expires 2027-01-08),
+   and nothing on it is deleted. Every run trained on the cluster data, so
+   the laptop gets a full copy of the cluster versions, in the places the code
+   already reads.
 
    - Done 2026-10-29: `/home/fatemeh/Downloads/hedge/snellius_backup/` holds
      every cluster run and the cluster-only data, checked by checksum. Its
      `README.txt` says what each folder is. Exp 10 came later and is complete
-     in `/home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/10/`.
+     in `/home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/10/`. A
+     new cluster run is copied back the same way, with its script and log
+     (`CLAUDE.md`, "Bringing a cluster run back to the laptop").
    - Data, each dataset once in `/home/fatemeh/Downloads/hedge/results/`, as
      the cluster version. `pdok_dataset2/images` gets the cluster's 5,000 (the
      laptop has 10; its labels are already all 5,000, identical to the
@@ -1209,22 +1213,24 @@ In the order suggested:
      the `CLUSTER_EXP_ROOT` the code uses. Keep the 9 files only the mirror
      has.
    - Check that `spatial_train_val_split` on the laptop gives exactly the
-     3,098 cluster val stems. Delete `snellius_backup` only after both moves
-     are checked.
+     3,098 cluster val stems. Delete the laptop folder `snellius_backup`
+     only after both moves are checked; by then it is a second laptop copy.
    - Repo: retire `val_cluster`. 19 files name it, including
      `tests/test_show_polyline_results.py` and the talk; keep the names of
      existing inference outputs such as `best_9_val_cluster_t0.05`, they record
-     what ran. Remove the laptop-vs-cluster notes: the lines about 10 local
+     what ran. Once the laptop data match the cluster's, remove the notes
+     about them differing: the lines about 10 local
      pdok_dataset2 labels, the lessons "Two builds of the same dataset are not
      the same crops" and "A split can be pinned to a stem list", the laptop
-     note in `exps/probe_split_gap.py`, and `CLAUDE.md`. Add a pdok_dataset2
+     note in `exps/probe_split_gap.py`, and the split note in `CLAUDE.md`.
+     Add a pdok_dataset2
      row to the dataset table in `docs/experiments_log.md`: the first 5,000 of
      the same sampling as pdok_dataset3, which trained the backbone through
      pdok_dataset_semseg2. Make the table's sizes laptop sizes. One line on the
      blue `pos_001893`, with a small probe in `exps/`, run on the backup copy
      before it is deleted.
-   - Later: `CLAUDE.md`, the `/cluster-run` skill and `slurm/` describe
-     Snellius.
+   - Keep `CLAUDE.md`, the `/cluster-run` skill and `slurm/` as they are: the
+     cluster is still in use.
    - Open, not urgent: the stored pdok_dataset3 crops differ from a fresh
      `2025_ortho25` download by 5.6 to 13 mean pixel value, while pdok_dataset2
      `pos_000000`, the same place, matches it exactly. Look at one crop side by
@@ -1274,10 +1280,10 @@ In the order suggested:
    - Exp 9 again with another seed, to confirm its +0.022.
    - Exp 9 for longer. Exp 8 says longer adds only a little (+0.013).
 
-Clean-up, when you want: the epoch snapshots `<n>_<epoch>.pt`, 80 MB each,
-now exist only on the cluster and none is needed, so they can go (see scoring
-by epoch under Dropped). Keep `1_150.pt`, the exp 1 result, not a spare
-snapshot.
+Snapshots: the epoch snapshots `<n>_<epoch>.pt`, 80 MB each, now exist only
+on the cluster. None is needed (see scoring by epoch under Dropped), but leave
+them there unless the cluster runs short of space. On the laptop keep
+`1_150.pt`, the exp 1 result, not a spare snapshot.
 
 Then, results-driven:
 
@@ -1301,7 +1307,8 @@ Dropped, with the reason:
   exp 8 trained for 90 epochs, and that gained only 0.013. Exp 10 was flat from
   epoch 35. The answer is known, and asking again costs 80 MB per snapshot plus
   its inference run. The probe, the snapshots of exps 9 and 10 and the scored
-  inference runs were removed on 2026-11-09. The probe is in git history:
+  inference runs were removed from the laptop on 2026-11-09; the cluster keeps
+  its snapshots. The probe is in git history:
   `git log -- exps/probe_f1_by_epoch.py`.
 
 Note: the spatial split makes val numbers look worse than a random split would.
