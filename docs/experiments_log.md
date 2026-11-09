@@ -200,6 +200,10 @@ bbox 3900/903.
   - Geometry matches the labels: straightness .934 against .936, bent share
     .119 against .155, median length 105 m against 113 m.
   - Campsites still score worst: woody F1 .643 against .731 elsewhere.
+  - By epoch, woody F1 at 10 m (`exps/probe_f1_by_epoch.py`, now only in git
+    history): .659 at 10,
+    .689 at 20, .707 at 30, .720 at 35 and 40, .722 at 45. Flat from epoch
+    35, when the learning rate was down to 13% of its start, as in exp 6.
 
   Checks. Exp 9 inferred again on the tree row folder gives exactly its
   recorded hedge numbers (.710 / .733 / .721), and exp 5 gives its own, so
@@ -213,6 +217,8 @@ bbox 3900/903.
 
   Inference runs kept at
   `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_tree_polylines/inference/{best_10,10,9}_val_t0.05`.
+  The snapshots were inferred as `10_{10,20,30,40}_val_t0.05`, scored, and
+  deleted with their checkpoints on 2026-11-09.
 
 - 9 scored, 2026-09-30. **Training the backbone helps. The first clear gain
   since exp 2.** Hedge F1 0.721 at 10 m against 0.699, and 0.581 at 5 m
@@ -270,7 +276,8 @@ bbox 3900/903.
   about twice as much. Job 27354074, A100, git ad56c71, 90 epochs in 22 h. The
   last epoch scores better than epoch 70, which had the lowest eval loss.
 
-  F1 at 10 m by epoch (`exps/probe_f1_by_epoch.py`): 0.692 at 40, 0.708 at 60,
+  F1 at 10 m by epoch (`exps/probe_f1_by_epoch.py`, now only in git history):
+  0.692 at 40, 0.708 at 60,
   0.705 at 70, 0.712 at 90. Most of the gain comes by epoch 60. It finds no
   more hedges.
 
@@ -281,7 +288,8 @@ bbox 3900/903.
   and loops than exp 8.
 
   Inference runs kept at
-  `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/inference/{8_40,8_60,best_8,8}_val_cluster_t0.05`.
+  `/home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines/inference/{best_8,8}_val_cluster_t0.05`.
+  The `8_40` and `8_60` runs were deleted on 2026-11-09, after scoring.
 
 - 7, 8, 9 setup (all submitted 2026-09-29): back to the
   exp 2 recipe, hedges only, no lidar, 26,902 train crops, and one change each.
@@ -302,7 +310,8 @@ bbox 3900/903.
   - Exp 8. Exp 6 F1 at 10 m by epoch: 0.667 at 20, 0.687 at 30, 0.703 at 40,
     0.703 at 45. It rose about 0.02 per 10 epochs and stopped when the
     learning rate was down to 4% of its start. So the stop may be the
-    schedule, not the model (`exps/probe_f1_by_epoch.py`).
+    schedule, not the model (`exps/probe_f1_by_epoch.py`, now only in git
+    history).
   - Exp 9. Exps 3 to 6 changed only what comes after the backbone, and none
     moved hedge F1 by more than 0.01. The backbone learned from 4,000 crops,
     for masks, and has never trained on this task. Missing hedges are a

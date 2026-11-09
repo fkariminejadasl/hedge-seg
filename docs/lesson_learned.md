@@ -1152,7 +1152,7 @@ Phase C — seed and backbone:
 - Exp 9 (backbone trained at lr 1e-5) is the new best: hedge F1 0.721 at 10 m
   against 0.699, and 0.581 against 0.553 at 5 m.
 - Exp 8 (exp 2 for 90 epochs) gains 0.013 at 10 m, a little more than the
-  seed gap and below the 0.02 bar. Most of it is in by epoch 60.
+  seed gap and below the 0.02 bar.
 
 Phase C — one woody class:
 
@@ -1199,7 +1199,8 @@ In the order suggested:
      in `/home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/10/`.
    - Data, each dataset once in `/home/fatemeh/Downloads/hedge/results/`, as
      the cluster version. `pdok_dataset2/images` gets the cluster's 5,000 (the
-     laptop has 10). `pdok_dataset3` gains `pos_030002` and `pos_030003` and
+     laptop has 10; its labels are already all 5,000, identical to the
+     cluster). `pdok_dataset3` gains `pos_030002` and `pos_030003` and
      loses `pos_029989` and `pos_029998`, but keeps the laptop's real photo of
      `pos_001893`: the cluster copy is a solid blue failed download, 1 of
      26,902 train crops. Both polyline datasets become the cluster versions,
@@ -1273,11 +1274,10 @@ In the order suggested:
    - Exp 9 again with another seed, to confirm its +0.022.
    - Exp 9 for longer. Exp 8 says longer adds only a little (+0.013).
 
-Clean-up, when you want: the cluster snapshots `<n>_<epoch>.pt`, 80 MB each.
-Those of exps 5 to 8 (21 files) exist only on the cluster and are fully
-scored, so they can go. Exp 9's and exp 10's four are also on the laptop; keep
-them until those runs are scored epoch by epoch. Keep `1_150.pt`, the exp 1
-result.
+Clean-up, when you want: the epoch snapshots `<n>_<epoch>.pt`, 80 MB each,
+now exist only on the cluster and none is needed, so they can go (see scoring
+by epoch under Dropped). Keep `1_150.pt`, the exp 1 result, not a spare
+snapshot.
 
 Then, results-driven:
 
@@ -1296,6 +1296,13 @@ Dropped, with the reason:
   geometry's.
 - A date-matched rebuild on `2016_ortho25`. 2016 imagery matches nothing here;
   the labels are 2022 and the crops are 2025.
+- Scoring runs epoch by epoch. `exps/probe_f1_by_epoch.py` asked whether a run
+  still improves when it stops. Exp 6 rose until the learning rate ran out, so
+  exp 8 trained for 90 epochs, and that gained only 0.013. Exp 10 was flat from
+  epoch 35. The answer is known, and asking again costs 80 MB per snapshot plus
+  its inference run. The probe, the snapshots of exps 9 and 10 and the scored
+  inference runs were removed on 2026-11-09. The probe is in git history:
+  `git log -- exps/probe_f1_by_epoch.py`.
 
 Note: the spatial split makes val numbers look worse than a random split would.
 That is expected; they are the real baseline to improve from.

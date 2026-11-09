@@ -208,10 +208,9 @@ two things at once.
 **Luck.** We trained the first model again and changed only the random start.
 The score moved by 0.01. So we trust a gain only above 0.02 *(exp 7)*.
 
-**Training twice as long:** 0.699 to 0.712 at 10 m. A little. Most of it is
-there by epoch 60 of 90 *(exp 8)*.
+**Training twice as long:** 0.699 to 0.712 at 10 m. A little *(exp 8)*.
 
-*(exps 7 and 8, `exps/probe_polyline_pr.py`, `exps/probe_f1_by_epoch.py`)*
+*(exps 7 and 8, `exps/probe_polyline_pr.py`)*
 
 ---
 
