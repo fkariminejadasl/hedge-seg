@@ -272,7 +272,6 @@ Ask before submitting a job. Slurm jobs cost budget and run for hours.
   to `~/exps/hedge` on the cluster and to the local mirror on the laptop, so
   the same line works on both machines with no editing. This applies to
   `infer_ckpt` and `backbone_ckpt`.
-- Copy the run's val stem list too. See the split note under project specifics.
 
 ## Looking at an inference result
 
@@ -289,9 +288,6 @@ otherwise the committed script stops being the record of what ran.
 3. List the run directories in `scripts/show_polyline_results.py` and run it.
    It draws one ground-truth figure and one figure per run, over the same
    crops, so the panels line up.
-
-`infer_polyline_dir` should be `polylines/val_cluster`, not `polylines/val`.
-See the split note under project specifics.
 
 ## Screenshots
 
@@ -376,8 +372,3 @@ names; never run theirs.
   two checkpoints" in `docs/lesson_learned.md`.
 - `infer_score_thresh` is a real knob, not a formality. Scores sit near 1, so
   0.5 keeps almost everything. exp 2 uses 0.90, exp 1 used 0.95.
-- The local and cluster conversions of pdok_dataset3 do NOT produce the same
-  train/val split, because `avoid_label_dirs` sees 10 labels locally and 5,000
-  on the cluster. About 46% of the local val crops were cluster training
-  images. Evaluate a checkpoint only on the val stems of the run that produced
-  it.

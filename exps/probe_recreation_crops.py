@@ -161,7 +161,9 @@ def main(polyline_dir, labels_dir, out_path):
 if __name__ == "__main__":
     root = DATA_ROOT / "pdok_dataset3_polylines"
     main(
-        polyline_dir=root / "polylines/val_cluster",
+        polyline_dir=root / "polylines/val",
         labels_dir=DATA_ROOT / "pdok_dataset3/labels",
+        # Named after the old val_cluster folder, the same 3,098 crops.
+        # exps/probe_polyline_pr.py and presentation/README.md read this name.
         out_path=root / "recreation_crops_val_cluster.txt",
     )

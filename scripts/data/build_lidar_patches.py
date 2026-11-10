@@ -17,8 +17,8 @@ Output, next to the polyline directory:
                               no data, in the metric order of cfg["metrics"]
     lidar_patches_stems.json  {"stems": [...], "metrics": [...], "cell_m": 10}
 
-One file covering every crop, looked up by stem, so it serves the laptop split
-and the cluster split alike. About 26 min and 450 MB for all 30,000 crops, so
+One file covering every crop, looked up by stem, so it serves any split.
+About 26 min and 450 MB for all 30,000 crops (14 min on 2026-11-09), so
 `cfg.limit` builds a subset when only a check is needed.
 
     /home/fatemeh/miniconda3/envs/hedge/bin/python scripts/data/build_lidar_patches.py
@@ -57,9 +57,8 @@ def read_patch(src, bbox_world, cells):
 
 def main(cfg):
     label_dir = Path(cfg.label_dir)
-    # Every crop of the dataset, not one file per split. The train/val split
-    # differs between the laptop and the cluster (avoid_label_dirs sees a
-    # different number of labels), and a stem-keyed file is immune to that.
+    # Every crop of the dataset, not one file per split, so a new split needs
+    # no rebuild.
     stems = sorted(p.stem for p in label_dir.glob("pos_*.json"))
     if not stems:
         raise FileNotFoundError(f"No label JSONs in {label_dir}")

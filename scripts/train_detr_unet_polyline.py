@@ -24,8 +24,8 @@ similar code as train_detr_maptr_polyline.py with these changes:
   learning rate (build_optimizer).
 - Dataset loads images + polyline NPZs produced by
   scripts/data/convert_pdok_polylines_to_detr_polyline.py, and checks up front
-  that every crop has an image and a lidar patch, since two builds of the same
-  dataset are not the same crops.
+  that every crop has an image and a lidar patch, since two downloads of the
+  same dataset need not hold the same crops.
 - Images are zero-padded 1000 -> pad_to (default 1024, divisible by 32);
   polylines are normalized by the padded extent so they stay aligned with
   the feature grid.
@@ -1711,10 +1711,10 @@ class DetrPolylineImageDataset(Dataset):
         self.merge_classes = merge_classes
 
         # One listing up front, so a crop with no image is named here instead of
-        # in a DataLoader worker on the first batch. Two builds of the same
-        # dataset are not the same crops: a failed download shifts the
-        # numbering, so pdok_dataset3 on the laptop and on the cluster hold
-        # 30,000 crops each but not the same 30,000.
+        # in a DataLoader worker on the first batch. A failed download leaves a
+        # gap and the download runs on past the end, so two downloads of
+        # pdok_dataset3 can hold 30,000 crops each but not the same 30,000
+        # (exps/probe_dataset_stem_mismatch.py).
         suffixes = set(self.IMAGE_SUFFIXES)
         have = {
             p.stem for p in self.image_dir.iterdir() if p.suffix.lower() in suffixes
@@ -2447,9 +2447,9 @@ def main(cfg):
 
     # Optional seeded subsets, to run at a smaller scale before committing to
     # the full split. n_val_subset only shrinks how many val images are scored
-    # each eval; use it to speed up eval on a run whose val split is not the
-    # final honest one (e.g. a local run with the leaky split). For a real
-    # baseline number keep it None so val stays comparable across runs.
+    # each eval; use it to speed up eval on a run that gives no final number
+    # (e.g. a short laptop run). For a real baseline number keep it None so
+    # val stays comparable across runs.
     n_train_full = len(train_ds)
     n_val_full = len(val_ds)
     train_ds = _seeded_subset(train_ds, cfg.n_train_subset, cfg.seed)
@@ -2595,8 +2595,8 @@ if __name__ == "__main__":
         mode="train",  # "train", "infer" or "preview"
         # Committed values are the cluster baseline. A throwaway laptop run
         # overrides: exp="<n>_laptop", num_workers=4, eval_every=10,
-        # n_val_subset=1000 (its val split is leakier, so full val is not the
-        # honest number anyway).
+        # n_val_subset=1000 (eval on a subset stays cheap; a laptop run is for
+        # watching the curve, not for a final number).
         exp="10",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
         save_path=EXP_ROOT / "detr_unet_polyline",
         # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
@@ -2636,9 +2636,10 @@ if __name__ == "__main__":
         # model is then exactly the exp 2 model. A crop with no patch is an
         # error, so a partial .npy only works with a matching polyline
         # directory (see exps/probe_lidar_crop_alignment.py).
-        # On the cluster, pos_030002 and pos_030003 of the hedges train split
-        # have no patch. For exp 6 they were moved to polylines/excluded_no_lidar,
-        # and moved back for exps 7 to 9, which have no lidar.
+        # The cluster copy of the file has no patch for pos_030002 and
+        # pos_030003 of the hedges train split; the laptop copy, rebuilt on
+        # 2026-11-09, has them. For exp 6 those two crops were moved to
+        # polylines/excluded_no_lidar, and moved back for exps 7 to 9.
         # Exp 6: DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy".
         lidar_path=None,
         lidar_stride=16,  # must equal the feature stride, so 1024 -> 64x64
@@ -2649,8 +2650,8 @@ if __name__ == "__main__":
         # started from exp 1: those 5,000 crops are a subset of these 26,902 and
         # exp 1 had begun memorising them by epoch 65, so its weights would bias
         # the result.
-        # None = full train split. On the cluster 26,902 for the hedges dataset
-        # and 26,900 for the tree row one, which lacks two crops there.
+        # None = full train split: 26,902 for the hedges dataset and 26,900 for
+        # the tree row one, which lacks pos_029989 and pos_029998.
         n_train_subset=None,
         n_val_subset=None,  # None = full val split; subset only speeds up eval
         # backbone
@@ -2753,7 +2754,8 @@ if __name__ == "__main__":
         # The head width must match the checkpoint: num_classes=2 for exps 4
         # and 5, cls_loss="focal" for exp 3. The tree row val folder links both
         # label classes into gt/, so a one-class model can be scored as a
-        # woody line model there; the hedges folder is val_cluster.
+        # woody line model there. The hedges folder is
+        # pdok_dataset3_polylines/polylines/val.
         infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/10/10.pt",
         # infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/10/best_10.pt",
         # infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/9/9.pt",

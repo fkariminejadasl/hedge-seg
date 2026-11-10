@@ -12,35 +12,38 @@ dino grid (14 or 16), then extras. grid size (14,14) or (16,16).
 
 Which script built which directory, and from what. Kept here rather than only
 in the script docstrings, because datasets get deleted to free inodes and then
-have to be rebuilt from nothing but this table. Sizes are on the cluster.
+have to be rebuilt from nothing but this table. Sizes are on the laptop.
 
-| dataset                                     | built by                                                     | from                                                                                                                                                         | size                 |
-| ------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- |
-| `pdok_dataset3` (30,000 crops, 46 GB)       | `scripts/data/build_pdok_wms_dataset.py`                     | PDOK WMS layer `Actueel_ortho25` (2025 photos; rebuild with `2025_ortho25`) plus `Top10NL2023_..._heg.shp`, 250 m crops at 1000 px, sampled one per polyline | 46 GB, 60,000 files  |
-| `pdok_dataset3_polylines`                   | `scripts/data/convert_pdok_polylines_to_detr_polyline.py`    | `pdok_dataset3/labels/*.json`                                                                                                                                | small                |
-| `pdok_dataset3_polylines/lidar_patches.npy` | `scripts/data/build_lidar_patches.py`                        | the 6 AHN4 metric GeoTIFFs in `/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4`, 16 GB, laptop only                                                         | 450 MB, 2 files      |
-| `pdok_dataset3_tree_polylines` (2026-09-16) | same converter, with `treeline_shp` and `val_stems_file` set | `pdok_dataset3/labels/*.json` plus `Top10NL2023_..._bomenrij.shp`                                                                                            | 144 MB, 30,000 files |
-| `pdok_dataset_semseg3`                      | `scripts/data/convert_pdok_polylines_to_semseg.py`           | `pdok_dataset3`                                                                                                                                              | 511 MB               |
-| `pdok_dataset_yolo`                         | `scripts/data/convert_pdok_polylines_to_yolo_{bbox,seg}.py`  | `pdok_dataset`                                                                                                                                               | 1.6 GB               |
+| dataset                                     | built by                                                     | from                                                                                                                                                                                                                                                                                                                    | size                 |
+| ------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| `pdok_dataset2` (5,000 crops)               | `scripts/data/build_pdok_wms_dataset.py`                     | the first 5,000 crops of the pdok_dataset3 sampling, same centres and stems, but a separate download from `Actueel_ortho25` (files dated 2026-05-28), so the pixels differ slightly. Trained the backbone `semseg_unet/4/best_4.pt` through `pdok_dataset_semseg2` (`scripts/data/convert_pdok_polylines_to_semseg.py`) | 7.6 GB, 10,000 files |
+| `pdok_dataset3` (30,000 crops)              | `scripts/data/build_pdok_wms_dataset.py`                     | PDOK WMS layer `Actueel_ortho25` (2025 photos; rebuild with `2025_ortho25`) plus `Top10NL2023_..._heg.shp`, 250 m crops at 1000 px, sampled one per polyline                                                                                                                                                            | 46 GB, 60,000 files  |
+| `pdok_dataset3_polylines`                   | `scripts/data/convert_pdok_polylines_to_detr_polyline.py`    | `pdok_dataset3/labels/*.json`                                                                                                                                                                                                                                                                                           | 119 MB, 30,000 files |
+| `pdok_dataset3_polylines/lidar_patches.npy` | `scripts/data/build_lidar_patches.py`                        | the 6 AHN4 metric GeoTIFFs in `/home/fatemeh/Downloads/hedge/LiDAR_metrics_AHN4`, 16 GB, laptop only                                                                                                                                                                                                                    | 450 MB, 2 files      |
+| `pdok_dataset3_tree_polylines` (2026-09-16) | same converter, with `treeline_shp` and `val_stems_file` set | `pdok_dataset3/labels/*.json` plus `Top10NL2023_..._bomenrij.shp`                                                                                                                                                                                                                                                       | 119 MB, 29,998 files |
+| `pdok_dataset_semseg3`                      | `scripts/data/convert_pdok_polylines_to_semseg.py`           | `pdok_dataset3`                                                                                                                                                                                                                                                                                                         | 46 GB, 102,001 files |
+| `pdok_dataset_yolo`                         | `scripts/data/convert_pdok_polylines_to_yolo_{bbox,seg}.py`  | `pdok_dataset`                                                                                                                                                                                                                                                                                                          | 1.6 GB, 2,003 files  |
 
 Things that are not in the script docstrings and cost a day each when
 forgotten:
 
-- **The laptop and cluster copies of `pdok_dataset3` are not the same 30,000
-  crops.** Four WMS requests failed on the cluster, so it lacks `pos_029989`,
-  `pos_029998`, `pos_030000` and `pos_030001` and runs on to `pos_030003`; the
-  laptop copy is `pos_000000` .. `pos_029999` with no gaps. A polyline dataset
-  built on one machine therefore names crops the other does not have. This is
-  why `pdok_dataset3_tree_polylines` is 26,900 train crops on the cluster and
-  26,902 on the laptop, and why `lidar_patches.npy` has no patch for
-  `pos_030002` or `pos_030003`. Check both machines with
-  `exps/probe_dataset_stem_mismatch.py` before using a dataset across them.
-  Reason in `docs/lesson_learned.md`.
-- **`pos_030002` and `pos_030003` have no lidar patch.** For exp 6 they were
-  moved out of the cluster's `pdok_dataset3_polylines/polylines/train`, so it
-  trained on 26,900 crops. On 2026-09-29 they were moved back for exps 7 to 9,
-  which have no lidar, so the split is 26,902 again, exactly exp 2's. A lidar
-  run needs them moved out again.
+- **The crop numbers have gaps.** A failed WMS request leaves a gap, and the
+  download runs on past the end to reach its count. `pdok_dataset3` lacks
+  `pos_029989`, `pos_029998`, `pos_030000` and `pos_030001` and runs on to
+  `pos_030003`; `pdok_dataset2` lacks `pos_004997` and runs to `pos_005000`.
+  The tree row dataset has 26,900 train crops, not 26,902, because the
+  first build named the two missing crops (`exps/probe_dataset_stem_mismatch.py`).
+- **A failed request can also return an image.** In the cluster copy,
+  `pos_001893` is one solid blue colour, and every cluster run trained on it, 1
+  of 26,902 crops. It is the only one (`exps/probe_failed_downloads.py`). The
+  laptop copy is a real photo from an earlier download.
+- **The cluster `lidar_patches.npy` has no patch for `pos_030002` and
+  `pos_030003`.** The laptop file has, since it was rebuilt on 2026-11-09. For
+  exp 6 the two crops were moved out of the cluster's
+  `pdok_dataset3_polylines/polylines/train`, so it trained on 26,900 crops. On
+  2026-09-29 they were moved back for exps 7 to 9, which have no lidar, so the
+  split is 26,902 again, exactly exp 2's. A lidar run on the cluster needs the
+  laptop file copied over first.
 - `pdok_dataset3` was downloaded from `Actueel_ortho25`, which is not a fixed
   layer: it serves the newest flight, the 2025 photos today, and will become
   2026 later. The builder now asks for `2025_ortho25`. **Even that does not
@@ -48,13 +51,12 @@ forgotten:
   fresh `2025_ortho25` download by 5.6 to 13 mean pixel value, against 21 to
   41 for `2024_ortho25` (`exps/probe_image_label_dates.py`). So a rebuild gets
   the same photos, not the same files. Keep the images.
-- The train/val split depends on where the conversion runs, because
-  `avoid_label_dirs` sees 10 pdok_dataset2 labels locally and 5,000 on the
-  cluster. The cluster split (26,902 / 3,098) is the operative one. Keep the
-  val stem list with the checkpoint. `pdok_dataset3_tree_polylines` avoids this
-  by setting `val_stems_file` to that stem list
-  (`/home/fatemeh/Downloads/hedge/cluster_val_stems.txt`), so it was built on
-  the laptop and still came out at 26,902 / 3,098.
+- The split depends on `pdok_dataset2/labels`, through `avoid_label_dirs`, so
+  a converter run needs all 5,000 of them. With them it gives train 26,902 /
+  val 3,098 (`exps/probe_split_reproduces.py`). `pdok_dataset3_tree_polylines`
+  was built with `val_stems_file` set to the val stems of cluster run 2
+  (`/home/fatemeh/Downloads/hedge/cluster_val_stems.txt`), which pins the
+  same split.
 - The lidar patch file has to be built on the laptop, because the 16 GB of AHN4
   rasters are only there. It is keyed by stem, so one file serves any dataset
   and any split. Copy the `.npy` and its `_stems.json` to the cluster together.
@@ -697,8 +699,9 @@ bbox 3900/903.
   pos_027437); 1_150 falls apart on crowded crops. Label problems seen: hedges
   missing from GT, and one hedge split into several overlapping GT lines.
 
-  polylines/val_cluster holds the 3,098 crops the cluster used for val, all
-  found locally. Built with:
+  polylines/val_cluster held the 3,098 crops the cluster used for val, all
+  found locally. Retired 2026-11-10: the laptop polylines/val is now the
+  cluster val. Built with:
 
   ```
   ssh me "ls /projects/prjs1025/data/hedge/pdok_dataset3_polylines/polylines/val" \
@@ -802,10 +805,11 @@ bbox 3900/903.
 - local (2026-07-20): pdok_dataset3 (30k) -> pdok_dataset3_polylines.
   min_length_px=40 (10 m), closed_eps_px=2, block_m=5000, val_fraction=0.2,
   seed=42. train=24,257 val=5,743 (19.1%), 103,432 polylines, 302 rings opened,
-  0 val-train overlap. Only 10 local pdok_dataset2 labels, so avoid_label_dirs
-  excluded just 36 crops.
+  0 val-train overlap. avoid_label_dirs excluded just 36 crops, because the
+  laptop then had only 10 pdok_dataset2 labels. Replaced on 2026-11-09 by the
+  cluster conversion below.
 - cluster (2026-07-21): same, but avoid_label_dirs sees all 5,000 pdok_dataset2
-  labels. train=26,902 val=3,098 (10.3%), 103,414 polylines, 0 val-train overlap.
+  labels. The split of every run. train=26,902 val=3,098 (10.3%), 103,414 polylines, 0 val-train overlap.
   12,155 crops (40%) sit near semseg areas, so avoidance halves the val set. Kept
   it: no val image was seen by the frozen backbone during semseg training.
 

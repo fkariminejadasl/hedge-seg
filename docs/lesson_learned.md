@@ -133,8 +133,7 @@ The block size has two jobs. It must be much larger than the 250 m crop, so
 most overlap groups fit inside one block. And it must be small enough that
 there are many blocks to hash, so the val fraction lands near the target.
 Without the backbone filter, 5 km blocks give 19.1% val against a 20% target
-(`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`, run on the laptop
-conversion). The cluster split is 10.3% val, because groups that overlap the
+(`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`). The split is 10.3% val, because groups that overlap the
 pdok_dataset2 crops the backbone was trained on go to train.
 
 The blocks set the val fraction, not the distance to train. A group that
@@ -663,17 +662,17 @@ Three things to take from it:
 
 ## A checkpoint has to be evaluated on the split it was trained against
 
-Run 1 trained on the cluster conversion of pdok_dataset3 (26,902 / 3,098). The
-local conversion is 24,257 / 5,743, because `avoid_label_dirs` sees 10
-pdok_dataset2 labels locally and 5,000 on the cluster
-(`scripts/data/convert_pdok_polylines_to_detr_polyline.py`, counts from
-`exps/dataset_stats.py`). Same seed and blocks, so
-the cluster val set is a subset: all 3,098 stems were found locally. About 46%
-of the local val crops were cluster training images, so scoring a cluster
-checkpoint on the local val directory shows training images half the time.
+Run 1 trained on the cluster split (26,902 / 3,098). The laptop conversion of
+that time was 24,257 / 5,743, because its `avoid_label_dirs` had only 10 of
+the 5,000 pdok_dataset2 labels (counts from `exps/dataset_stats.py`). Same seed
+and blocks, so the cluster val set was a subset of it, but about 46% of the
+laptop val crops were cluster training images. Scoring a cluster checkpoint
+there showed it training images half the time.
 
-The split is part of the run, like the weights. Keep the val stem list with the
-checkpoint, and do not assume two conversions of the same dataset agree.
+The split is part of the run, like the weights. A conversion from other labels
+gives another split, so do not assume two conversions agree: pin a new dataset
+to the run it is compared against with `val_stems_file`. Since 2026-11-09 the
+laptop computes the cluster split (`exps/probe_split_reproduces.py`).
 
 ## The "nothing found" branch is the one that breaks
 
@@ -958,63 +957,6 @@ account is needed. *(`exps/probe_osm_user_agent.py`)*
 OSM stays off in the test anyway. Volunteers edit the map every day, so tiles
 drift away from any saved copy, and the test would need the network.
 
-## A split can be pinned to a stem list
-
-The geographic split depends on where the conversion runs, because
-`avoid_label_dirs` sees 10 pdok_dataset2 labels locally and 5,000 on the
-cluster. That trap cost a val set once and is why `polylines/val_cluster`
-exists.
-
-`val_stems_file` in the converter takes the split from an existing run's val
-stem list instead of recomputing it. Pointed at the 3,098 stems of cluster run
-2, the new tree dataset came out at exactly train 26,902 / val 3,098 on the
-laptop, so a new dataset can be built on either machine and still be scored
-against an old checkpoint. The rule stays the same: the split is part of the
-run, so keep the stem list with the checkpoint.
-
-It pins the split, not the stem set. The train half is still recomputed from
-whatever labels the converting machine has, which is how exp 4 failed. See the
-next section.
-
-## Two builds of the same dataset are not the same crops
-
-`pdok_dataset3` was downloaded twice, once on the laptop and once on the
-cluster. Both hold exactly 30,000 crops, which is why the count never looked
-wrong. They are not the same 30,000:
-
-|         | laptop                                | cluster                                                |
-| ------- | ------------------------------------- | ------------------------------------------------------ |
-| range   | `pos_000000` .. `pos_029999`, no gaps | `pos_000000` .. `pos_030003`, four gaps                |
-| missing | none                                  | `pos_029989`, `pos_029998`, `pos_030000`, `pos_030001` |
-
-Four PDOK WMS requests failed during the cluster download, so it ran on past
-`pos_029999` to reach 30,000. Crops are sampled one per polyline, so a failure
-shifts the numbering and nothing downstream notices.
-
-This killed exp 4 three minutes into epoch 1 with "No image for pos_029989".
-Exps 1 to 3 never hit it because `pdok_dataset3_polylines` was converted **on
-the cluster**, from the cluster's own labels, so its stems match the cluster
-images by construction. `pdok_dataset3_tree_polylines` was built on the laptop
-and copied over, so it carried two crops the cluster does not have.
-
-The same thing is true of `lidar_patches.npy`, built on the laptop: it has no
-patch for `pos_030002` or `pos_030003`. The tree dataset does not contain those
-stems, so exp 4 was unaffected, but `pdok_dataset3_polylines` does, so the
-lidar-only ablation has to drop them or build the two patches first.
-
-Two rules. A dataset built on one machine has to be checked against the images
-on the machine it runs on, not assumed to match a dataset of the same name.
-And that check belongs at dataset construction, not at the first batch:
-`DetrPolylineImageDataset.__init__` in
-`scripts/train_detr_unet_polyline.py` now lists the image directory once and
-names every missing crop before the GPU is touched, the way the lidar check
-already did. Getting this wrong costs a queue slot and an hour of waiting to
-learn about a two-file mismatch.
-
-Run `exps/probe_dataset_stem_mismatch.py` on both machines before using a
-dataset across them. It prints the numbering with its gaps and every polyline
-stem that has no image or no lidar patch.
-
 ## Training the backbone is the first clear gain
 
 The backbone is the part that reads the photo. Until exp 9 it was frozen: it
@@ -1088,8 +1030,7 @@ Phase A — data + split:
 - Converted dataset3 (30k images). The operative cluster split (avoid_label_dirs
   sees all 5,000 pdok_dataset2 labels) is train=26,902, val=3,098 (10.3%),
   103,414 polylines, 302 rings opened, 0 val-train overlap; enforcing backbone
-  avoidance halves the val set because 40% of crops sit near semseg areas. The
-  local dry-run (only 10 pdok_dataset2 labels available) was 24,257 / 5,743.
+  avoidance halves the val set because 40% of crops sit near semseg areas.
   Stats reproducible with `exps/dataset_stats.py` and
   `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`; per-run numbers in
   `docs/experiments_log.md`.
@@ -1103,10 +1044,10 @@ Phase B — training half:
   spatially-blocked train subset, frozen backbone up3, augment on, scheduler
   on, eval_every=5. First run whose predictions sit on real hedgerows in
   images the model never saw.
-- Inference re-run on the cluster val split only, using `polylines/val_cluster`
-  (commands in `docs/experiments_log.md`). The local val directory is a
-  different split, about 46% of it was in the cluster's training set, so
-  figures taken from it were not the baseline.
+- Inference re-run on the cluster val split only. The laptop val directory
+  was then a different split, about 46% of it in the cluster's training set,
+  so figures taken from it were not the baseline (see "A checkpoint has to be
+  evaluated on the split it was trained against").
 - `infer_score_thresh` raised from 0.5 to 0.95 on line count, then confirmed by
   sweep: 0.95 is the optimum for `1_150.pt`.
 - Inference made reproducible: self-naming run directories, ground truth
@@ -1179,6 +1120,18 @@ Exps 8 and 9 are their last epoch (`8.pt`, `9.pt`).
 Exp 10 is not in this table: it draws woody lines, so its hedge precision
 counts every tree row as wrong. See "One woody line class".
 
+Housekeeping — the cluster data on the laptop, 2026-11-09 and 10:
+
+- The laptop holds the cluster data and runs, in the places the code reads,
+  checked by md5. Every file the two machines shared was already identical;
+  only the split and four crops differed. The laptop keeps its real photo of
+  `pos_001893`, where the cluster copy is a solid blue failed download
+  (`exps/probe_failed_downloads.py`). The laptop now computes the split of
+  every run, train 26,902 / val 3,098 (`exps/probe_split_reproduces.py`), so
+  `polylines/val_cluster` is retired. The cluster runs are in
+  `/home/fatemeh/Downloads/hedge/snellius`, each run's script and log inside
+  its folder.
+
 ## TODO
 
 Exp 9 `9.pt` at t=0.90 is the baseline for hedges, and exp 10 `10.pt` at
@@ -1188,60 +1141,6 @@ enough correct lines, worst on crowded crops (exp 2 recall 0.372 on crops with
 7+ labelled lines against 0.731 on crops with one).
 
 In the order suggested:
-
-1. **Back up the cluster on the laptop, in a simple layout.** The cluster
-   stays in use until the credit runs out (the account expires 2027-01-08),
-   and nothing on it is deleted. Every run trained on the cluster data, so
-   the laptop gets a full copy of the cluster versions, in the places the code
-   already reads.
-
-   - Done 2026-11-09: the cluster data and runs are on the laptop, in the
-     places the code reads, checked by md5. After the checks, the laptop
-     backup `snellius_backup` was deleted, and so were the laptop files the
-     cluster versions replaced, including the 10 laptop `pdok_dataset2`
-     images and the laptop-only `pos_029989` and `pos_029998`. A new cluster
-     run is copied back with its script and log (`CLAUDE.md`, "Bringing a
-     cluster run back to the laptop").
-   - Data, each dataset once in `/home/fatemeh/Downloads/hedge/results/`, as
-     the cluster version. Every file the two machines shared was already
-     identical; only the split and four crops differed. `pdok_dataset2/images`
-     holds the cluster's 5,000. `pdok_dataset3` gained `pos_030002` and
-     `pos_030003` and lost `pos_029989` and `pos_029998`, but keeps the
-     laptop's real photo of `pos_001893`: the cluster copy is a solid blue
-     failed download, 1 of 26,902 train crops, and the only one
-     (`exps/probe_failed_downloads.py`). Both polyline datasets are the
-     cluster versions, so `val_cluster` equals `val`. `lidar_patches.npy` was
-     rebuilt for the new crops with `scripts/data/build_lidar_patches.py`; the
-     cluster copy still lacks `pos_030002` and `pos_030003`.
-   - The laptop now computes the cluster split, train 26,902 / val 3,098
-     (`exps/probe_split_reproduces.py`).
-   - Runs: the backup was merged into
-     `/home/fatemeh/Downloads/hedge/snellius`, the `CLUSTER_EXP_ROOT`. A loose
-     `<n>.sh` or `<n>_<jobid>.out` now sits inside its run folder `<n>/`.
-     Where the two copies differed (two ultralytics `results.csv` and the
-     `semseg_unet` 5 log), both are kept, the cluster one with `_cluster` in
-     the name.
-   - Repo: retire `val_cluster`. 19 files name it, including
-     `tests/test_show_polyline_results.py` and the talk; keep the names of
-     existing inference outputs such as `best_9_val_cluster_t0.05`, they record
-     what ran. Once the laptop data match the cluster's, remove the notes
-     about them differing: the lines about 10 local
-     pdok_dataset2 labels, the lessons "Two builds of the same dataset are not
-     the same crops" and "A split can be pinned to a stem list", the laptop
-     note in `exps/probe_split_gap.py`, and the split note in `CLAUDE.md`.
-     Add a pdok_dataset2
-     row to the dataset table in `docs/experiments_log.md`: the first 5,000 of
-     the same sampling as pdok_dataset3, which trained the backbone through
-     pdok_dataset_semseg2. Make the table's sizes laptop sizes. One line on the
-     blue `pos_001893`, citing `exps/probe_failed_downloads.py`.
-   - Keep `CLAUDE.md`, the `/cluster-run` skill and `slurm/` as they are: the
-     cluster is still in use.
-   - Open, not urgent: the stored pdok_dataset3 crops differ from a fresh
-     `2025_ortho25` download by 5.6 to 13 mean pixel value, while pdok_dataset2
-     `pos_000000`, the same place, matches it exactly. Look at one crop side by
-     side: colour, sharpness or a small shift? Which pdok_dataset2 copy
-     matched is not recorded. The laptop and cluster copies differed, and
-     only the cluster one is left.
 
 1. **Look at the strange things in the figures.** In
    `/home/fatemeh/Downloads/hedge/screenshots/`, `exp2_8_9.png` shows exp 2
@@ -1286,6 +1185,14 @@ In the order suggested:
      tokens. The most direct attack on the limit.
    - Exp 9 again with another seed, to confirm its +0.022.
    - Exp 9 for longer. Exp 8 says longer adds only a little (+0.013).
+
+1. **Why the stored crops differ from a fresh download.** Not urgent. The
+   stored pdok_dataset3 crops differ from a fresh `2025_ortho25` download by
+   5.6 to 13 mean pixel value, while pdok_dataset2 `pos_000000`, the same
+   place, matched it exactly (`exps/probe_image_label_dates.py`). Look at one
+   crop side by side: colour, sharpness or a small shift? Which pdok_dataset2
+   copy matched is not recorded. The laptop and cluster copies differed, and
+   only the cluster one is left.
 
 Snapshots: the epoch snapshots `<n>_<epoch>.pt`, 80 MB each, now exist only
 on the cluster. None is needed (see scoring by epoch under Dropped), but leave
