@@ -8,12 +8,19 @@ script); the test fails (times out) if that regresses. It also exercises the
 whole pipeline end to end: backbone checkpoint load, image dataset, augmentation,
 forward/backward/optimizer, matcher, eval, and checkpoint saving.
 
-It runs the hedges-only dataset with one class and no lidar, the exps 7 to 9
-configuration. FREEZE_BACKBONE=False with BACKBONE_LR set covers exp 9, which
-trains the backbone too; it needs more GPU memory, so lower BATCH_SIZE on the
-laptop. For exp 6 set lidar_path; for exp 4 also point the polyline
-directories at pdok_dataset3_tree_polylines and set num_classes=2.
-Before the training run it checks the lidar branch itself
+It runs the exp 10 data: the tree row dataset with merge_classes=True, so
+hedges and tree rows train as one class, and no lidar. FREEZE_BACKBONE=False
+with BACKBONE_LR set covers exps 9 and 10, which train the backbone too; it
+needs more GPU memory, so lower BATCH_SIZE on the laptop. For exps 7 to 9 point
+the polyline directories at pdok_dataset3_polylines and set
+merge_classes=False. For exp 6 do that and set lidar_path; for exp 4 keep the
+tree row directories, set merge_classes=False and num_classes=2.
+
+`check_merge_classes` first checks that merging only relabels the lines, and
+that a one-class model refuses a tree row label it was not told to merge. With
+cls_loss="ce" that label is the no-object column, so without the check the tree
+rows would silently be trained as background.
+Before the training run it also checks the lidar branch itself
 (`check_lidar_branch`), because two of its properties cannot be seen from a loss
 curve: the branch is exactly inert at initialisation, and it does receive
 gradients. Without the first, a lidar run would not be comparable with a
@@ -31,6 +38,7 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 from omegaconf import OmegaConf
 
@@ -53,6 +61,44 @@ NUM_WORKERS = 4
 TIMEOUT_S = 600  # a healthy run finishes in well under a minute on any GPU
 FREEZE_BACKBONE = True  # False: the backbone trains too, as in exp 9
 BACKBONE_LR = None  # its learning rate then; None means max_lr
+
+
+def check_merge_classes():
+    """
+    merge_classes changes the labels and nothing else, and a one-class model
+    refuses a tree row it was not told to merge.
+    """
+    kwargs = dict(
+        image_dir=DATA_ROOT / "pdok_dataset3/images",
+        polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
+        num_points=20,
+        pad_to=1024,
+        augment=False,
+    )
+    two = t.DetrPolylineImageDataset(**kwargs, num_classes=2)
+    merged = t.DetrPolylineImageDataset(**kwargs, num_classes=1, merge_classes=True)
+    plain = t.DetrPolylineImageDataset(**kwargs, num_classes=1)
+
+    # The first val crop that holds a tree row.
+    idx = next(i for i, f in enumerate(two.files) if (np.load(f)["labels"] == 1).any())
+    _, target_two = two[idx]
+    _, target_merged = merged[idx]
+    assert (target_two["labels"] == 1).any()
+    assert (target_merged["labels"] == 0).all(), "a label survived the merge"
+    assert torch.equal(target_merged["polylines"], target_two["polylines"])
+
+    try:
+        plain[idx]
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a one-class model accepted a tree row label")
+    n_hedge = int((target_two["labels"] == 0).sum())
+    print(
+        f"MERGE OK: {two.files[idx].stem} has {n_hedge} hedges and "
+        f"{len(target_two['labels']) - n_hedge} tree rows, all class 0 after "
+        f"the merge, same polylines; unmerged one-class read refused"
+    )
 
 
 def check_lidar_branch(n_lidar_channels=7, grid=8, num_polylines=4, num_points=20):
@@ -129,6 +175,7 @@ def check_lidar_branch(n_lidar_channels=7, grid=8, num_polylines=4, num_points=2
 
 
 def main():
+    check_merge_classes()
     check_lidar_branch()
     # Not /tmp: it is wiped on shutdown, and a scratch file that cannot be
     # looked at the next morning is no use when a smoke test fails overnight.
@@ -138,8 +185,8 @@ def main():
         exp="smoke",
         save_path=scratch,
         image_dir=DATA_ROOT / "pdok_dataset3/images",
-        train_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/train",
-        val_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
+        train_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/train",
+        val_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
         pad_to=1024,
         augment=True,
         # Lidar off, the exps 7 to 9 setting. With lidar on it needs the full
@@ -152,7 +199,8 @@ def main():
         backbone_lr=BACKBONE_LR,
         num_points=20,
         num_polylines=60,
-        num_classes=1,  # hedges only, the exps 6 to 9 dataset
+        num_classes=1,
+        merge_classes=True,  # exp 10: hedges and tree rows as one class
         d_model=256,
         nhead=8,
         num_encoder_layers=1,

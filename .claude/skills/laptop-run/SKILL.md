@@ -6,10 +6,10 @@ description: Run a training script locally on the laptop as a throwaway experime
 # Run a training job on the laptop
 
 For a throwaway or debugging run on the local machine. The laptop GPU
-(RTX PRO 3000, 12.3 GB) is only good for smoke tests and small runs. Its val
-split is leakier than the cluster's (avoid_label_dirs only sees the few local
-pdok_dataset2 labels), so a laptop run's val numbers are not the honest
-baseline. Use it to watch the learning curve, not to report a final number.
+(RTX PRO 3000, 12.3 GB) is only good for smoke tests and small runs. The
+laptop holds the cluster data and split, but a laptop run is short and scored
+on a val subset, so its numbers are not the baseline. Use it to watch the
+learning curve, not to report a final number.
 
 Paths come from `hedge_seg/paths.py` and resolve to the local machine
 automatically. Always `conda activate hedge` first, never base.
@@ -20,11 +20,11 @@ The committed config is the cluster baseline. For a laptop run, edit these in
 the training script cfg and leave the change uncommitted:
 
 - `exp="<n>_laptop"` so it never collides with the cluster's `<n>` and the
-  leaky-val run is obvious from the name.
+  laptop run is obvious from the name.
 - `num_workers=4` (4 train + 4 eval = 8 processes) so the machine stays usable
   while you work. Do not raise it just because the laptop has more cores.
-- `eval_every=10` and `n_val_subset=1000` to keep eval cheap. The leaky val is
-  not the honest number anyway, so scoring all of it every few epochs is waste.
+- `eval_every=10` and `n_val_subset=1000` to keep eval cheap. A laptop run
+  gives no final number, so scoring all of val every few epochs is waste.
 
 These are visible edits, not a hidden override. The committed script always
 shows the value that runs.

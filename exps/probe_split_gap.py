@@ -27,10 +27,8 @@ Result (2026-10-07, on the cluster, the split of every cluster run):
 So val is ground the model has not seen, but mostly nearby ground, not a
 distant region. The 5 km blocks set the val fraction, not the distance.
 
-On the laptop, set val_dir to polylines/val_cluster: the laptop conversion has
-its own split in polylines/val. The laptop labels also hold pos_029989, which
-the cluster download lacks, and it overlaps val crop pos_024080. So the laptop
-shows 1 overlapping pair and 4 touching crops instead of 0 and 3.
+The laptop gives exactly these numbers too (2026-11-10), since its data are
+the cluster versions.
 
     PYTHONPATH=. /home/fatemeh/miniconda3/envs/hedge/bin/python exps/probe_split_gap.py
 """
@@ -100,8 +98,6 @@ if __name__ == "__main__":
         labels_dir=DATA_ROOT / "pdok_dataset3/labels",
         # The val crops of every cluster run. Train is every other crop.
         val_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
-        # On the laptop, the same 3,098 crops:
-        # val_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val_cluster",
         block_m=5000.0,  # block_m of the converter
     )
     main(cfg)

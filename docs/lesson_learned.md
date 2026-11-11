@@ -133,8 +133,7 @@ The block size has two jobs. It must be much larger than the 250 m crop, so
 most overlap groups fit inside one block. And it must be small enough that
 there are many blocks to hash, so the val fraction lands near the target.
 Without the backbone filter, 5 km blocks give 19.1% val against a 20% target
-(`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`, run on the laptop
-conversion). The cluster split is 10.3% val, because groups that overlap the
+(`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`). The split is 10.3% val, because groups that overlap the
 pdok_dataset2 crops the backbone was trained on go to train.
 
 The blocks set the val fraction, not the distance to train. A group that
@@ -533,10 +532,11 @@ hedge.
 
 Two facts, both checked:
 
-- `Actueel_ortho25` is bit-identical to `2025_ortho25`: 0.00 mean pixel
-  difference on a test crop, against 29.51 for `2022_ortho25`, the year the
-  labels come from. `pdok_dataset3` was downloaded 2026-04-29, so the crops are
-  **2025** imagery.
+- The crops are **2025** imagery. Stored crops differ from a fresh
+  `2025_ortho25` download by 5.6 to 13 mean pixel value, against 21 to 41 for
+  `2024_ortho25`. Not 0, so even the year layer does not return the stored
+  files byte for byte. `2025_ortho25` itself differs from `2022_ortho25`, the
+  year the labels come from, by 29.51 on a test crop.
 - Top10NL2023 was "herzien op basis van luchtfoto 2022"
   (`BRT_Actualiteitskaart_april_2023.pdf`), so the labels are **2022**.
 
@@ -662,17 +662,17 @@ Three things to take from it:
 
 ## A checkpoint has to be evaluated on the split it was trained against
 
-Run 1 trained on the cluster conversion of pdok_dataset3 (26,902 / 3,098). The
-local conversion is 24,257 / 5,743, because `avoid_label_dirs` sees 10
-pdok_dataset2 labels locally and 5,000 on the cluster
-(`scripts/data/convert_pdok_polylines_to_detr_polyline.py`, counts from
-`exps/dataset_stats.py`). Same seed and blocks, so
-the cluster val set is a subset: all 3,098 stems were found locally. About 46%
-of the local val crops were cluster training images, so scoring a cluster
-checkpoint on the local val directory shows training images half the time.
+Run 1 trained on the cluster split (26,902 / 3,098). The laptop conversion of
+that time was 24,257 / 5,743, because its `avoid_label_dirs` had only 10 of
+the 5,000 pdok_dataset2 labels (counts from `exps/dataset_stats.py`). Same seed
+and blocks, so the cluster val set was a subset of it, but about 46% of the
+laptop val crops were cluster training images. Scoring a cluster checkpoint
+there showed it training images half the time.
 
-The split is part of the run, like the weights. Keep the val stem list with the
-checkpoint, and do not assume two conversions of the same dataset agree.
+The split is part of the run, like the weights. A conversion from other labels
+gives another split, so do not assume two conversions agree: pin a new dataset
+to the run it is compared against with `val_stems_file`. Since 2026-11-09 the
+laptop computes the cluster split (`exps/probe_split_reproduces.py`).
 
 ## The "nothing found" branch is the one that breaks
 
@@ -860,6 +860,9 @@ One wrong idea to avoid: exp 4 placed its tree rows well, so we thought they
 could not hurt the hedges. How well one class is drawn says nothing about
 what it does to the other. *(exps 4, 5 and 7, `exps/probe_polyline_pr.py`)*
 
+Taught as one class instead of two, tree rows do pay, as a woody line map. See
+"One woody line class" below.
+
 ## Where the lidar is allowed to act
 
 The backbone turns the image into a 64x64 grid of feature vectors, one per
@@ -954,63 +957,6 @@ account is needed. *(`exps/probe_osm_user_agent.py`)*
 OSM stays off in the test anyway. Volunteers edit the map every day, so tiles
 drift away from any saved copy, and the test would need the network.
 
-## A split can be pinned to a stem list
-
-The geographic split depends on where the conversion runs, because
-`avoid_label_dirs` sees 10 pdok_dataset2 labels locally and 5,000 on the
-cluster. That trap cost a val set once and is why `polylines/val_cluster`
-exists.
-
-`val_stems_file` in the converter takes the split from an existing run's val
-stem list instead of recomputing it. Pointed at the 3,098 stems of cluster run
-2, the new tree dataset came out at exactly train 26,902 / val 3,098 on the
-laptop, so a new dataset can be built on either machine and still be scored
-against an old checkpoint. The rule stays the same: the split is part of the
-run, so keep the stem list with the checkpoint.
-
-It pins the split, not the stem set. The train half is still recomputed from
-whatever labels the converting machine has, which is how exp 4 failed. See the
-next section.
-
-## Two builds of the same dataset are not the same crops
-
-`pdok_dataset3` was downloaded twice, once on the laptop and once on the
-cluster. Both hold exactly 30,000 crops, which is why the count never looked
-wrong. They are not the same 30,000:
-
-|         | laptop                                | cluster                                                |
-| ------- | ------------------------------------- | ------------------------------------------------------ |
-| range   | `pos_000000` .. `pos_029999`, no gaps | `pos_000000` .. `pos_030003`, four gaps                |
-| missing | none                                  | `pos_029989`, `pos_029998`, `pos_030000`, `pos_030001` |
-
-Four PDOK WMS requests failed during the cluster download, so it ran on past
-`pos_029999` to reach 30,000. Crops are sampled one per polyline, so a failure
-shifts the numbering and nothing downstream notices.
-
-This killed exp 4 three minutes into epoch 1 with "No image for pos_029989".
-Exps 1 to 3 never hit it because `pdok_dataset3_polylines` was converted **on
-the cluster**, from the cluster's own labels, so its stems match the cluster
-images by construction. `pdok_dataset3_tree_polylines` was built on the laptop
-and copied over, so it carried two crops the cluster does not have.
-
-The same thing is true of `lidar_patches.npy`, built on the laptop: it has no
-patch for `pos_030002` or `pos_030003`. The tree dataset does not contain those
-stems, so exp 4 was unaffected, but `pdok_dataset3_polylines` does, so the
-lidar-only ablation has to drop them or build the two patches first.
-
-Two rules. A dataset built on one machine has to be checked against the images
-on the machine it runs on, not assumed to match a dataset of the same name.
-And that check belongs at dataset construction, not at the first batch:
-`DetrPolylineImageDataset.__init__` in
-`scripts/train_detr_unet_polyline.py` now lists the image directory once and
-names every missing crop before the GPU is touched, the way the lidar check
-already did. Getting this wrong costs a queue slot and an hour of waiting to
-learn about a two-file mismatch.
-
-Run `exps/probe_dataset_stem_mismatch.py` on both machines before using a
-dataset across them. It prints the numbering with its gaps and every polyline
-stem that has no image or no lidar patch.
-
 ## Training the backbone is the first clear gain
 
 The backbone is the part that reads the photo. Until exp 9 it was frozen: it
@@ -1031,6 +977,42 @@ The backbone really changed: 66 of its 86 weight tensors moved, against none
 in exp 2 (`exps/probe_backbone_trained.py`). *(exp 9,
 `exps/probe_polyline_pr.py`)*
 
+## One woody line class: a better woody map, not a better hedge map
+
+Exp 10 trains hedges and tree rows as one class, on the exp 9 recipe. The tree
+row dataset already holds both, so `merge_classes=True` in
+`scripts/train_detr_unet_polyline.py` only relabels them.
+
+As a woody line detector it is the best model we have. F1 at 10 m, every line
+against both label layers, each run at its best threshold:
+
+| model                                      | F1    |
+| ------------------------------------------ | ----- |
+| exp 10, one woody class                    | 0.722 |
+| exp 9, hedges only                         | 0.676 |
+| exp 5, two classes pooled, frozen backbone | 0.654 |
+
+Exp 9 never learned tree rows, so beating it was expected. Exp 5 is the real
+alternative, two classes instead of one. At the same recall, 0.76, exp 10 is
+0.13 more precise. Part of the 0.068 gap is exp 5's frozen backbone, which was
+worth 0.022 on hedges, so the class choice itself is likely nearer 0.05. Still
+above the 0.02 bar, but one run each.
+
+It finds no more hedges. Its hedge recall rose from 0.733 to 0.795, but it
+draws 5.76 lines per crop against 3.33, and the null model takes all of that
+back: skill 0.483 against 0.473. That trap was written down before the run,
+and it held.
+
+So the choice is about what map we want, not about a better model. For woody
+lines, use exp 10. For hedges alone, exp 9 stays. Nothing here says the model
+tells the two apart better; it is simply no longer asked to.
+
+A hint, not a finding: woody recall barely falls on crowded crops, 0.84 with
+one woody line to 0.72 with seven or more, where hedge recall fell to 0.37. But
+it also draws more lines there, and no null model was run per crowding bucket,
+so this may be luck. Check it before it shapes a run.
+*(exp 10, `exps/probe_polyline_pr.py`, `exps/probe_recall_null_model.py`)*
+
 ## Done
 
 Phase A — data + split:
@@ -1048,8 +1030,7 @@ Phase A — data + split:
 - Converted dataset3 (30k images). The operative cluster split (avoid_label_dirs
   sees all 5,000 pdok_dataset2 labels) is train=26,902, val=3,098 (10.3%),
   103,414 polylines, 302 rings opened, 0 val-train overlap; enforcing backbone
-  avoidance halves the val set because 40% of crops sit near semseg areas. The
-  local dry-run (only 10 pdok_dataset2 labels available) was 24,257 / 5,743.
+  avoidance halves the val set because 40% of crops sit near semseg areas.
   Stats reproducible with `exps/dataset_stats.py` and
   `exps/quantify_geographic_crop_overlap_pdok_dataset3.py`; per-run numbers in
   `docs/experiments_log.md`.
@@ -1063,10 +1044,10 @@ Phase B — training half:
   spatially-blocked train subset, frozen backbone up3, augment on, scheduler
   on, eval_every=5. First run whose predictions sit on real hedgerows in
   images the model never saw.
-- Inference re-run on the cluster val split only, using `polylines/val_cluster`
-  (commands in `docs/experiments_log.md`). The local val directory is a
-  different split, about 46% of it was in the cluster's training set, so
-  figures taken from it were not the baseline.
+- Inference re-run on the cluster val split only. The laptop val directory
+  was then a different split, about 46% of it in the cluster's training set,
+  so figures taken from it were not the baseline (see "A checkpoint has to be
+  evaluated on the split it was trained against").
 - `infer_score_thresh` raised from 0.5 to 0.95 on line count, then confirmed by
   sweep: 0.95 is the optimum for `1_150.pt`.
 - Inference made reproducible: self-naming run directories, ground truth
@@ -1112,7 +1093,13 @@ Phase C — seed and backbone:
 - Exp 9 (backbone trained at lr 1e-5) is the new best: hedge F1 0.721 at 10 m
   against 0.699, and 0.581 against 0.553 at 5 m.
 - Exp 8 (exp 2 for 90 epochs) gains 0.013 at 10 m, a little more than the
-  seed gap and below the 0.02 bar. Most of it is in by epoch 60.
+  seed gap and below the 0.02 bar.
+
+Phase C — one woody class:
+
+- Exp 10 (exp 9 with hedges and tree rows as one class): woody line F1 0.722
+  at 10 m against 0.676 for exp 9 and 0.654 for exp 5. Hedge recall skill
+  unchanged, 0.483 against 0.473.
 
 All runs from exp 2 on, hedge against hedge on the same 3,098 val crops, at
 t=0.90, the best threshold of every run. Each cell is precision / recall / F1.
@@ -1130,39 +1117,101 @@ Exps 8 and 9 are their last epoch (`8.pt`, `9.pt`).
 
 *(`exps/probe_polyline_pr.py`)*
 
+Exp 10 is not in this table: it draws woody lines, so its hedge precision
+counts every tree row as wrong. See "One woody line class".
+
+Housekeeping, the cluster data on the laptop, 2026-11-09 to 11:
+
+- The laptop holds the cluster data and runs, in the places the code reads.
+  Before the copy, only the split and four crops differed. Rechecked against
+  the live cluster on 2026-11-11: 129,997 of the 130,000 dataset files are
+  identical, and the runs differ only by the epoch snapshots, which stay on
+  the cluster (`exps/probe_laptop_matches_cluster.py`). The 3 dataset files
+  that differ do so on purpose. The laptop keeps its real photo of
+  `pos_001893`, where the cluster copy is a solid blue failed download
+  (`exps/probe_failed_downloads.py`), and its lidar file and stem list were
+  rebuilt with the two crops the cluster file lacks.
+- The laptop now computes the split of every run, train 26,902 / val 3,098
+  (`exps/probe_split_reproduces.py`), so `polylines/val_cluster` is retired.
+- The cluster runs are in `/home/fatemeh/Downloads/hedge/snellius`, each run's
+  script and log inside its folder. Three files had the same name on both
+  machines but other content. Both versions are kept: the laptop one under
+  the old name, the cluster one with `_cluster` added (`results_cluster.csv`
+  in `detect_ultralytics/3` and `seg_ultralytics/1`, and
+  `semseg_unet/5/5_23187937_cluster.out`). The laptop also keeps six older
+  run files the cluster no longer has.
+- Nothing on the cluster was deleted. It stays in use until the account
+  expires on 2027-01-08. On the laptop, the backup folder and the replaced
+  files were deleted, including the laptop-only crops `pos_029989` and
+  `pos_029998`.
+
 ## TODO
 
-Phase C — exp 2 is done (F1 0.640 -> 0.685 at 10 m, see above). Next, in order:
+Exp 9 `9.pt` at t=0.90 is the baseline for hedges, and exp 10 `10.pt` at
+t=0.90 for woody lines. A run has to win by 0.02 to count (see "How big a gap
+has to be before it counts"). The limit is perception: the model does not draw
+enough correct lines, worst on crowded crops (exp 2 recall 0.372 on crops with
+7+ labelled lines against 0.731 on crops with one).
 
-Exp 3 lost (0.664). Exps 4 to 6 did not beat exp 2 by the 0.02 bar
-(0.698, 0.689, 0.703); exp 9 did (0.721). See "How big a gap has to be before
-it counts". Exp 9 `9.pt` at t=0.90 is the new baseline.
+In the order suggested:
 
-The bottleneck is that the model does not draw enough correct lines, worst
-where crops are crowded (exp 2 recall 0.372 on crops with 7+ labelled lines
-against 0.731 on crops with one). So the next runs should target perception.
+1. **Look at the strange things in the figures.** In
+   `/home/fatemeh/Downloads/hedge/screenshots/`, `exp2_8_9.png` shows exp 2
+   with the lowest val loss, but by eye exp 9 is better, and its last
+   checkpoint sometimes beats its best one. `strange_polylines1.png` (left
+   `best_9_val_cluster_t0.05`, right GT) and `strange_polylines2.png` (left
+   `9_val_cluster_t0.05`, middle `best_9_val_cluster_t0.05`, right GT) mark
+   with arrows lines that lie on no hedgerow. Also check the short side of an
+   L-shaped hedge being left out: if L shapes are rare, storing them as two
+   lines may be better. Draw more with `scripts/show_polyline_results.py`.
+   This may change what comes next.
 
-- Exp 4: finer features. `feature_stage="up3"` is stride 16, so a 1024 px crop
-  becomes a 64x64 grid and a 3 m hedge is 12 px, under one feature cell. Thin
-  structures cannot survive that. `FEATURE_STAGES` only has `enc4` (stride 32)
-  and `up3` (stride 16) today, so this means adding the next UNet decoder
-  stage at stride 8. Memory is available: batch 16 uses 5.8 of 40 GB, and
-  stride 8 is 4x the tokens. This is the most direct attack on the real limit.
+1. **Fix the tree row score.** `exps/probe_polyline_pr.py` gives a crop with
+   no tree row, and none drawn, a perfect 1.0, and 1,224 of the 3,098 val
+   crops have none. On the 1,874 that do, tree recall at 10 m is 0.280 for
+   exp 5 and 0.425 for exp 4 (`exps/probe_hedge_tree_confusion.py`). Score a
+   class only on crops where it appears, then correct the tree row numbers in
+   `docs/experiments_log.md` (exps 4 and 5), in this file (0.624 and 0.688),
+   in the `exps/probe_polyline_pr.py` docstring, and in the talk (the exp 4
+   slide says the score is being fixed). Hedge and woody line scores are not
+   affected: every val crop but one has a hedge.
 
-- Fix the tree row score. It counts a crop with no tree row, and no tree row
-  drawn, as a perfect score. That is 40% of the val crops, so every tree row
-  number so far is too high (exps 4 and 5). Hedge scores are not affected:
-  every val crop but one has a hedge.
+1. **Labels from Top10NL2025 instead of 2023.** The photos are 2025, the
+   labels 2023. Build 2025 labels for the same crops, pinning the split with
+   `val_stems_file`, and score the exp 2 and exp 9 predictions against them
+   before training anything. If they score clearly higher, the old labels
+   hold the number down. Both shapefiles are in
+   `/home/fatemeh/Downloads/hedge/Top10NL2025`. Keep the label year apart from
+   any other change, or the run cannot be read.
 
-- Labels from Top10NL2025 instead of 2023, a separate conversion. It closes
-  the three-year image/label gap at no imagery cost, since the crops are
-  already 2025. Both shapefiles are downloaded, in
-  `/home/fatemeh/Downloads/hedge/Top10NL2025`. Keep it out of exp 4: changing
-  the label year and adding a class at once cannot be read.
+1. **Null model per crowding bucket for exp 10.** Its woody recall barely
+   falls on crowded crops, which would say part of the crowding problem is
+   the label split. It also draws more lines there, so check before believing
+   it.
 
-- Training longer helped exp 2 only a little (exp 8, +0.013 at 10 m). Exp 9
-  for longer might add the same small amount, but training the backbone is
-  where the gain was.
+1. **Next GPU runs**, ideas, not decided:
+
+   - Finer features. `feature_stage="up3"` is stride 16, so a 3 m hedge,
+     12 px, is under one feature cell. `FEATURE_STAGES` only has `enc4`
+     (stride 32) and `up3` (stride 16), so this means adding the UNet decoder
+     stage at stride 8. Batch 16 uses 5.8 of 40 GB, and stride 8 is 4x the
+     tokens. The most direct attack on the limit.
+   - Exp 9 again with another seed, to confirm its +0.022.
+   - Exp 9 for longer. Exp 8 says longer adds only a little (+0.013).
+
+1. **Why the stored crops differ from a fresh download.** Not urgent. The
+   stored pdok_dataset3 crops differ from a fresh `2025_ortho25` download by
+   5.6 to 13 mean pixel value, while pdok_dataset2 `pos_000000`, the same
+   place, matched it exactly (`exps/probe_image_label_dates.py`). Look at one
+   crop side by side: colour, sharpness or a small shift? Which pdok_dataset2
+   copy matched is not recorded. The laptop and cluster copies differ: the
+   cluster one is in `pdok_dataset2`, the laptop one in
+   `pdok_dataset_semseg2/images/train/pos_000000.png`.
+
+Snapshots: the epoch snapshots `<n>_<epoch>.pt`, 80 MB each, now exist only
+on the cluster. None is needed (see scoring by epoch under Dropped), but leave
+them there unless the cluster runs short of space. On the laptop keep
+`1_150.pt`, the exp 1 result, not a spare snapshot.
 
 Then, results-driven:
 
@@ -1181,6 +1230,14 @@ Dropped, with the reason:
   geometry's.
 - A date-matched rebuild on `2016_ortho25`. 2016 imagery matches nothing here;
   the labels are 2022 and the crops are 2025.
+- Scoring runs epoch by epoch. `exps/probe_f1_by_epoch.py` asked whether a run
+  still improves when it stops. Exp 6 rose until the learning rate ran out, so
+  exp 8 trained for 90 epochs, and that gained only 0.013. Exp 10 was flat from
+  epoch 35. The answer is known, and asking again costs 80 MB per snapshot plus
+  its inference run. The probe, the snapshots of exps 9 and 10 and the scored
+  inference runs were removed from the laptop on 2026-11-09; the cluster keeps
+  its snapshots. The probe is in git history:
+  `git log -- exps/probe_f1_by_epoch.py`.
 
 Note: the spatial split makes val numbers look worse than a random split would.
 That is expected; they are the real baseline to improve from.

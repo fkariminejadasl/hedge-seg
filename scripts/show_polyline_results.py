@@ -16,8 +16,8 @@ runs: the exp 1 optimum is 0.95 and the exp 2 optimum is 0.90.
 
 `save` writes each figure to `save_dir` as
 `<model>_p<page>_<tag>_<run>_<split>_t<thresh>.png`, for example
-`detr_unet_polyline_p1_best_2_val_cluster_t.90.png`, with the ground truth as
-`detr_unet_polyline_p1_gt_val_cluster_t.90.png`. The page counts from 1 and
+`detr_unet_polyline_p1_best_10_val_t.90.png`, with the ground truth as
+`detr_unet_polyline_p1_gt_val_t.90.png`. The page counts from 1 and
 goes up each time `n` is pressed, so no page overwrites another. The tag is
 left out when it is empty.
 
@@ -65,9 +65,11 @@ def wait_for_key(figures):
 
 def split_run_name(run_dir: Path):
     """
-    `best_2_val_cluster_t0.05` -> ("best_2", "val_cluster"). The directory names
-    itself after the checkpoint, the split and the inference cutoff, so the
-    figure name can be rebuilt from it.
+    `best_10_val_t0.05` -> ("best_10", "val"). The directory names itself
+    after the checkpoint, the split and the inference cutoff, so the figure
+    name can be rebuilt from it. `val_cluster` is the split name of run
+    directories made before 2026-11-10, when the laptop val split was not the
+    cluster one. It is kept so those still parse.
     """
     stem = run_dir.name.rsplit("_t", 1)[0]
     for split in ("val_cluster", "val", "train"):

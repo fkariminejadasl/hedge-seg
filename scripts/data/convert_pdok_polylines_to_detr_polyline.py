@@ -20,10 +20,11 @@ crops that touches a train block goes entirely to train. A KDTree check asserts 
 no val crop overlaps a train crop. Optionally, val also avoids areas used by another
 dataset (for example the semseg backbone training data), via avoid_label_dirs.
 
-The computed split depends on the machine, because avoid_label_dirs sees a
-different number of labels locally and on the cluster. val_stems_file takes the
-split from an existing run's val stem list instead, so both machines agree and a
-new dataset stays scoreable against that run.
+The computed split depends on the labels in labels_dir and avoid_label_dirs.
+The laptop and the cluster hold the same ones, so they compute the same split
+(exps/probe_split_reproduces.py). val_stems_file takes the split from an
+existing run's val stem list instead, so a new dataset, for example one with
+other labels, stays scoreable against that run.
 
 Label cleaning:
 - closed rings (first and last point within closed_eps_px, after collapsing
@@ -314,10 +315,8 @@ def split_from_val_stems(labels_dir: Path, val_stems_file: Path) -> Dict[str, st
     One name per line, with or without a suffix, so the output of
     `ls polylines/val` can be used directly. Everything else is train.
 
-    The computed split depends on where the conversion runs, because
-    avoid_label_dirs sees 10 pdok_dataset2 labels locally and 5,000 on the
-    cluster. Pinning it to the stem list of an existing run makes the two
-    machines agree and keeps a new dataset scoreable against that run.
+    Pinning the split to the stem list of an existing run keeps a new dataset
+    scoreable against that run, whatever labels it was built from.
     """
     wanted = {Path(line).stem for line in Path(val_stems_file).read_text().split()}
     stems = [f.stem for f in sorted(Path(labels_dir).glob("pos_*.json"))]

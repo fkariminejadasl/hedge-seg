@@ -310,7 +310,7 @@ if __name__ == "__main__":
     cfg = dict(
         image_dir=DATA_ROOT / "pdok_dataset3/images",
         label_dir=DATA_ROOT / "pdok_dataset3/labels",
-        polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val_cluster",
+        polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         out_dir=DATA_ROOT / "pdok_dataset3_polylines/lidar_alignment",
         stems=None,  # None picks the crops with the most labelled hedge
         n_crops=8,  # crops to draw
@@ -333,7 +333,7 @@ if __name__ == "__main__":
         # partial file, point it at polylines/lidar_check, which the code below
         # fills with exactly the crops that do have a patch.
         lidar_path=DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy",
-        aug_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val_cluster",
+        aug_polyline_dir=DATA_ROOT / "pdok_dataset3_polylines/polylines/val",
         lidar_stride=16,
         pad_to=1024,
         aug_trials=400,

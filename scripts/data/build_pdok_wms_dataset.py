@@ -16,7 +16,10 @@ def main():
         num_workers=8,
         seed=123,
         crs="EPSG:28992",
-        layer_name="Actueel_ortho25",  # or "2018_ortho25"
+        # The 2025 flight, the photos of pdok_dataset2 and pdok_dataset3. Not
+        # "Actueel_ortho25": that is whatever the newest flight is, so it changes
+        # over time (exps/probe_image_label_dates.py).
+        layer_name="2025_ortho25",
         chip_size_m=250.0,
         out_size_px=1000,
         image_format="image/jpeg",

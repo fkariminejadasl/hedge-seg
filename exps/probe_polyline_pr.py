@@ -36,6 +36,16 @@ docs/experiments_log.md.
   exp 2, with far fewer wrong lines at t=0.05 (8.99 per crop against 12.63).
 - Longer training, exp 8 (exp 2 for 90 epochs) at t=0.90: 0.569 / 0.712 /
   0.775, a little more than the seed gap and less than exp 9.
+- One woody line class, exp 10 (exp 9 with tree rows merged into hedges),
+  every line against both label layers, at 10 m and each run's best
+  threshold: exp 10 0.683/0.765 F1 0.722 (t=0.90), exp 9 0.690/0.663 F1
+  0.676 (t=0.70), exp 5 with its two classes pooled 0.678/0.632 F1 0.654
+  (t=0.90). At 5 / 15 m, t=0.90: exp 10 0.551 / 0.786, exp 9 0.521 / 0.724.
+  best_10.pt (epoch 35) gives 0.720, a tie. Against hedge labels only exp 10
+  covers more hedge length than exp 9, recall 0.795 against 0.733 at t=0.90,
+  but it draws 5.76 lines per crop against 3.33;
+  exps/probe_recall_null_model.py shows the skill did not change. Exp 9 and
+  exp 5 reproduce their recorded hedge numbers on this folder.
 - Buffered length at 10 m within exp 1: best_1.pt 0.75/0.52 (F1 0.614),
   1_150.pt 0.70/0.59 (F1 0.640). 1_150.pt wins at every buffer, so the
   checkpoint the eval loss calls overfit is the better detector. Rank by this
@@ -290,25 +300,37 @@ if __name__ == "__main__":
     tree = DATA_ROOT / "pdok_dataset3_tree_polylines"
     cfg = dict(
         # All hold the same 3,098 val stems, so they can be listed together.
+        # Exp 10 is scored on the tree row val folder, whose gt/ holds both
+        # label classes, and exp 9 was inferred there again to compare.
         run_dirs=[
-            root / "inference/best_2_val_cluster_t0.05",  # exp 2, softmax head
-            root / "inference/best_3_val_cluster_t0.05",  # exp 3, focal head
-            tree / "inference/best_4_val_t0.05",  # exp 4, tree rows and lidar
-            tree / "inference/best_5_val_t0.05",  # exp 5, tree rows, no lidar
-            root / "inference/best_6_val_cluster_t0.05",  # exp 6, lidar, no tree rows
-            root / "inference/best_7_val_cluster_t0.05",  # exp 7, exp 2 with seed 43
-            root
-            / "inference/best_9_val_cluster_t0.05",  # exp 9 ep 30, backbone trained
-            root / "inference/9_val_cluster_t0.05",  # exp 9 ep 45, backbone trained
-            root / "inference/best_8_val_cluster_t0.05",  # exp 8 ep 70, 90 epochs
-            root / "inference/8_val_cluster_t0.05",  # exp 8 ep 90, 90 epochs
+            tree / "inference/9_val_t0.05",  # exp 9 ep 45, hedges only
+            tree / "inference/best_10_val_t0.05",  # exp 10 ep 35, one woody class
+            tree / "inference/10_val_t0.05",  # exp 10 ep 45, one woody class
+            tree / "inference/best_5_val_t0.05",  # exp 5, two classes, frozen
         ],
+        # Exps 2 to 9, scored with classes={0: "hedge", 1: "tree row"}:
+        # root / "inference/best_2_val_cluster_t0.05",  # exp 2, softmax head
+        # root / "inference/best_3_val_cluster_t0.05",  # exp 3, focal head
+        # tree / "inference/best_4_val_t0.05",  # exp 4, tree rows and lidar
+        # tree / "inference/best_5_val_t0.05",  # exp 5, tree rows, no lidar
+        # root / "inference/best_6_val_cluster_t0.05",  # exp 6, lidar, no tree rows
+        # root / "inference/best_7_val_cluster_t0.05",  # exp 7, exp 2 with seed 43
+        # root / "inference/best_9_val_cluster_t0.05",  # exp 9 ep 30, backbone trained
+        # root / "inference/9_val_cluster_t0.05",  # exp 9 ep 45, backbone trained
+        # root / "inference/best_8_val_cluster_t0.05",  # exp 8 ep 70, 90 epochs
+        # root / "inference/8_val_cluster_t0.05",  # exp 8 ep 90, 90 epochs
         # Which classes to score, each against its own labels. With
         # {0: "hedge", 1: "tree row"} the hedge row of a two-class run is
         # directly comparable with a one-class run, whose lines are all class 0.
         # A class with no labels in a run is skipped. The detail sections below
         # follow the first class listed. None scores every line together.
-        classes={0: "hedge", 1: "tree row"},
+        #
+        # For exp 10, None is the woody line score: every line against both
+        # label layers. 0 is then every exp 10 line against hedge labels, so
+        # its recall compares with exp 9 and its precision does not: a tree
+        # row it draws counts as wrong. Class 1 is left out, because a crop
+        # with no tree row scores recall 1.0 and 40% of val crops have none.
+        classes={None: "woody line", 0: "hedge"},
         # Written by exps/probe_recreation_crops.py. Missing file just skips
         # the campsite rows.
         recreation_stems=root / "recreation_crops_val_cluster.txt",

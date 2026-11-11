@@ -1,40 +1,28 @@
 """
 Does this polyline dataset name crops that exist on this machine?
 
-pdok_dataset3 was downloaded twice, once on the laptop and once on the cluster.
-Both hold exactly 30,000 crops, so every count matches and nothing looks wrong.
-They are not the same 30,000: crops are sampled one per polyline, and a failed
-PDOK WMS request shifts the numbering onward, so each download skipped a
-different set of indices.
+Crops are numbered by their place in the polyline sampling. A failed PDOK WMS
+request leaves a gap, and the download runs on past the end to reach its
+count. So two downloads of the same dataset can both hold 30,000 crops and
+still not hold the same 30,000. A polyline dataset or a stem-keyed
+lidar_patches.npy built against one copy then names crops the other lacks.
+This walks the stem sets and reports every mismatch.
 
-A polyline dataset built on one machine therefore names crops the other does not
-have, and the same is true of lidar_patches.npy, which is keyed by stem. This
-walks the three stem sets and reports every mismatch, which is the check that
-has to pass before a locally built dataset is used on the cluster.
+Result (2026-11-10, laptop, after its data became the cluster versions):
 
-Result (2026-09-17, pdok_dataset3):
+    images  pos_000000 .. pos_030003, 30,000 crops, 4 gaps:
+            pos_029989, pos_029998, pos_030000, pos_030001
+    lidar   30,000 stems
+    both polyline datasets, train and val: no crop without an image or a
+    lidar patch. PASS
 
-    laptop   pos_000000 .. pos_029999, 30,000 crops, no gaps
-    cluster  pos_000000 .. pos_030003, 30,000 crops, 4 gaps:
-             pos_029989, pos_029998, pos_030000, pos_030001
+The cluster images have the same numbering. Its lidar_patches.npy is the
+older one, with no patch for pos_030002 or pos_030003, so a lidar run there
+needs the laptop file copied over first.
 
-So the laptop has pos_029989 and pos_029998 which the cluster lacks, and the
-cluster has pos_030002 and pos_030003 which the laptop lacks.
-
-Consequences measured the same day:
-
-    pdok_dataset3_tree_polylines  built on the laptop, so on the cluster two of
-                                  its train crops had no image (pos_029989,
-                                  pos_029998). They were deleted there, leaving
-                                  26,900 train against 26,902 on the laptop.
-                                  Val is 3,098 on both and is exp 2's val set.
-    lidar_patches.npy             built on the laptop, so it has no patch for
-                                  pos_030002 or pos_030003. The tree dataset
-                                  does not contain those stems, but
-                                  pdok_dataset3_polylines does, so the lidar
-                                  only ablation has to drop them first.
-
-This is what killed exp 4 job 26798493 three minutes into epoch 1 with "No image
+Why it exists: on 2026-09-17 the laptop copy of pdok_dataset3 ran
+pos_000000 .. pos_029999 with no gaps, a different 30,000. The tree dataset
+built there killed exp 4 job 26798493 three minutes into epoch 1 with "No image
 for pos_029989". DetrPolylineImageDataset now runs the same check at
 construction, so the failure is immediate and names every crop at once.
 
