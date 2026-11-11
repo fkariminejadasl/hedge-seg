@@ -1120,20 +1120,26 @@ Exps 8 and 9 are their last epoch (`8.pt`, `9.pt`).
 Exp 10 is not in this table: it draws woody lines, so its hedge precision
 counts every tree row as wrong. See "One woody line class".
 
-Housekeeping, the cluster data on the laptop, 2026-11-09 and 10:
+Housekeeping, the cluster data on the laptop, 2026-11-09 to 11:
 
-- The laptop holds the cluster data and runs, in the places the code reads,
-  checked by md5. Every file the two machines shared was already identical;
-  only the split and four crops differed. The laptop keeps its real photo of
+- The laptop holds the cluster data and runs, in the places the code reads.
+  Before the copy, only the split and four crops differed. Rechecked against
+  the live cluster on 2026-11-11: 129,997 of the 130,000 dataset files are
+  identical, and the runs differ only by the epoch snapshots, which stay on
+  the cluster (`exps/probe_laptop_matches_cluster.py`). The 3 dataset files
+  that differ do so on purpose. The laptop keeps its real photo of
   `pos_001893`, where the cluster copy is a solid blue failed download
-  (`exps/probe_failed_downloads.py`). The laptop now computes the split of
-  every run, train 26,902 / val 3,098 (`exps/probe_split_reproduces.py`), so
-  `polylines/val_cluster` is retired. The cluster runs are in
-  `/home/fatemeh/Downloads/hedge/snellius`, each run's script and log inside
-  its folder. Three files differed between the two copies; both are kept, the
-  cluster one with `_cluster` in the name (`results_cluster.csv` in
-  `detect_ultralytics/3` and `seg_ultralytics/1`, and
-  `semseg_unet/5/5_23187937_cluster.out`).
+  (`exps/probe_failed_downloads.py`), and its lidar file and stem list were
+  rebuilt with the two crops the cluster file lacks.
+- The laptop now computes the split of every run, train 26,902 / val 3,098
+  (`exps/probe_split_reproduces.py`), so `polylines/val_cluster` is retired.
+- The cluster runs are in `/home/fatemeh/Downloads/hedge/snellius`, each run's
+  script and log inside its folder. Three files had the same name on both
+  machines but other content. Both versions are kept: the laptop one under
+  the old name, the cluster one with `_cluster` added (`results_cluster.csv`
+  in `detect_ultralytics/3` and `seg_ultralytics/1`, and
+  `semseg_unet/5/5_23187937_cluster.out`). The laptop also keeps six older
+  run files the cluster no longer has.
 - Nothing on the cluster was deleted. It stays in use until the account
   expires on 2027-01-08. On the laptop, the backup folder and the replaced
   files were deleted, including the laptop-only crops `pos_029989` and

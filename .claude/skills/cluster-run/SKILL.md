@@ -92,6 +92,10 @@ Ask before `sbatch`. It costs GPU budget and runs for hours.
      tensorboard --port 4004 --logdir_spec <n>:<n>
      ```
 
+9. Copy the run to the laptop, with its script and log, as in "Keeping the
+   laptop in step with the cluster" in `CLAUDE.md`. Rerun the copy to update a
+   run still going.
+
 ## Before the first big run of a model
 
 - Run `exps/probe_batch_size.py` in a short slurm job on the target GPU to

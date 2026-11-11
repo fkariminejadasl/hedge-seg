@@ -241,28 +241,66 @@ that log.
 
 Ask before submitting a job. Slurm jobs cost budget and run for hours.
 
-## Bringing a cluster run back to the laptop
+## Keeping the laptop in step with the cluster
 
-- Copy the whole run directory, not the files inside it, so the local mirror
-  keeps the `<n>/` level and matches `~/exps/hedge`. The slurm script and the
-  log sit *beside* that directory on the cluster, so `scp -r` of the directory
-  alone silently leaves them behind. Take all three and put the two loose files
-  inside `<n>/` locally, so one directory holds the whole run:
+The laptop holds a full copy of the cluster data and runs. Copy each new run
+and dataset over as below, so it stays that way. Use rsync, not scp: run it
+again and it copies only what changed, so it also updates a run still going.
+
+- Runs. `/home/fatemeh/Downloads/hedge/snellius` mirrors `~/exps/hedge`, with
+  one difference: the slurm script and the log sit beside the run directory on
+  the cluster, and inside it on the laptop, so one directory holds the whole
+  run.
 
   ```
-  scp -r me:exps/hedge/detr_unet_polyline/2 \
-      /home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/
-  scp me:exps/hedge/detr_unet_polyline/2.sh \
-      me:exps/hedge/detr_unet_polyline/2_<jobid>.out \
-      /home/fatemeh/Downloads/hedge/snellius/detr_unet_polyline/2/
+  M=detr_unet_polyline; N=11; L=/home/fatemeh/Downloads/hedge/snellius
+  rsync -av --exclude='[0-9]*_[0-9]*.pt' me:exps/hedge/$M/$N $L/$M/
+  rsync -av me:exps/hedge/$M/$N.sh "me:exps/hedge/$M/${N}_*.out" $L/$M/$N/
   ```
 
-  The log is not optional. It records the git hash and the full text of the
-  training script, so it is the only proof of what actually ran.
-- Only the checkpoints being analysed are worth mirroring. `best_<n>.pt` and
-  `<n>.pt` are usually the same weights when the best epoch is the last one;
-  check before running inference twice. Delete the `<n>_<epoch>.pt` copies
-  locally once they are not needed, they are 80 MB each.
+  The exclude leaves the epoch snapshots `<n>_<epoch>.pt`, 80 MB each, on the
+  cluster. The log is not optional. It records the git hash and the full
+  training script, so it is the only proof of what ran. Copy one run at a
+  time, never all of `~/exps/hedge`: a few laptop files have a cluster file of
+  the same name with other content, and a whole-tree copy would overwrite them.
+- What the laptop lacks. This lists it and copies nothing:
+
+  ```
+  rsync -avn --ignore-existing --exclude='[0-9]*_[0-9]*.pt' \
+      --exclude='*.sh' --exclude='*.out' \
+      me:exps/hedge/ /home/fatemeh/Downloads/hedge/snellius/
+  ```
+
+- Data. Datasets are made by code, but build each one once, where its inputs
+  are, and copy it to the other machine. Do not build it again there, because
+  a rebuild does not give the same files. Some download requests fail, and at
+  different places each time. pdok_dataset3 was once downloaded on both
+  machines, and each copy lacked two crops the other had. A dataset built from
+  the laptop copy then named crops the cluster did not have, and the first
+  exp 4 job stopped on "No image for pos_029989"
+  (`exps/probe_dataset_stem_mismatch.py`). The lidar patches are built on the
+  laptop, which alone has the AHN4 rasters.
+
+  ```
+  rsync -av me:/projects/prjs1025/data/hedge/<dataset> \
+      /home/fatemeh/Downloads/hedge/results/
+  ```
+
+  Swap the two paths to send a laptop file to the cluster. After a rebuild,
+  delete the old copy first, or files that changed split stay in both. Add the
+  dataset to the table in `docs/experiments_log.md`, then run
+  `exps/probe_dataset_stem_mismatch.py` on both machines.
+- To check one copy, run the same rsync with `-n --checksum`. It reads every
+  file on both sides and lists only those whose content differs, so an empty
+  list means the copy is exact. To check everything, run
+  `exps/probe_laptop_matches_cluster.py`, about 5 minutes. Add a new dataset
+  to its list first.
+- To back up the laptop itself, use `rsync -aH` to an ext4 disk. `-H` keeps a
+  hard link as one file: `pdok_dataset_semseg3` shares its images with
+  `pdok_dataset3`, so a plain copy stores them twice. The `gt/` links of the
+  inference runs are absolute paths, so restore to the same place.
+- `best_<n>.pt` and `<n>.pt` are usually the same weights when the best epoch
+  is the last one; check before running inference twice.
 - Inference at `infer_score_thresh=0.05` keeps everything, so the reporting
   threshold can be swept in both directions afterwards. A run saved at 0.95 can
   only be swept upward. The directory name records the *inference* cutoff, so
