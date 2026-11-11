@@ -1120,7 +1120,7 @@ Exps 8 and 9 are their last epoch (`8.pt`, `9.pt`).
 Exp 10 is not in this table: it draws woody lines, so its hedge precision
 counts every tree row as wrong. See "One woody line class".
 
-Housekeeping — the cluster data on the laptop, 2026-11-09 and 10:
+Housekeeping, the cluster data on the laptop, 2026-11-09 and 10:
 
 - The laptop holds the cluster data and runs, in the places the code reads,
   checked by md5. Every file the two machines shared was already identical;
@@ -1130,7 +1130,14 @@ Housekeeping — the cluster data on the laptop, 2026-11-09 and 10:
   every run, train 26,902 / val 3,098 (`exps/probe_split_reproduces.py`), so
   `polylines/val_cluster` is retired. The cluster runs are in
   `/home/fatemeh/Downloads/hedge/snellius`, each run's script and log inside
-  its folder.
+  its folder. Three files differed between the two copies; both are kept, the
+  cluster one with `_cluster` in the name (`results_cluster.csv` in
+  `detect_ultralytics/3` and `seg_ultralytics/1`, and
+  `semseg_unet/5/5_23187937_cluster.out`).
+- Nothing on the cluster was deleted. It stays in use until the account
+  expires on 2027-01-08. On the laptop, the backup folder and the replaced
+  files were deleted, including the laptop-only crops `pos_029989` and
+  `pos_029998`.
 
 ## TODO
 
@@ -1191,8 +1198,9 @@ In the order suggested:
    5.6 to 13 mean pixel value, while pdok_dataset2 `pos_000000`, the same
    place, matched it exactly (`exps/probe_image_label_dates.py`). Look at one
    crop side by side: colour, sharpness or a small shift? Which pdok_dataset2
-   copy matched is not recorded. The laptop and cluster copies differed, and
-   only the cluster one is left.
+   copy matched is not recorded. The laptop and cluster copies differ: the
+   cluster one is in `pdok_dataset2`, the laptop one in
+   `pdok_dataset_semseg2/images/train/pos_000000.png`.
 
 Snapshots: the epoch snapshots `<n>_<epoch>.pt`, 80 MB each, now exist only
 on the cluster. None is needed (see scoring by epoch under Dropped), but leave
