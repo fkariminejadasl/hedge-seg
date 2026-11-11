@@ -40,7 +40,7 @@ The split guarantees no overlap, not a distance. Because whole groups go to trai
 
 ## Overview
 
-- **Initial Investigation**: SAM3, PiDiNet, conventional methods for hedgerow delineation.
+- **Initial Investigation**: SAM3, PiDiNet, conventional methods for hedgerow delineation. Tested directly, neither SAM3 nor PiDiNet gave usable hedge lines.
 
 - **train_neg_pos_classifier**: Validated DINOv3 on LiDAR-crop classification (hedge vs. non-hedge from ground truth). Result: Good performance. Dataset: `scripts/data/build_lidar_training_dataset.py`.
 
