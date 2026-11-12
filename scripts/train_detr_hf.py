@@ -6,6 +6,7 @@ Dataset: Generated in-code from chip images and labels.
 Purpose: Explore HuggingFace DETR for bounding-box detection; used to decide on custom DETR implementation.
 Note: HF DETR is streamlined for bounding boxes and difficult to adapt for polyline outputs.
 Based on: https://huggingface.co/learn/cookbook/en/fine_tuning_detr_custom_dataset (with adaptations and bug fixes).
+Needs the hf extra for albumentations: pip install -e ".[hf]"
 """
 
 import json
