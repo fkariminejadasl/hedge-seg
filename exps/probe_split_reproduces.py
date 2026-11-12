@@ -4,8 +4,9 @@ Does the laptop now compute the same train/val split as the cluster?
 Every run trained and was scored on the split made on the cluster. The laptop
 used to compute another one, because avoid_label_dirs saw 10 pdok_dataset2
 labels there against 5,000 on the cluster. On 2026-11-09 the laptop data
-became the cluster versions (task 1 in docs/lesson_learned.md). This reruns
-spatial_train_val_split of scripts/data/convert_pdok_polylines_to_detr_polyline.py
+became the cluster versions (see "Laptop copy of the cluster data" in
+docs/experiments_log.md). This reruns spatial_train_val_split of
+scripts/data/convert_pdok_polylines_to_detr_polyline.py
 with the settings of the cluster conversion and compares it with the val stem
 list of cluster run 2 and with the stored polylines/train and polylines/val.
 

@@ -1,18 +1,7 @@
-# Hedge Segmentation
+# Literature and data sources
 
-## Method
-
-Preprocessing: image super resolution
-
-Option1: DETR like curvlinear objects on DINO embeddings
-
-Option2: Semantic segementation (SS) or instant segmentation (IS). Segmentation model such as [SAM 3](https://ai.meta.com/blog/segment-anything-model-3) or just DPT head on DINO backbone. Both SS and IS requires postprocessing to get vector data. Instance segmentation postprocessing is simpler than SS.
-
-For better separation of hedge and not confusing between tree, we could treat trees as negatives. We could get the idea from [CountGD++ Zisserman](https://arxiv.org/abs/2512.23351)​, to use it in both data and loss.
-
-Directly tesing it with SAM 3 and PiDiNet (edge detection) didn't result in a satisfactory results.
-
-<!-- ==================================== -->
+Papers, datasets and data sources read for this project. What was built and
+run is in `docs/descriptions.md`.
 
 ## Literature
 
@@ -52,8 +41,10 @@ These refernce are the DETR-like model, which from BEV images they get the vecto
 
 - [DiffusionEdge](https://arxiv.org/pdf/2401.02032) Diffusion Probabilistic Model for Crisp Edge Detection. Condition on the image to get image images using diffusion model.
 - UNIGEOCLIP: Unified Geospatial Contrastive Learning
-- MMEarth-Bench: Global Environmental Tasks for Multimodal Geospatial Models
+- [MMEarth-Bench](https://arxiv.org/html/2602.06285): Global Environmental Tasks for Multimodal Geospatial Models. Five multimodal environmental tasks with 12 modalities, globally distributed data, and both in- and out-of-distribution test splits.
 - Entropy-Gradient Grounding: Training-Free Evidence Retrieval in Vision-Language Models. Just an idea for fine-grained information.
+- [SAM 3](https://ai.meta.com/blog/segment-anything-model-3): segmentation model, tested directly at the start together with PiDiNet edge detection. Neither gave usable hedge lines.
+- [CountGD++](https://arxiv.org/abs/2512.23351) (Zisserman): uses negative examples in both the data and the loss. An idea for keeping tree rows apart from hedges.
 
 <!-- ================================= -->
 
@@ -72,8 +63,6 @@ PDOK aerial images (only Netherlands)
 - [viewer](https://app.pdok.nl/viewer)
 - QGIS: WMTS https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0?request=GetCapabilities&service=wmts
 
-<!-- # 194297  408398 -->
-
 [Satellietdataportaal](https://www.satellietdataportaal.nl), NLSA (only Netherlands):
 
 - PlanetScope (4.8m), RapidEye(6m), Pleiades NEO (30cm, 50cm), SuperView-1(50cm), TripleSat(80cm), Hyperscout-2, Sentinel-2(10m), Spot6-7(1.5m), Formosat(2m), RadarSat-2(20m)
@@ -82,6 +71,16 @@ PDOK aerial images (only Netherlands)
   Sentinel / Copernicus / ESA data
 
 For the Netherlands, two main sources of high-resolution remote sensing data are used. Satellite imagery is obtained from the Satellietdataportaal of the Netherlands Space Agency, which provides SuperView data at approximately 30 cm resolution. Each tile covers about 14 × 14 km and is around 6.5 GB, with new imagery generally available about once per month for the same location, although cloud cover can affect usability. Aerial imagery is available through the PDOK platform and originates from Beeldmateriaal Nederland, a Dutch public-sector initiative implemented by Het Waterschapshuis and Kadaster. These aerial images are higher quality and are available at 8 cm and 25 cm resolution, typically updated annually.
+
+#### Worldwide imagery
+
+- Pleiades (paid and free): best resolution 30cm
+- NAIP (National Agriculture Imagery Program): aerial 30cm, frequency every 2–3 years
+- Maxar (paid): 30 cm
+- Planet (paid): 3m,
+- Sentinel: best resolution 10m
+- Landsat: best resolution 15m, frequency every 8–16 days
+- MODIS which operates on NASA's Terra and Aqua satellites: low res but covers the entire planet every 1 to 2 days. 250m - 1km, daily frequency
 
 #### Others
 
@@ -107,25 +106,3 @@ ______________________________________________________________________
     Discusses self-supervised pretraining, multimodal geospatial learning, spatial reasoning, and transfer to downstream applications such as land-cover mapping. No new model or dataset introduced. [SatMAE code](https://github.com/sustainlab-group/SatMAE) | [Prithvi models](https://huggingface.co/ibm-nasa-geospatial) | [CROMA code](https://github.com/antofuller/CROMA).
 
 - [SAGE: A Sampling-Aware Global Evaluation Benchmark for Species Distribution Modeling](https://arxiv.org/html/2609.31082) (Tuia, 2026): Global benchmark for predicting the geographic distribution of 5,771 plant species. Combines 89.8M species occurrence records from GBIF (citizen-science observations) for training with 53,336 expert-curated vegetation plots from sPlotOpen for presence-absence evaluation. Uses 52 environmental predictors derived from raster datasets (climate, topography, and human activity at 1 km; soil at 250 m), converted into tabular features for species distribution modeling. No RGB/multispectral imagery or pixel-level segmentation annotations. Not directly suitable for hedgerow segmentation, as it focuses on species distribution rather than vegetation boundaries. Benchmarks traditional species distribution models (Random Forest, MaxEnt, etc.) against deep learning models (MLP, ResNet, FT-Transformer), all using tabular inputs. Finds that DeepSDMs outperform traditional methods for infrequently recorded species when sampling bias is corrected, but offer no consistent advantage for well-sampled species. Data, code, models, and visualizations available on the [project website](https://earens.github.io/sage/).
-
-<!-- ================================= -->
-
-## Issues and some possible solutions
-
-- Data:
-  - Short-length data (minimum 10 pixels per 256x256 image) are removed. -> Done
-  - Low-quality data. Maybe use the self-driving data. -> Not Done
-  - Closed polylines: There are 691,006 polylines and 4,121 closed shapes. Some are not originally closed, but their start and end points are very close. -> Not Done
-  - Data leakage. Use data from different locations for training and validation. -> Not Done
-- Model and Loss:
-  - Auxiliary loss:
-    - Diffusion model on coordinates. Add an extra decoder to inject noise into the coordinates and denoise them with classifier-free guidance.
-    - Semantic segmentation decoder as an auxiliary loss to help the model converge better.
-    - Auxiliary loss on every decoder layer, similar to DETR.
-    - Cardinality (polyline count), length, direction, and curvature loss.
-  - Use only the semantic segmentation network to show that the data and DINOv3 are fine. This might not be necessary, since the binary background/foreground classifier already shows good results.
-  - Train DINOv3 as well: the transformer decoder head acts like an adapter, so there is most likely no need to train DINOv3.
-- Optimization and Hyperparameters
-  - Gradient clipping
-  - Scheduler
-  - Batch size (lower), learning rate (lower), EOS (lower)

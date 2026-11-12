@@ -26,22 +26,6 @@ Follow the official installation in [QGIS](https://qgis.org/resources/installati
 
 ______________________________________________________________________
 
-## Data sources
-
-#### Satellite / Aerial
-
-- Pleiades (paid and free): best resolution 30cm
-- NAIP (National Agriculture Imagery Program): aerial 30cm, frequency every 2–3 years
-- Maxar (paid): 30 cm
-- Planet (paid): 3m,
-- Sentinel: best resolution 10m
-- Landsat: best resolution 15m, frequency every 8–16 days
-- MODIS which operates on NASA's Terra and Aqua satellites: low res but covers the entire planet every 1 to 2 days. 250m - 1km, daily frequency
-
-[MMEarth-Bench](https://arxiv.org/html/2602.06285) a collection of five new multimodal environmental tasks with 12 modalities, globally distributed data, and both in- and out-of-distribution test splits.
-
-______________________________________________________________________
-
 ## PDOK TOP10NL Specific Layer
 
 In TOP10NL, **“heg, haag”** is an object type inside the **objectklasse `inrichtingselement`**, and it is stored as a **line geometry**. PDOK offers TOP10NL both as an **OGC API Features** service and as downloadable **GeoPackage/GML** files. QGIS supports **WFS / OGC API Features** connections, so you can use either route.

@@ -13,15 +13,23 @@ have stopped the run:
   than from the model, and the comparison with exp 2 would mean nothing.
 - How much did the dataset actually grow?
 
-Result (2026-09-16, pdok_dataset3_polylines against pdok_dataset3_tree_polylines):
+Result (2026-11-12, pdok_dataset3_polylines against pdok_dataset3_tree_polylines,
+the data every run used):
 
-    crops                          30,000 in both, same stems
-    lines                          103,432 -> 147,867 (44,435 tree rows)
+    crops                          30,000 hedges only, 29,998 with tree rows
+    lines                          103,411 -> 147,846 (44,435 tree rows)
     lines per crop, mean           3.45 -> 4.93
     lines per crop, max            49 -> 49
     crops with a tree row          18,061 (60.2%)
     crops over 60 lines            0
-    hedge arrays identical         30,000 of 30,000
+    hedge arrays identical         29,998 of 29,998
+
+The tree row dataset lacks pos_030002 and pos_030003, which hold 3 hedge lines.
+It was built from the laptop copy of pdok_dataset3, which did not have them
+(dataset notes in docs/experiments_log.md). So the line counts are over the
+29,998 shared crops; over all 30,000 the hedges-only dataset has 103,414. The
+first run, on 2026-09-16, compared with the laptop's own hedges-only dataset of
+that time, which held two other crops, and gave 103,432 hedge lines.
 
 So the busiest crop was already at 49 lines before tree rows were added, and 60
 queries are still enough. Nothing about the hedges changed.

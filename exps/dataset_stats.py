@@ -7,6 +7,18 @@ out_root should show ~0 for both, confirming ring-opening and length
 filtering worked; dataset_root shows what the raw data looks like before
 cleaning. Uses hedge_seg.utils.{iter_polylines_from_json_dir,
 iter_polylines_from_npz_dir, closed_ring_ratio, short_polyline_ratio}.
+
+Result (2026-11-12, pdok_dataset3, the data of every run):
+
+    [pdok_dataset3] closed rings (raw): 302/67422 (0.45%)
+    [pdok_dataset3_polylines] closed rings (converted, should be ~0): 0/103414 (0.00%)
+    [pdok_dataset3] short polylines (raw, < 40px): 3377/106793 (3.16%)
+    [pdok_dataset3_polylines] short polylines (converted, should be 0): 0/103414 (0.00%)
+
+Closed rings are counted among polylines with at least 3 points. 106,793 minus
+3,377 is 103,416, two more than stored: those two fell under 40 px only after
+resampling to 20 points, and the converter checks the length again after
+resampling.
 """
 
 from pathlib import Path

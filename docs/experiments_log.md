@@ -1,8 +1,8 @@
 # Experiment log
 
-Raw notebook of individual runs, terse style. Held to a lower bar than
-docs/lesson_learned.md (curated lessons) and docs/descriptions.md (per-script
-overview). Merged from the older docs/descriptions.txt notes.
+Raw notebook of individual runs, terse style. The results table is in
+docs/status.md, the lessons in docs/lesson_learned.md and the scripts in
+docs/descriptions.md.
 
 Config shorthand for detr_polyline rows:
 epochs, n_polyline (num_queries), n_points (num_points), eos_coef,
@@ -57,7 +57,8 @@ forgotten:
   val 3,098 (`exps/probe_split_reproduces.py`). `pdok_dataset3_tree_polylines`
   was built with `val_stems_file` set to the val stems of cluster run 2
   (`/home/fatemeh/Downloads/hedge/cluster_val_stems.txt`), which pins the
-  same split.
+  same split. That file lists the cluster val folder, made with
+  `ssh me "ls /projects/prjs1025/data/hedge/pdok_dataset3_polylines/polylines/val" > /home/fatemeh/Downloads/hedge/cluster_val_stems.txt`.
 - The lidar patch file has to be built on the laptop, because the 16 GB of AHN4
   rasters are only there. It is keyed by stem, so one file serves any dataset
   and any split. Copy the `.npy` and its `_stems.json` to the cluster together.
@@ -101,6 +102,11 @@ overfit 10 has all defaults except dropout. Dropout larger than 0.01 collapses.
 lower when only 2 polylines; with 11 it is higher.
 
 ## snellius detr_polyline (DINO embeddings)
+
+Data, the lidar crops: at most 441 polylines in a 256 x 256 crop, 276 after
+dropping those under 10 px, 20 points per polyline, 17,000 crops. 691,006
+polylines, 4,121 closed, some only nearly closed (start and end close
+together), e.g. test_256_None.
 
 - best_detr_polyline_1: 500, 100, 20, eos=.1, dino_14, wd=1e-2, dropout=0.1, giou=1, batch=1280, test_256 -> no collapse.
   Max 441 polylines in some images, image 256x256, DINOv3 resized to 224.
@@ -296,8 +302,7 @@ bbox 3900/903.
 
 - 7, 8, 9 setup (all submitted 2026-09-29): back to the
   exp 2 recipe, hedges only, no lidar, 26,902 train crops, and one change each.
-  All three run at the same time, because the cluster is down on Thursday and
-  Friday.
+  All three ran at the same time.
 
   | exp | change from exp 2                       | question                         |
   | --- | --------------------------------------- | -------------------------------- |
@@ -337,9 +342,8 @@ bbox 3900/903.
 
   Exp 9: job 27354321, gpu_a100, git a383742, --time=24:00:00, started
   2026-09-29 14:58. The log shows 20.2M trainable weights: the head, 5.8M at
-  lr 1e-4, and the backbone, 14.4M at lr 1e-5. Epoch 1 took 17:07, so about 13 h,
-  due about 04:00 on 2026-09-30. Epoch 1 train_total 1.7805 against exp 2's
-  1.8175.
+  lr 1e-4, and the backbone, 14.4M at lr 1e-5. Epoch 1 took 17:07, so about 13 h
+  in all. Epoch 1 train_total 1.7805 against exp 2's 1.8175.
 
   Exp 7 matches exp 2 in every cfg value but the seed: the only other
   differences are keys added later, whose values give exp 2's behaviour
@@ -579,7 +583,7 @@ bbox 3900/903.
   match MapTR's recipe (focal is normalized by matched targets, not by query
   count, so the weights are not on the old scale). Everything else identical to
   exp 2: full 26,902 train crops, 45 epochs, same val stems. Not warm started,
-  the class head changed shape. ETA about 11 h on an A100, `--time=16:00:00`.
+  the class head changed shape.
 
   Why focal and not eos_coef: `exps/probe_score_quality.py` on exp 2 shows the
   score ranks by straightness, not correctness. Correct bent lines have median
@@ -702,25 +706,7 @@ bbox 3900/903.
 
   polylines/val_cluster held the 3,098 crops the cluster used for val, all
   found locally. Retired 2026-11-10: the laptop polylines/val is now the
-  cluster val. Built with:
-
-  ```
-  ssh me "ls /projects/prjs1025/data/hedge/pdok_dataset3_polylines/polylines/val" \
-    > /home/fatemeh/Downloads/hedge/cluster_val_stems.txt
-  cd /home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines
-  mkdir -p polylines/val_cluster
-  while read f; do
-    [ -f "polylines/val/$f" ] && ln -sfn "$(realpath polylines/val/$f)" "polylines/val_cluster/$f"
-  done < /home/fatemeh/Downloads/hedge/cluster_val_stems.txt
-  ```
-
-- 1_laptop (2026-07-22, in progress): laptop RTX PRO 3000. Same as cluster 1 but
-  laptop overrides: workers=4, eval_every=10, n_val_subset=1000 (leaky local
-  split, so full val is not the honest number). ~7:30/ep, ~19 h total. Hit the
-  forkserver DataLoader hang at epoch 11 (fixed, see lesson_learned.md), then
-  relaunched. At epoch 10, eval poly 0.075 below train poly 0.080: generalizing,
-  not memorizing (unlike the 8-image runs). Use it to watch the curve, not for a
-  final number.
+  cluster val.
 
 - inference at t=0.05 (2026-07-28, laptop): both exp 1 checkpoints re-inferred
   over the 3,098 val_cluster crops so the threshold could be swept downward.
@@ -823,3 +809,24 @@ exps/probe_batch_size.py, real train step per batch size.
 - RTX PRO 3000 12.3 GB: 4 = 1.55, 16 = 5.76, 32 = 11.41, 48 = OOM.
   GPU-only 0.0532 s/image (A100 0.0278, ~1.9x). Real epoch ~2.8x slower than
   A100 because the laptop is CPU-bound on data loading and matching.
+
+## Laptop copy of the cluster data (2026-11-09 to 11)
+
+- The laptop holds the cluster data and runs, in the places the code reads.
+  Rechecked against the live cluster on 2026-11-11: 129,997 of the 130,000
+  dataset files are identical, and the runs differ only by the epoch
+  snapshots, which stay on the cluster (`exps/probe_laptop_matches_cluster.py`).
+- The 3 dataset files that differ do so on purpose. The laptop keeps its real
+  photo of `pos_001893`, where the cluster copy is a solid blue failed download
+  (`exps/probe_failed_downloads.py`), and its lidar file and stem list were
+  rebuilt with the two crops the cluster file lacks.
+- The laptop now computes the split of every run, train 26,902 / val 3,098
+  (`exps/probe_split_reproduces.py`), so `polylines/val_cluster` is retired.
+- Three run files had the same name on both machines but other content. Both
+  versions are kept: the laptop one under the old name, the cluster one with
+  `_cluster` added (`results_cluster.csv` in `detect_ultralytics/3` and
+  `seg_ultralytics/1`, and `semseg_unet/5/5_23187937_cluster.out`). The laptop
+  also keeps six older run files the cluster no longer has.
+- Nothing on the cluster was deleted. The account ends on 2027-01-08. On the
+  laptop, the backup folder and the replaced files were deleted, including the
+  laptop-only crops `pos_029989` and `pos_029998`.
