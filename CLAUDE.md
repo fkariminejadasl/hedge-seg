@@ -2,11 +2,10 @@
 
 ## Start of a session
 
-- Read `docs/status.md` first: where the project stands, the results and the
-  next steps. Before proposing a run or a change, search
-  `docs/lesson_learned.md` and `docs/experiments_log.md` for what was already
-  tried, measured and ruled out, and `docs/descriptions.md` for the scripts
-  involved. Read a whole file when the task needs it.
+- Read `docs/status.md`, `docs/descriptions.md`, `docs/lesson_learned.md` and
+  `docs/experiments_log.md` before proposing or running anything. They are not
+  loaded automatically, and they hold what has already been tried, measured
+  and ruled out.
 - Answer from this repository only. The other repos in this VS Code workspace
   (bird-behavior, ...) are not context unless I say so.
 
