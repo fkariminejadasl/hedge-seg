@@ -35,7 +35,6 @@ dependencies = [
     "transformers",
     "accelerate",
     "datasets",
-    "albumentations",
     "torchmetrics", # torchmetrics[detection]
     "wandb",
     "tensorboard",
@@ -77,6 +76,15 @@ test = [
     "mdformat",
     "mdformat-gfm",
     # "pytest-cov",
+]
+
+# pip install .[hf]
+# Only scripts/train_detr_hf.py uses albumentations, so it is kept out of the
+# core dependencies. It pulls in simsimd (through albucore), which had no
+# ready-made wheel for Python 3.15, and building it failed with the older C
+# compiler on Snellius: avx512fp16 is unknown to it (2026-11-12).
+hf = [
+    "albumentations",
 ]
 
 # app: pip install fastapi uvicorn python-multipart gradio build
