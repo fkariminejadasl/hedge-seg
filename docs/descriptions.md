@@ -165,7 +165,7 @@ Data and split:
 - `exps/probe_split_reproduces.py`: does `spatial_train_val_split` still give the stored split?
 - `exps/probe_dataset_stem_mismatch.py`: does a polyline dataset name only crops this machine has, each with an image and a lidar patch? Run it on both machines before moving a dataset.
 - `exps/probe_failed_downloads.py`: which stored crops are failed WMS downloads, found by file size.
-- `exps/probe_laptop_matches_cluster.py`: does the laptop copy of the datasets and runs match the cluster, file by file? The copy steps are in `CLAUDE.md`.
+- `exps/probe_laptop_matches_cluster.py`: does the laptop copy of the datasets and runs match the cluster, file by file? The copy steps are in `docs/workflow.md`.
 
 Code and machines:
 
@@ -185,4 +185,4 @@ Older helpers, from before the DETR work:
 
 ### Cluster
 
-- `slurm/snellius_<model>.sh`: one submission script per model, copied to `~/exps/hedge/<model>/<n>.sh` and edited per run (see `CLAUDE.md`). Each prints the git hash, `hedge_seg/paths.py`, the data scripts and the whole training script before starting, so the `.out` log alone documents what ran.
+- `slurm/snellius_<model>.sh`: one submission script per model, copied to `~/exps/hedge/<model>/<n>.sh` and edited per run (see the `/cluster-run` skill in `.claude/skills/`). Each prints the git hash, `hedge_seg/paths.py`, the data scripts and the whole training script before starting, so the `.out` log alone documents what ran.

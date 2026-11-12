@@ -44,6 +44,27 @@ shows the value that runs.
 3. Confirm it started: `grep -E "Dataset:|Traceback" "$LOGDIR/train.log"`.
 4. Watch it: `tail -f "$LOGDIR/train.log"`, or tensorboard on `<save_path>/<exp>/tensorboard`.
 
+## Stopping a run
+
+- Stop it gently first: `pkill -TERM -f <script>` (or Ctrl-C if foreground) so
+  the process releases the GPU cleanly. Only hard-kill (`pkill -9`) if it does
+  not exit within about 10 s.
+- Hard-killing a process while it is using the GPU can leave the driver wedged:
+  the GPU stays at high power (P1, boosted clocks, 100% util stuck) and stays
+  hot with the fan loud, even though nothing is training. `nvidia-smi` shows no
+  compute process; `power.draw`, `clocks.sm` and `pstate` show the real state
+  (idle is about 5 to 15 W and P8).
+- To un-wedge it, open and cleanly close a small CUDA context, which makes the
+  driver re-check and drop to idle. Do not run `nvidia-smi --gpu-reset` while
+  Xorg uses the GPU; it crashes the display.
+
+  ```
+  python -c "import torch; x=torch.zeros(8,device='cuda'); torch.cuda.synchronize(); del x; torch.cuda.empty_cache()"
+  ```
+
+- After any kill, confirm no orphaned workers remain (`pgrep -af <script>`);
+  persistent DataLoader workers do not always die with the parent.
+
 ## Gotchas learned the hard way
 
 - The run is a local `nohup` process. It dies if the laptop sleeps or powers
