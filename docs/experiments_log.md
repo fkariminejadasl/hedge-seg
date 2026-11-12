@@ -1,8 +1,8 @@
 # Experiment log
 
-Raw notebook of individual runs, terse style. Held to a lower bar than
-docs/lesson_learned.md (curated lessons) and docs/descriptions.md (per-script
-overview). Merged from the older docs/descriptions.txt notes.
+Raw notebook of individual runs, terse style. The results table is in
+docs/status.md, the lessons in docs/lesson_learned.md and the scripts in
+docs/descriptions.md.
 
 Config shorthand for detr_polyline rows:
 epochs, n_polyline (num_queries), n_points (num_points), eos_coef,
@@ -57,7 +57,8 @@ forgotten:
   val 3,098 (`exps/probe_split_reproduces.py`). `pdok_dataset3_tree_polylines`
   was built with `val_stems_file` set to the val stems of cluster run 2
   (`/home/fatemeh/Downloads/hedge/cluster_val_stems.txt`), which pins the
-  same split.
+  same split. That file lists the cluster val folder, made with
+  `ssh me "ls /projects/prjs1025/data/hedge/pdok_dataset3_polylines/polylines/val" > /home/fatemeh/Downloads/hedge/cluster_val_stems.txt`.
 - The lidar patch file has to be built on the laptop, because the 16 GB of AHN4
   rasters are only there. It is keyed by stem, so one file serves any dataset
   and any split. Copy the `.npy` and its `_stems.json` to the cluster together.
@@ -301,8 +302,7 @@ bbox 3900/903.
 
 - 7, 8, 9 setup (all submitted 2026-09-29): back to the
   exp 2 recipe, hedges only, no lidar, 26,902 train crops, and one change each.
-  All three run at the same time, because the cluster is down on Thursday and
-  Friday.
+  All three ran at the same time.
 
   | exp | change from exp 2                       | question                         |
   | --- | --------------------------------------- | -------------------------------- |
@@ -342,9 +342,8 @@ bbox 3900/903.
 
   Exp 9: job 27354321, gpu_a100, git a383742, --time=24:00:00, started
   2026-09-29 14:58. The log shows 20.2M trainable weights: the head, 5.8M at
-  lr 1e-4, and the backbone, 14.4M at lr 1e-5. Epoch 1 took 17:07, so about 13 h,
-  due about 04:00 on 2026-09-30. Epoch 1 train_total 1.7805 against exp 2's
-  1.8175.
+  lr 1e-4, and the backbone, 14.4M at lr 1e-5. Epoch 1 took 17:07, so about 13 h
+  in all. Epoch 1 train_total 1.7805 against exp 2's 1.8175.
 
   Exp 7 matches exp 2 in every cfg value but the seed: the only other
   differences are keys added later, whose values give exp 2's behaviour
@@ -584,7 +583,7 @@ bbox 3900/903.
   match MapTR's recipe (focal is normalized by matched targets, not by query
   count, so the weights are not on the old scale). Everything else identical to
   exp 2: full 26,902 train crops, 45 epochs, same val stems. Not warm started,
-  the class head changed shape. ETA about 11 h on an A100, `--time=16:00:00`.
+  the class head changed shape.
 
   Why focal and not eos_coef: `exps/probe_score_quality.py` on exp 2 shows the
   score ranks by straightness, not correctness. Correct bent lines have median
@@ -707,25 +706,7 @@ bbox 3900/903.
 
   polylines/val_cluster held the 3,098 crops the cluster used for val, all
   found locally. Retired 2026-11-10: the laptop polylines/val is now the
-  cluster val. Built with:
-
-  ```
-  ssh me "ls /projects/prjs1025/data/hedge/pdok_dataset3_polylines/polylines/val" \
-    > /home/fatemeh/Downloads/hedge/cluster_val_stems.txt
-  cd /home/fatemeh/Downloads/hedge/results/pdok_dataset3_polylines
-  mkdir -p polylines/val_cluster
-  while read f; do
-    [ -f "polylines/val/$f" ] && ln -sfn "$(realpath polylines/val/$f)" "polylines/val_cluster/$f"
-  done < /home/fatemeh/Downloads/hedge/cluster_val_stems.txt
-  ```
-
-- 1_laptop (2026-07-22, in progress): laptop RTX PRO 3000. Same as cluster 1 but
-  laptop overrides: workers=4, eval_every=10, n_val_subset=1000 (leaky local
-  split, so full val is not the honest number). ~7:30/ep, ~19 h total. Hit the
-  forkserver DataLoader hang at epoch 11 (fixed, see lesson_learned.md), then
-  relaunched. At epoch 10, eval poly 0.075 below train poly 0.080: generalizing,
-  not memorizing (unlike the 8-image runs). Use it to watch the curve, not for a
-  final number.
+  cluster val.
 
 - inference at t=0.05 (2026-07-28, laptop): both exp 1 checkpoints re-inferred
   over the 3,098 val_cluster crops so the threshold could be swept downward.
