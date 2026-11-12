@@ -179,8 +179,9 @@ Then, results-driven:
   SkySense.
 
 Checkpoints: the epoch snapshots `<n>_<epoch>.pt` are not needed and are not
-kept (see Dropped). `1_150.pt` is the exp 1 result, not a spare snapshot, so
-keep it.
+kept (see Dropped). Training no longer writes them: `save_every` in
+`scripts/train_detr_unet_polyline.py` is set above `n_epochs`. `1_150.pt` is 
+the exp 1 result, not a spare snapshot, so keep it.
 
 ## Dropped, with the reason
 

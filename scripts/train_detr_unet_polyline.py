@@ -2579,9 +2579,8 @@ def main(cfg):
             torch.save(ckpt, cfg.save_path / f"{cfg.exp}_{epoch}.pt")
         scheduler.step()
 
-    # <exp>.pt is the last epoch, whatever its loss. save_every only fires on
-    # multiples, so with n_epochs=45 and save_every=10 there is no <exp>_45.pt
-    # and this is the only copy of the final weights.
+    # <exp>.pt is the last epoch, whatever its loss. With save_every above
+    # n_epochs it is the only copy of the final weights.
     torch.save(ckpt, cfg.save_path / f"{cfg.exp}.pt")
     final_loss = eval_losses["loss_total"] if eval_losses is not None else float("nan")
     print(
@@ -2591,84 +2590,40 @@ def main(cfg):
 
 
 if __name__ == "__main__":
+    # Committed values are the cluster run of exp 10. A laptop run overrides a
+    # few of them, see the laptop-run skill. The results of every run are in
+    # docs/status.md, the details in docs/experiments_log.md.
     cfg = dict(
         mode="train",  # "train", "infer" or "preview"
-        # Committed values are the cluster baseline. A throwaway laptop run
-        # overrides: exp="<n>_laptop", num_workers=4, eval_every=10,
-        # n_val_subset=1000 (eval on a subset stays cheap; a laptop run is for
-        # watching the curve, not for a final number).
-        exp="10",  # outputs go to save_path/<exp>/, like semseg_unet/<exp>/
+        exp="10",  # outputs go to save_path/<exp>/
         save_path=EXP_ROOT / "detr_unet_polyline",
-        # data (from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
-        # which writes geographically split polylines/{train,val} directories)
-        #
-        # Exps 4 to 6 added tree rows and lidar. None beat exp 2 by the 0.02 bar
-        # (hedge F1 at 10 m 0.698, 0.689, 0.703; exps/probe_polyline_pr.py).
-        # Exps 7 to 9 go back to the exp 2 recipe, hedges only and no lidar, and
-        # each changes one thing:
-        #
-        #   run          | change from exp 2                       | why
-        #   exp 7        | seed=43                                 | how much luck moves F1
-        #   exp 8        | n_epochs=90                             | F1 rose until the lr ran out
-        #   exp 9        | freeze_backbone=False, backbone_lr=1e-5 | backbone never trained here
-        #
-        # Hedge F1 at 10 m, t=0.90: exp 7 0.691, so a new seed moves F1 by about
-        # 0.01; exp 9 0.721, the first clear gain (exps/probe_polyline_pr.py).
-        #
-        # Exp 10 (here) is exp 9 with hedges and tree rows as one class, a woody
-        # line. The tree row dataset already holds both, so merge_classes=True
-        # only relabels them and no new dataset is needed. Woody line F1 at
-        # 10 m 0.722 at t=0.90, against 0.676 for exp 9; hedge recall skill
-        # unchanged (exps/probe_polyline_pr.py, exps/probe_recall_null_model.py).
-        #
-        #   run          | polyline dir                 | num_classes | lidar_path
-        #   exp 2        | pdok_dataset3_polylines      | 1           | None
-        #   exp 5        | pdok_dataset3_tree_polylines | 2           | None
-        #   exp 6        | pdok_dataset3_polylines      | 1           | set
-        #   exp 4        | pdok_dataset3_tree_polylines | 2           | set
-        #   exp 10       | pdok_dataset3_tree_polylines | 1, merged   | None
+        # data, from scripts/data/convert_pdok_polylines_to_detr_polyline.py,
+        # split by location into polylines/{train,val}. The hedges-only dataset
+        # is pdok_dataset3_polylines; the tree row one holds hedges (class 0)
+        # and tree rows (class 1).
         image_dir=DATA_ROOT / "pdok_dataset3/images",
         train_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/train",
         val_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
         pad_to=1024,  # images zero-padded 1000 -> 1024 (divisible by 32)
-        # Lidar patches from scripts/data/build_lidar_patches.py, keyed by stem,
-        # so one file serves any split. None switches the branch off and the
-        # model is then exactly the exp 2 model. A crop with no patch is an
-        # error, so a partial .npy only works with a matching polyline
-        # directory (see exps/probe_lidar_crop_alignment.py).
-        # The cluster copy of the file has no patch for pos_030002 and
-        # pos_030003 of the hedges train split; the laptop copy, rebuilt on
-        # 2026-11-09, has them. For exp 6 those two crops were moved to
-        # polylines/excluded_no_lidar, and moved back for exps 7 to 9.
-        # Exp 6: DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy".
+        # Lidar patches from scripts/data/build_lidar_patches.py, keyed by stem.
+        # None builds no lidar branch. A crop with no patch is an error.
+        # With lidar (exp 6): DATA_ROOT / "pdok_dataset3_polylines/lidar_patches.npy"
         lidar_path=None,
         lidar_stride=16,  # must equal the feature stride, so 1024 -> 64x64
         augment=True,  # flip/rot90 of image + polylines (train split only)
-        # exp 2 is the data-scaling A/B against exp 1: full train split instead
-        # of a 5,000 subset, everything else identical, so any change in the
-        # buffered-length score is caused by data and nothing else. Not warm
-        # started from exp 1: those 5,000 crops are a subset of these 26,902 and
-        # exp 1 had begun memorising them by epoch 65, so its weights would bias
-        # the result.
-        # None = full train split: 26,902 for the hedges dataset and 26,900 for
-        # the tree row one, which lacks pos_029989 and pos_029998.
-        n_train_subset=None,
-        n_val_subset=None,  # None = full val split; subset only speeds up eval
+        n_train_subset=None,  # None = the full train split
+        n_val_subset=None,  # None = the full val split; a subset only speeds up eval
         # backbone
         backbone_ckpt=CLUSTER_EXP_ROOT / "semseg_unet/4/best_4.pt",
         feature_stage="up3",  # "up3": stride 16, 64x64 tokens; "enc4": stride 32, 32x32
-        freeze_backbone=False,  # exp 9: the backbone trains too
-        # Learning rate of the backbone when it trains (freeze_backbone=False).
-        # None means max_lr. Unused while the backbone is frozen.
-        backbone_lr=1e-5,  # exp 9: 10x below max_lr, as in DETR
+        freeze_backbone=False,  # False trains the backbone too (exps 9 and 10)
+        backbone_lr=1e-5,  # backbone learning rate when it trains; None = max_lr
         num_points=20,
-        num_polylines=60,  # polyline instance queries (max ~50 GT per image)
-        # 2 for the tree-row dataset (0 hedge, 1 tree row), 1 for the
-        # hedges-only one, and 1 for the tree-row dataset with merge_classes.
-        # Tree rows add 1.3 lines per crop on top of 3.6 hedges, so 60 queries
-        # are still ample: the most crowded crop has 49 lines either way.
+        num_polylines=60,  # line queries; the busiest crop has 49 lines
+        # 1 for hedges only, 2 for the tree row dataset (0 hedge, 1 tree row),
+        # and 1 again for the tree row dataset with merge_classes=True.
         num_classes=1,
-        merge_classes=True,  # exp 10: every label becomes 0, one woody line class
+        merge_classes=True,  # every label becomes 0: one woody line class
         # base model
         d_model=256,
         nhead=8,
@@ -2679,67 +2634,45 @@ if __name__ == "__main__":
         aux_loss=True,
         query_embed_mode="detr",  # "detr" or "legacy"
         with_refine=True,  # per-layer reference-point refinement (MapTR-style)
-        # cls_loss picks the class head. "ce" is softmax over
-        # {hedge, no-object} with an eos_coef-weighted background column, used
-        # by exps 1 and 2. "focal" is one independent sigmoid per class with
-        # focal loss and no background column, as in Deformable-DETR and
-        # MapTRv2, used by exp 3.
-        #
-        # Exp 3 lost: best F1 at 10 m 0.664 against exp 2's 0.699. Perception
-        # was unchanged (recall 0.842 at t=0.05 against 0.840) but the head
-        # became far more reluctant, drawing 1.6 lines per image at its optimum
-        # against exp 2's 3.2, with 2.14 real lines. The ranking it was meant to
-        # fix barely moved: AUC for correct against wrong 0.742 against 0.767,
-        # and 0.648 against 0.618 inside the bent group. All numbers from
-        # exps/probe_polyline_pr.py and exps/probe_score_quality.py; run both to
-        # reproduce, they print exp 2 and exp 3 side by side.
-        #
-        # So "ce" is the setting to use. Left switchable because the comparison
-        # is worth being able to redo, not because focal is recommended.
-        cls_loss="ce",  # "ce" (exps 1, 2, best) or "focal" (exp 3, worse)
+        # Class head. "ce": softmax over {class, no-object}, with an
+        # eos_coef-weighted no-object column; the setting to use. "focal": one
+        # sigmoid per class with focal loss, as in MapTRv2; it lost in exp 3
+        # and is kept only to be able to redo that comparison.
+        cls_loss="ce",
         eos_coef=0.05,  # unused when cls_loss="focal" (no no-object column)
         focal_alpha=0.25,
         focal_gamma=2.0,
         # criterion and matcher
-        # class_cost and loss_ce belong to the head and must move with it. 1.0
-        # is the exp 1 and 2 setting for "ce". For "focal" use 2.0 for both,
-        # matching MapTR's recipe (cls 2.0, pts 5.0), because focal is
-        # normalized by the number of matched targets rather than by the query
-        # count and so is not on the same scale.
+        # class_cost and loss_ce move with the head: 1.0 for "ce", 2.0 for
+        # "focal" (MapTR's recipe), because focal loss is divided by the number
+        # of matched lines rather than by the number of queries.
         class_cost=1.0,
         loss_ce=1.0,
         poly_cost=5.0,
         bbox_cost=0.0,
         loss_poly=5.0,
+        # Box, length and direction losses ignore point order and hold a zigzag
+        # in place, so they stay at 0 (docs/lesson_learned.md).
         loss_bbox=0.0,
         loss_bbox_giou=0.0,
         loss_smooth=0.0,
         loss_card=0.0,
         loss_len=0.0,
-        loss_dir=0.0,  # 0.005
+        loss_dir=0.0,  # MapTR uses 0.005
         aux_weight=0.5,
-        # optimizer / training
-        # batch_size from exps/probe_batch_size.py on an A100-40GB: 16 -> 5.8 GB,
-        # 64 -> 22.7 GB, and throughput is flat past 16 (0.028 vs 0.026 s/image),
-        # so a bigger batch only costs optimizer steps per epoch. 16 also matches
-        # the DETR batch size that max_lr=1e-4 is tuned for.
-        # num_workers: train and eval loaders each keep their own persistent
-        # workers, so 8 means 16 processes for the 18 CPUs of one A100.
-        # n_epochs: exp 1 ran 5,000 crops for 150 epochs in 7 h, so about
-        # 0.031 s per train image, so 26,902 crops is about 14 min per epoch and
-        # 45 epochs is about 10.5 h. 45 epochs is also 1.2M image presentations
-        # against exp 1's 750k, comfortably past the point where exp 1 turned
-        # over by eval loss.
+        # optimizer / training. Time per image stops improving past batch 16 on
+        # an A100 (exps/probe_batch_size.py), and 16 matches the DETR batch that
+        # max_lr=1e-4 is tuned for.
         n_epochs=45,  # exp 8 ran 90
         batch_size=16,  # images are 1024x1024; up3 gives 4096 tokens
         num_workers=8,  # 8 train + 8 eval = 16 procs for the 18 CPUs of an A100
         max_lr=1e-4,
         weight_decay=1e-2,
         disable_tqdm=True,
-        # save_every=10, not 50: exps/probe_polyline_pr.py ranks checkpoints, and
-        # it disagrees with the eval loss (exp 1's "overfit" epoch 150 beat its
-        # best_1.pt). Keep enough checkpoints to score.
-        save_every=10,
+        # Epoch snapshots <exp>_<epoch>.pt are written every save_every epochs.
+        # Set above n_epochs, so none are: best_<exp>.pt and <exp>.pt are always
+        # saved, and scoring by epoch was dropped (docs/status.md).
+        save_every=1000,
         eval_every=5,  # evaluate every k epochs (best checkpoint only on eval epochs)
         seed=42,  # exp 7 used 43
         # checkpoints
@@ -2747,23 +2680,19 @@ if __name__ == "__main__":
         # preview
         preview_out_dir=DATA_ROOT / "pdok_dataset3_polylines/preview",
         preview_n=10,
-        # inference
-        # CLUSTER_EXP_ROOT, not EXP_ROOT: cluster runs write here, and locally
-        # it points at the scp'd mirror, so this path needs no editing when
-        # running inference on a cluster checkpoint from either machine.
-        # The head width must match the checkpoint: num_classes=2 for exps 4
-        # and 5, cls_loss="focal" for exp 3. The tree row val folder links both
-        # label classes into gt/, so a one-class model can be scored as a
-        # woody line model there. The hedges folder is
+        # inference. CLUSTER_EXP_ROOT, not EXP_ROOT, so the same path works on
+        # both machines. The head must match the checkpoint: num_classes=2 for
+        # exps 4 and 5, cls_loss="focal" for exp 3. The tree row val folder
+        # links both label classes into gt/, so a one-class model is scored
+        # there as a woody line model; the hedges folder is
         # pdok_dataset3_polylines/polylines/val.
         infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/10/10.pt",
         # infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/10/best_10.pt",
         # infer_ckpt=CLUSTER_EXP_ROOT / "detr_unet_polyline/9/9.pt",
         infer_polyline_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/polylines/val",
         infer_out_dir=DATA_ROOT / "pdok_dataset3_tree_polylines/inference",
-        # 0.05, not 0.95: a focal sigmoid score is not on the same scale as the
-        # old softmax one, so 0.95 would be an arbitrary cut. A run saved at
-        # 0.05 keeps everything and can be swept in both directions afterwards.
+        # 0.05 keeps almost every line, so the cut-off can be swept both ways
+        # afterwards; a run saved at a high cut-off can only be swept upward.
         infer_score_thresh=0.05,
         infer_topk=60,
     )
