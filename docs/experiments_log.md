@@ -823,3 +823,24 @@ exps/probe_batch_size.py, real train step per batch size.
 - RTX PRO 3000 12.3 GB: 4 = 1.55, 16 = 5.76, 32 = 11.41, 48 = OOM.
   GPU-only 0.0532 s/image (A100 0.0278, ~1.9x). Real epoch ~2.8x slower than
   A100 because the laptop is CPU-bound on data loading and matching.
+
+## Laptop copy of the cluster data (2026-11-09 to 11)
+
+- The laptop holds the cluster data and runs, in the places the code reads.
+  Rechecked against the live cluster on 2026-11-11: 129,997 of the 130,000
+  dataset files are identical, and the runs differ only by the epoch
+  snapshots, which stay on the cluster (`exps/probe_laptop_matches_cluster.py`).
+- The 3 dataset files that differ do so on purpose. The laptop keeps its real
+  photo of `pos_001893`, where the cluster copy is a solid blue failed download
+  (`exps/probe_failed_downloads.py`), and its lidar file and stem list were
+  rebuilt with the two crops the cluster file lacks.
+- The laptop now computes the split of every run, train 26,902 / val 3,098
+  (`exps/probe_split_reproduces.py`), so `polylines/val_cluster` is retired.
+- Three run files had the same name on both machines but other content. Both
+  versions are kept: the laptop one under the old name, the cluster one with
+  `_cluster` added (`results_cluster.csv` in `detect_ultralytics/3` and
+  `seg_ultralytics/1`, and `semseg_unet/5/5_23187937_cluster.out`). The laptop
+  also keeps six older run files the cluster no longer has.
+- Nothing on the cluster was deleted. The account ends on 2027-01-08. On the
+  laptop, the backup folder and the replaced files were deleted, including the
+  laptop-only crops `pos_029989` and `pos_029998`.

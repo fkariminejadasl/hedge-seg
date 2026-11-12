@@ -62,11 +62,6 @@ The split guarantees no overlap, not a distance. Because whole groups go to trai
 
   Exp 4 adds both tree rows (class 1) and the lidar branch in one run, to find out quickly whether the pair pays. The dataset and the branch each switch on one config line, so the three ablations (trees only, lidar only, neither) need no code edit.
 
-  Not tried yet:
-
-  - LiDAR as the only input, with no aerial image
-  - Different backbone/embeddings: DINOv3 sat, Google Satellite embeddings, SkySense
-
 ### Key Findings
 
 - **Polyline regression from embeddings** learns distribution well but struggles with precise coordinate prediction.

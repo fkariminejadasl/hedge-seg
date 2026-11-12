@@ -2,7 +2,7 @@
 
 ## Start of a session
 
-- Read `docs/descriptions.md`, `docs/lesson_learned.md` and
+- Read `docs/status.md`, `docs/descriptions.md`, `docs/lesson_learned.md` and
   `docs/experiments_log.md` before proposing or running anything. They are
   not loaded automatically, and they hold what has already been tried,
   measured and ruled out.
@@ -107,10 +107,13 @@ escape.
 
 ## Documentation layout
 
+- `docs/status.md`: where the project stands. The best models, how the
+  numbers are measured, the results table, Done, TODO and Dropped. The page
+  to open first.
 - `docs/descriptions.md`: overview of every script and dataset. Keep it
   polished and current.
 - `docs/lesson_learned.md`: curated lessons that generalize, with the reason
-  behind them. Has a Done and a TODO section for the phase plan.
+  behind them.
 - `docs/experiments_log.md`: raw notebook of individual runs, in a terse style.
   Held to a lower bar than the other two. It opens with a **"How each dataset
   was made"** table: which script built which directory, from what input, and
@@ -118,6 +121,9 @@ escape.
   row whenever a dataset is created, and edit the row whenever the script that
   builds it changes. This is the one part of that file held to the same bar as
   the other docs, because a deleted dataset can only be rebuilt from it.
+- `docs/literature.md`: papers, datasets and data sources read for the project.
+- `docs/qgis.md`: how to look at the data in QGIS, and how the Top10NL hedge
+  layer was exported.
 - `presentation/presentation.md`: the talk. Highlights only, short and
   itemised, written for ecologists rather than for engineers. Where
   `lesson_learned.md` gives the reasoning, this gives the conclusion in one
@@ -131,6 +137,11 @@ escape.
 - `presentation/README.md`: which figures the talk uses, what each set shows,
   and the exact steps to remake them. No findings here, only mechanics.
 
+Each result is written in full in one place only: the details of a run in
+`experiments_log.md`, the results table in `status.md`. Other docs name the
+result and point there, so two copies cannot drift apart. The talk is the
+exception: it repeats numbers, each with its measure and its source.
+
 ## Every number needs code in the repository
 
 This applies to every document listed above, not only the talk.
@@ -140,10 +151,10 @@ This applies to every document listed above, not only the talk.
   docstring so nobody has to run it to learn the answer. Name a one-off probe
   `probe_<what it asks>.py`; a standing tool keeps its own name, like
   `exps/dataset_stats.py`.
-- **Name that script wherever the number appears.** In `lesson_learned.md` and
-  `descriptions.md` write the path in the sentence; in `presentation.md` put it
-  in italic parentheses at the end of the line, for example
-  `*(exp 2, exps/probe_polyline_pr.py)*`.
+- **Name that script wherever the number appears.** In `lesson_learned.md`,
+  `status.md` and `descriptions.md` write the path in the sentence; in
+  `presentation.md` put it in italic parentheses at the end of the line, for
+  example `*(exp 2, exps/probe_polyline_pr.py)*`.
 - **This includes the quick check done in a scratch file.** If its answer ends
   up in a document, the file moves to `exps/` and gets a docstring. A number
   whose code was thrown away cannot be rechecked when the data changes, and
@@ -165,8 +176,8 @@ After a change, update the docs it affects, in the same commit:
 - New or changed behavior of a script: its top docstring and `descriptions.md`.
 - A bug or surprise worth remembering, or a design decision: `lesson_learned.md`,
   with the reason.
-- A finished or planned run: `experiments_log.md`, and move the phase plan's
-  Done/TODO in `lesson_learned.md` if it changed.
+- A finished or planned run: `experiments_log.md`, and in `status.md` the
+  results table, Done and TODO.
 - A result that changes the headline numbers, the figures, or the next steps:
   `presentation/presentation.md` too. It goes stale silently, because nothing
   breaks when it is wrong.
