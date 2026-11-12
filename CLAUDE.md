@@ -12,25 +12,21 @@
 
 ## How to write
 
-- Use simple language. Short sentences. No em dashes.
-- This is the most important rule, in chat and in documentation. Explain things
-  so they are easy to understand. Do not use a hard word where an easy one
-  works. Do not pack several ideas into one sentence. If an explanation needs a
-  term like "block buffering" or "start method", say what it means in plain
-  words the first time it appears.
-- Keep it short. Docs, commit messages and chat all tend to grow. Before
-  finishing any text, cut it. Say the finding, the reason, and the number, then
-  stop. Drop background the reader already has, restatements of the same point,
+- Use simple language and short sentences. No em dashes. This is the most
+  important rule, in chat and in documentation.
+- Do not use a hard word where an easy one works, and do not pack several ideas
+  into one sentence. Explain a term like "block buffering" in plain words the
+  first time it appears.
+- Keep it short. Before finishing any text, cut it: say the finding, the reason
+  and the number, then stop. Drop background the reader already has, repeats,
   and sentences that only lead into the next one.
-- Editing a doc means rewriting the section, not appending to it. If a new
-  paragraph overlaps an old one, merge them. A lesson is one short section, not
-  a history of what we thought over time.
-- A commit message is a few lines plus the numbers that matter. Not a report.
-- Do not add formatting flourishes to documentation. Plain text, plain lists.
-- Give full paths so they can be clicked, for example
-  `scripts/train_detr_unet_polyline.py`, not "the training script". Name the
-  exact function or class too.
-- When asked to diagnose, diagnose first and do not change code until asked.
+- Editing a doc means rewriting the section, not appending to it. Merge
+  overlapping paragraphs. A lesson is one short section, not a history of what
+  we thought over time.
+- No formatting flourishes in documentation. Plain text, plain lists.
+- Give full paths so they can be clicked, like
+  `scripts/train_detr_unet_polyline.py`, and name the exact function or class.
+- When asked to diagnose, diagnose first and change no code until asked.
 - Say which files were inspected before answering a question about the repo.
 
 ## Reporting a result
@@ -47,61 +43,46 @@
   that two checkpoints hold the same weights, or that an old run reproduces its
   logged numbers. Say which tests ran, and if none ran, say so and why.
 
-## Committing
+## Commits
 
-- Never run `git commit` on your own. Make the change, run the formatter, say
-  what changed and why, and propose the commit message. The user reviews it
-  first and then says when to commit.
-- **Always end with a commit message, unprompted.** Every time the working tree
-  is left dirty, finish the reply with a ready-to-paste message covering
-  everything uncommitted, not only the last edit. Do not wait to be asked. If
-  the work splits into unrelated concerns, propose one message per commit and
-  say which files belong to each.
-- Never run `git push` unless the user says to push.
-- This holds even when the change was asked for and looks finished. Being asked
-  to make a change is not permission to commit it.
+- Never run `git commit` or `git push` on your own, even when the change was
+  asked for and looks finished. Make the change, run the checks below, say what
+  changed and why, and propose the message. The user commits and pushes.
+- **Always end with a commit message, unprompted,** whenever the working tree is
+  left dirty. Cover everything uncommitted, not only the last edit. If the work
+  splits into unrelated concerns, propose one commit per concern and say which
+  files belong to each.
+- Give one copyable block: `git add` with the files named,
+  `git commit -m "..."`, and `git push origin <branch>`. Build the `git add`
+  line from `git status --short` run just before, and leave out paths already
+  staged: the old path of a staged rename makes `git add` fail. Never
+  `git add -A` or `git add .`, which would take untracked files like
+  `.vscode/`. On the first push of a new branch, use `git push -u`.
+- The message is a few lines plus the numbers that matter, and says why, not
+  only what (for example: 0.354 GB per image, so 40 GB fits about 100). Wrap at
+  about 72 characters. No Claude Code attribution, no Co-Authored-By line, no
+  tool names.
+- **It must paste straight into `git commit -m "<message>"`,** so it may not
+  contain a double quote (closes the quote early), a single quote (breaks
+  single quoting), a backtick (runs a command) or a dollar sign (expands a
+  variable). So write cls_loss=focal, not a quoted value. Blank lines between
+  paragraphs are fine.
 
-## Before every commit
+Before every commit:
 
 ```
 for i in hedge_seg exps scripts tests; do echo $i; black $i -l 88; isort $i --profile black; pyflakes $i; done
 mdformat docs/
 ```
 
-Fix what pyflakes reports in the code being committed. Leave unrelated
-pre-existing warnings alone and mention them instead.
-
-`mdformat` (with `mdformat-gfm`, in the `test` extra of `pyproject.toml`)
-formats the markdown and aligns the pipe tables. Run it on `docs/` only, never
-on `presentation/`: those are Marp decks where a reflow can silently push
-content off a slide. It does not rewrap paragraphs, so keep edited prose lines
-near 80 characters yourself. If it adds a backslash escape, the markdown was
-ambiguous; put that filename or expression in backticks instead.
-
-## Commit messages
-
-- No Claude Code attribution, no Co-Authored-By line, no tool names.
-- Explain why, not only what. Numbers are useful, for example
-  0.354 GB per image, so 40 GB fits about 100.
-- Wrap at about 72 characters.
-- **The message must paste straight into `git commit -m "<message>"`.** So it
-  may not contain any of these four characters:
-
-  | character | why it breaks |
-  |---|---|
-  | `"` | closes the quote early |
-  | `'` | breaks the shell if the user quotes with it instead |
-  | `` ` `` | runs as a command inside double quotes |
-  | `$` | expands as a variable inside double quotes |
-
-  Write `cls_loss=focal`, not `` `cls_loss="focal"` ``. Say "the 0.05
-  threshold" as: the 0.05 threshold. Blank lines between paragraphs are fine
-  inside the quotes, so a multi-paragraph message still works with one `-m`.
-- Give one copyable block with three commands in order: `git add` with the
-  files of that commit, `git commit -m "..."`, and `git push origin <branch>`
-  for the current branch. Name the files; never `git add -A` or `git add .`,
-  which would also take untracked files like `.vscode/`. Writing the push
-  command for the user to run is not running it.
+- Fix what pyflakes reports in the code being committed. Mention unrelated old
+  warnings instead of fixing them.
+- `mdformat` (with `mdformat-gfm`, in the `test` extra of `pyproject.toml`)
+  formats the markdown and aligns the pipe tables. Run it on `docs/` only,
+  never on `presentation/`: those are Marp decks where a reflow can silently
+  push content off a slide. It does not rewrap paragraphs, so keep edited prose
+  lines near 80 characters yourself. If it adds a backslash escape, the
+  markdown was ambiguous; put that name or expression in backticks instead.
 
 ## Documentation layout
 
@@ -127,11 +108,18 @@ ambiguous; put that filename or expression in backticks instead.
   `lesson_learned.md` gives the reasoning, this gives the conclusion in one
   line. Keep a technical name in italic parentheses after the plain-language
   version, so the audience follows and a specialist can still place it.
+  Keep the slide list and order: each slide is one step of the story told at
+  the meeting, so do not merge slides to cut repetition.
 - `presentation/update.md`: the meeting updates, one slide per meeting, newest
   first. The user writes it. Do not add to it, reorder it or fill it in; only
   correct the wording.
 - `presentation/README.md`: which figures the talk uses and the exact steps to
   remake them. No findings here, only mechanics.
+
+Write the docs for the cluster. Where the laptop copy differs from the
+cluster, for example in a file count or a split, give only the cluster number:
+the runs happen there, so a laptop number only confuses. A probe's docstring
+may still add a line on how to run it on the laptop.
 
 Each result is written in full in one place only: the details of a run in
 `experiments_log.md`, the results table in `status.md`. Other docs name the
@@ -151,6 +139,9 @@ This applies to every document listed above, not only the talk.
   `status.md` and `descriptions.md` write the path in the sentence; in
   `presentation.md` put it in italic parentheses at the end of the line, for
   example `*(exp 2, exps/probe_polyline_pr.py)*`.
+- **Every number says what it is:** the measure (F1, precision, recall,
+  balanced accuracy, ...), the run, and the tolerance and cut-off when they
+  differ from the defaults in `docs/status.md`. A bare 0.72 is not a result.
 - **This includes the quick check done in a scratch file.** If its answer ends
   up in a document, the file moves to `exps/` and gets a docstring. A number
   whose code was thrown away cannot be rechecked when the data changes.
@@ -160,9 +151,12 @@ This applies to every document listed above, not only the talk.
 One rule for both Marp decks, `presentation.md` and `update.md`:
 
 - **A slide must fit one page.** Marp does not warn, it silently cuts off the
-  bottom. Budget for the default 16:9 theme: about 13 lines of body text, or
-  about 5 lines plus one `h:420` image, and no body line over about 95
-  characters. `update.md` sets 22px type and carries no figures, so more fits.
+  bottom. Budget for the default 16:9 theme: about 12 lines of body text, or
+  about 5 lines plus one `h:420` image. Count lines as they show on the slide:
+  a line over about 72 visible characters wraps and counts twice (markup like
+  `**` and backticks does not show), and a caption under an image must stay on
+  one line. Measured on the PDF export of 2026-11-12. `update.md` sets 22px
+  type and carries no figures, so more fits.
   Marp runs as a VS Code extension here, so you cannot render to check. Keep to
   the budget, do not change a tested image height blind, and say when a slide
   should be exported and looked at.
