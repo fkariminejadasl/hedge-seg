@@ -114,17 +114,19 @@ minute for 30,000 crops.
 
 |                       | hedges only | with tree rows   |
 | --------------------- | ----------- | ---------------- |
-| lines                 | 103,432     | 103,432 + 44,435 |
+| lines                 | 103,411     | 103,411 + 44,435 |
 | lines per crop, mean  | 3.45        | 4.93             |
 | max lines per crop    | 49          | 49               |
 | crops with a tree row | 0           | 18,061 (60.2%)   |
 
-All from `exps/probe_tree_dataset_stats.py`.
+All from `exps/probe_tree_dataset_stats.py`, over the 29,998 crops the two
+datasets share. The tree row dataset lacks `pos_030002` and `pos_030003`,
+because the copy of the data it was built from did not have them.
 
 - The query budget does not change. The busiest crop already had 49 lines, so
   60 queries still suffice.
 - The hedge labels are untouched: the class 0 arrays are bit-identical to
-  `pdok_dataset3_polylines` on all 30,000 crops.
+  `pdok_dataset3_polylines` on all 29,998 shared crops.
 - The two classes blur at 10 m. 12.2% of tree row length lies within 10 m of
   the hedge layer, and 11.0% of hedge length within 10 m of the tree row layer,
   against 2.4% and 1.7% at 5 m (`exps/probe_tree_class_labels.py`). So the 5 m
