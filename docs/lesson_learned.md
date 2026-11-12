@@ -417,87 +417,71 @@ and exp 3 side by side.
 
 ### Check an overlay with a shift test, not with your eyes
 
-Before lidar can be an input, the crop-to-raster maths has to be right, and a
-one-cell error is 10 m. Looking at the overlay is not enough: the first crops
-tried were the ones with the most labelled hedge, which are so cluttered that
-something bright sits near every line whether the maths is right or wrong.
+Before lidar can be an input, the sums that place a crop on the lidar raster
+have to be right, and an error of one cell is 10 m. Looking at an overlay is
+not enough. The first crops tried had the most labelled hedge, and they were so
+busy that something bright sat near every line, right or wrong.
 
-Two changes made it decisive.
+Two changes made the check decisive:
 
-- **Pick uncluttered crops to look at.** One long hedge across an empty field
-  shows a shift immediately. `pick_ids(..., max_lines=2)`.
-- **Measure it.** Sample the metric in the cells the hedges pass through, minus
-  the cells they do not, then repeat at whole-cell offsets. On `perc_95` over
-  40 crops the peak is at offset (0, 0) at 1.35 m, with every neighbour lower
-  (0.89 to 1.00). So the maths is right, and this now regression-tests itself.
+- Look at quiet crops. One long hedge across an empty field shows a shift at
+  once (`pick_ids(..., max_lines=2)`).
+- Measure it. Take the mean of a metric in the cells the hedges pass through,
+  minus the mean in the other cells, and repeat with the patch shifted by
+  whole cells. On `perc_95` over 40 crops the peak is at no shift, 1.35 m, and
+  every shifted position is lower, 0.89 to 1.00. So the placement is right.
 
-`exps/probe_lidar_crop_alignment.py`. It also writes `crop_footprints.geojson`
-so the same crops can be checked in QGIS against the uncropped layers.
-
-Two things this turned up in passing. Drawing the patch with nearest-neighbour
-interpolation matters, because smoothing hides exactly the half-cell shift being
-looked for. And in some crops the bright band follows the woody line visible in
-the photo while the label sits a little to one side of it, which is the 2014
-digitising accuracy showing up directly.
+Both are in `exps/probe_lidar_crop_alignment.py`, which also writes
+`crop_footprints.geojson` to check the same crops in QGIS. Draw the patch
+without smoothing (nearest-neighbour), because smoothing hides exactly the
+half-cell shift being looked for.
 
 ### Why the lidar is not upsampled to the image size
 
-The obvious way to add lidar is to blow the 25x25 patch up to 1000x1000, then
-flip, rotate and pad it exactly like the image. Same code, nothing new to think
-about. It was not done that way, for one reason:
+The obvious way is to blow the 25x25 patch up to the image size, then flip,
+rotate and pad it like the image. It was not done, because of the size:
 
 | how the lidar is carried                 | size per crop | per batch of 16 |
 | ---------------------------------------- | ------------- | --------------- |
 | upsampled to the padded image, 1024x1024 | 28.7 MB       | **470 MB**      |
 | on the token grid, 64x64                 | 112 KB        | 1.8 MB          |
 
-470 MB per batch would go through the DataLoader, which sends every batch
-between worker processes, and it buys nothing. Upsampling adds no information:
-one lidar cell is 40x40 image pixels, so each value would simply be stored
-1,600 times. The model then reduces it to the token grid anyway, so the whole
-round trip is up and straight back down.
+The DataLoader sends every batch between worker processes, and the larger
+version buys nothing. One lidar cell is 40x40 image pixels, so each value
+would be stored 1,600 times, and the model shrinks it back to the 64x64 token
+grid anyway.
 
-The cost of not doing it is one function, `_lidar_on_padded_grid`. It samples
-each output cell by where its centre falls rather than resizing, which is what
-keeps the mapping exact: 1024/16 is 64 output cells over a 25 cell patch that
-covers only 1000 of the 1024 pixels, so no whole-number scale factor exists.
-
-One simpler option does exist and was rejected: pad the patch to 26x26, since
-26 cells of 40 pixels covers 1040 and the canvas is 1024. That is exact too and
-needs no sampling, but it leaves the model to work out that the last cell is
-mostly padding. Doing it in the dataset keeps that knowledge in one place.
+The price is one function, `_lidar_on_padded_grid`. It fills each token cell
+from where the cell centre falls on the patch, rather than resizing. That
+keeps the mapping exact: 64 cells cover 1024 pixels, while the 25 cell patch
+covers only the 1000 pixels of the crop, so no whole-number scale exists.
 
 ### Test an augmentation by making two code paths agree
 
-The second half of the lidar check was the dangerous one. The dataset flips and
-rotates the image and the polylines before padding, so a lidar array added
-there has to go through the same steps, and if it misses one **nothing raises**:
-the shapes stay right and only the content is wrong. It would have shown up as
-a slightly worse run, months later, with no obvious cause.
+The dataset flips and rotates the image and the polylines before padding, so
+the lidar patch has to go through the same steps. If it misses one, nothing
+raises: the shapes stay right and only the content is wrong. It would have
+shown up months later as a slightly worse run with no clear cause.
 
-What makes it testable is that the polylines and the lidar are augmented by
-separate lines of code. So instead of checking either against the truth, check
-them against each other: the presence channel says where the laser found
-vegetation, and it should be high in the cells the hedges pass through and low
-elsewhere, whether or not augmentation is on.
+The polylines and the lidar are augmented by separate lines of code, so check
+them against each other rather than against the truth. The presence channel
+says where the laser found vegetation. It should be high in the cells the
+hedges pass through and low elsewhere, with or without augmentation:
 
 |             | under hedges | elsewhere | gap        |
 | ----------- | ------------ | --------- | ---------- |
 | augment off | 0.924        | 0.467     | +0.457     |
 | augment on  | 0.921        | 0.467     | **+0.453** |
 
-The gap survives, so both paths agree.
-
-Then break it on purpose. Take out the lidar rotation and the gap falls to
-**+0.187**. That is the important step. Without it, the test might be passing
-because it cannot fail.
-
-`augmentation_test` in `exps/probe_lidar_crop_alignment.py`.
+The gap survives, so both paths agree. Then break it on purpose: without the
+lidar rotation the gap falls to +0.187. That step matters most, because
+without it the test might pass only because it cannot fail
+(`augmentation_test` in `exps/probe_lidar_crop_alignment.py`).
 
 ### Nodata in the AHN4 metrics means no vegetation, not missing data
 
 24 of the 25 metrics are computed from vegetation returns only, so a cell with
-nothing woody in it has no value at all.
+nothing woody in it has no value at all:
 
 |                              | nodata share |
 | ---------------------------- | ------------ |
@@ -505,128 +489,102 @@ nothing woody in it has no value at all.
 | cells a hedge passes through | **6.7%**     |
 | every other cell             | 49.6%        |
 
-So an empty cell is telling you something, not hiding something. Two things
-follow. Filling the metrics with 0 is right rather than a fudge, because no
-vegetation is zero density and ground-level height. And the presence channel is
-not bookkeeping. It is probably the most useful of the seven channels, since
-"is anything growing here" is most of what a 10 m grid can say about a 3 m
-hedge.
+So an empty cell says something. Filling the metrics with 0 is right, because
+no vegetation means zero density and ground-level height. And the presence
+channel, which marks where any value exists, is probably the most useful of
+the seven channels: "is anything growing here" is most of what a 10 m grid can
+say about a 3 m hedge (`exps/probe_lidar_nodata_vs_hedge.py`).
 
-`exps/probe_lidar_nodata_vs_hedge.py`.
+### Lidar separates hedges from tree rows by structure, not height
 
-### Read the label definition before choosing a feature
-
-Top10NL does not separate hedges from tree rows by height. It separates them by
-whether the vegetation blocks the view at about eye level
+Top10NL does not separate hedges from tree rows by height. It separates them
+by whether the vegetation blocks the view at about eye level
 (https://kadaster.github.io/imbrt/):
 
 - bomenrij: at least 3 trees in a row, spaced so that "tot manshoogte geen
-  zichtbelemmering" (up to man-height it does **not** block the view).
-- heg, haag: a row of trees, with or without shrubs, spaced or under-grown so
-  that "tot minstens manshoogte het zicht belemmerd wordt" (up to at least
-  man-height it **does** block the view).
+  zichtbelemmering" (up to man-height it does not block the view)
+- heg, haag: a row of trees, with or without shrubs, spaced or with
+  undergrowth so that "tot minstens manshoogte het zicht belemmerd wordt" (up
+  to at least man-height it does block the view)
 
-So a tall row of trees is a heg when it has understory and a bomenrij when it
-does not. Height was never the criterion, and a first pass here that tested
-`perc_95` height alone concluded "lidar cannot separate them" at balanced
-accuracy 0.638. That conclusion was wrong, and it was wrong because the metric
-was chosen before the definition was read.
+So a tall row of trees is a heg when it has undergrowth. A first pass tested
+height alone and concluded that lidar cannot separate the two. That was wrong,
+because the feature was chosen before the definition was read.
 
-### LiDAR structure does separate hedges from tree rows
+`exps/probe_lidar_hedge_vs_tree.py` uses all 25 AHN4 metrics, 2,000 features
+per layer, scored on held-out 5 km blocks so nearby features cannot sit on
+both sides. Balanced accuracy is the mean hit rate of the two classes, so 0.5
+is a coin flip:
 
-All 25 AHN4 metrics, 2,000 features per layer, split by 5 km geographic blocks
-so nearby features cannot straddle train and test:
+| features used                  | balanced accuracy | AUC   |
+| ------------------------------ | ----------------- | ----- |
+| height p95 only, 1 metric      | 0.601             | 0.649 |
+| all 7 height metrics           | 0.709             | 0.771 |
+| the other 18, no height at all | 0.765             | 0.844 |
+| all 25, gradient boosting      | 0.778             | 0.852 |
 
-| features used                      | balanced accuracy | AUC       |
-| ---------------------------------- | ----------------- | --------- |
-| height p95 only, 1 metric          | 0.601             | 0.649     |
-| all **7** height metrics           | 0.709             | 0.771     |
-| the other **18**, no height at all | **0.765**         | **0.844** |
-| all 25, gradient boosting          | **0.778**         | **0.852** |
+Structure alone beats every height metric together. The best single metric is
+the share of vegetation returns between 1 and 2 m, a direct measurement of the
+eye-level rule:
 
-(7 height metrics, not 8, as an earlier version of this table said. The paper
-lists max, mean, median and the 25th, 50th, 75th and 95th percentiles, and
-median and perc_50 are the same quantity in two identical rasters, so there are
-really only 6 distinct ones.)
+| metric                 | heg, median | bomenrij, median | balanced accuracy, one cut-off |
+| ---------------------- | ----------- | ---------------- | ------------------------------ |
+| BR_1_2 (returns 1-2 m) | 0.079       | 0.008            | 0.739                          |
+| BR_2_3 (returns 2-3 m) | 0.066       | 0.007            | 0.701                          |
+| BR_above_3             | 0.686       | 0.933            | 0.696                          |
+| height p95             | 8.0 m       | 12.1 m           | 0.635                          |
 
-Structure alone beats every height metric put together. The best single metric
-is the share of vegetation returns between 1 and 2 m, which is a literal
-measurement of the rule above:
+A hedge returns ten times as much of its signal from the 1 to 2 m layer as a
+tree row does. Two traps:
 
-| metric                 | heg   | bomenrij | best single cut |
-| ---------------------- | ----- | -------- | --------------- |
-| BR_1_2 (returns 1-2 m) | 0.079 | 0.008    | 0.739           |
-| BR_2_3 (returns 2-3 m) | 0.066 | 0.007    | 0.701           |
-| BR_above_3             | 0.686 | 0.933    | 0.696           |
-| height p95             | 8.0 m | 12.1 m   | 0.635           |
+- `pulse_penetration_ratio` is nearly useless here (0.526), although it
+  measures openness. It is ground returns over all returns in a 10 m cell, and
+  a hedge covers only part of a cell, so the field around it dominates. The
+  band ratios count vegetation returns only, which removes that. Pick the
+  metric whose denominator matches the thing measured.
+- Each raster has its own nodata value: +3.4e38 in the band ratios, -3.4e38 or
+  -99999 in the height rasters. A single `value < -100` filter silently keeps
+  the positive ones.
 
-A hedge puts ten times as much of its return profile in the 1-2 m layer as a
-tree row does. Two details worth keeping:
-
-- `pulse_penetration_ratio` is nearly useless here (0.526) despite measuring
-  openness, because it is ground returns over **all** returns in a 10 m cell,
-  and a linear feature covers only part of a cell, so the surrounding field
-  dominates. The band ratios use vegetation returns only, which normalizes that
-  away. Pick the metric whose denominator matches the thing being measured.
-- Each raster carries its own nodata value, and the band ratios use +3.4e38
-  while the height rasters use -3.4e38 or -99999. A single `value < -100` filter
-  silently keeps the positive sentinels.
-
-This is per-feature classification given that a line is already there, so it is
-an upper bound on what a 10 m grid can contribute, not a detector result. At
-10 m a 250 m crop is only 25x25 cells, so the natural role is a side branch,
-which is what exp 4 does. Whether it may also touch the geometry is decided in
-"Where the lidar is allowed to act" below.
-
-Reproduce with `exps/probe_lidar_hedge_vs_tree.py`.
+This classifies a line that is already there, so it is an upper bound on what
+a 10 m grid can add, not a detector result.
 
 ### Where the lidar is allowed to act
 
-The backbone turns the image into a 64x64 grid of feature vectors, one per
-token, and the dataset puts the lidar patch on that same grid. So the lidar can
-enter in two places:
+The backbone turns the image into a 64x64 grid of tokens, and the dataset puts
+the lidar patch on that same grid. So the lidar can enter in two places:
 
-- **In the tokens.** Add a learned lidar vector to each image token. Everything
-  downstream sees image and lidar mixed, so the lidar can change the class and
-  the point positions.
-- **In the class head only.** Sample the lidar under each predicted line and
-  give it only to the head that says hedge or tree. It can rename a line but
-  never move one.
+- In the tokens: add a learned lidar vector to each image token. Everything
+  after that sees both, so the lidar can change the class and the point
+  positions.
+- In the class head only: sample the lidar under each drawn line and give it
+  only to the head that says hedge or tree row. It can rename a line but never
+  move one.
 
-Exp 4 uses the first, although an earlier note here argued for the second on the
-grounds that a 10 m grid could blur a thin line. Three reasons:
+The runs use the tokens (`LidarTokenEncoder` in
+`scripts/train_detr_unet_polyline.py`), for three reasons. It is far less code.
+Its last layer starts at zero, so at step 0 the model is exactly the model
+without lidar. And the limit is that too few correct lines are drawn, which a
+class-only branch cannot change.
 
-- It is far less code: an addition after `input_proj`, against sampling at each
-  predicted point plus a wider head.
-- `LidarTokenEncoder`'s last layer is zero-initialised, so at step 0 the model
-  is exactly the no-lidar model. The lidar only moves the geometry if the
-  gradient says that helps, and a lidar run and a no-lidar run start from the
-  same place.
-- The limit is that too few correct lines are drawn at all. A class-only branch
-  cannot change which lines are drawn, so it cannot touch that.
+It helps hedges very little: +0.009 F1 at 10 m with tree rows (exp 4 against
+exp 5) and +0.004 without (exp 6 against exp 2), both under the 0.02 bar. It
+does remove some wrong lines every time. It helps the tree rows more: on the
+1,874 val crops with a tree row, tree row recall is 0.425 with lidar against
+0.280 without (exps 4 and 5, `exps/probe_hedge_tree_confusion.py`).
 
-**The old worry looked right, but the runs cannot show it.** Before exp 4 we
-wrote down what a blurring lidar would look like: the 5 m score falls while
-the 10 m score holds. Exp 4 showed exactly that (5 m 0.533 against 0.553).
-But exp 5, without lidar, fell just as far (0.536), so the lidar is not the
-cause. And a new random start alone moves the 5 m score by 0.013 (exp 7), so
-the drop may be mostly luck.
+A prediction that comes true is not yet proof. Before exp 4 we wrote down what
+a blurring 10 m grid would do: the 5 m score falls while the 10 m score holds.
+Exp 4 did exactly that (5 m 0.533 against 0.553). But exp 5, without lidar,
+fell just as far (0.536), and a new random start alone moves the 5 m score by
+0.013 (exp 7). So the drop came from the tree rows or from luck, not from the
+lidar (`exps/probe_polyline_pr.py`).
 
-The lidar helps hedges very little: +0.009 at 10 m with tree rows (exp 4
-against exp 5), +0.004 without (exp 6 against exp 2). Both are below the 0.02
-we need. What it does every time is remove some wrong lines. It helps the
-tree row class more. So it is not worth moving it to the class head, and it
-is not a hedge win either.
-
-The lesson: a result that matches a prediction is still not proof when the
-run changed two things at once, or when the gap is as small as the luck.
-*(exps 4 to 7, `exps/probe_polyline_pr.py`)*
-
-Two details that are not cosmetic. BatchNorm comes first because the six metrics
-are in different units, five band ratios in [0, 1] against `perc_95` reaching
-56 m with a standard deviation of 6, so without it one channel dominates the
-sum. And `lidar_stride` has to equal the feature stride, or the lidar grid and
-the token grid are different sizes; `main` asserts it.
+Two details that matter. BatchNorm comes first, because the six metrics are in
+different units: five band ratios between 0 and 1, and `perc_95` up to 56 m.
+Without it one channel dominates. And `lidar_stride` must equal the feature
+stride, or the lidar grid and the token grid differ in size; `main` asserts
+it.
 
 ## Engineering pitfalls
 
