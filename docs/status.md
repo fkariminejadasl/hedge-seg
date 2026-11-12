@@ -69,9 +69,14 @@ All from `exps/probe_polyline_pr.py`. The tree row class scores of exps 4 and
 
 - Phase A, data and split: labels cleaned (closed loops opened, lines under
   10 m dropped), geographic split, train 26,902 / val 3,098.
-- Phase B: the first run that draws real hedges on unseen ground (exp 1), and
-  the length-based metric above. Eval loss turned out unable to rank
-  checkpoints.
+- Phase B: the first run that draws real hedges on unseen ground (exp 1).
+  Until then, checkpoints were judged by the eval loss, the training loss
+  computed on the val crops, and by counting lines per crop. Neither says
+  whether the lines lie on hedges, so Phase B added the length-based metric
+  above. It overturned the eval loss at once: the loss preferred epoch 65 of
+  exp 1, the metric epoch 150 (F1 at 10 m: 0.614 at epoch 65, 0.640 at epoch
+  150). Checkpoints are ranked by F1 since. Training still saves
+  `best_<n>.pt` at the lowest eval loss, so score `<n>.pt` too.
 - Phase C:
   - The score head is closed. Exp 3 lost, and the null model showed that
     half of the recall it chased was luck.
