@@ -266,85 +266,84 @@ in exp 2 (`exps/probe_backbone_trained.py`). *(exp 9,
 
 ## Measuring
 
-### A score is meaningless without the threshold it was read at
+### Quote the score cut-off with every number
 
-Exp 2 is on record as F1 0.699 at 10 m and 0.547 at 5 m. Those are two different
-thresholds: 0.699 is at t=0.90 and 0.547 is at t=0.95. At its own best threshold
-exp 2 scores 0.553 at 5 m, not 0.547. Comparing exp 4 against the pair as if it
-were one operating point makes the 5 m loss look like 0.014 when it is 0.020.
+A score depends on the cut-off t. Exp 2 was on record as F1 0.699 at 10 m and
+0.547 at 5 m, but those come from two cut-offs: 0.699 is at t=0.90 and 0.547
+at t=0.95. At t=0.90 exp 2 scores 0.553 at 5 m. Comparing exp 4 with the
+mixed pair made its 5 m loss look like 0.014 when it is 0.020.
 
-The optimum also moves with the model, so it has to be re-swept every time
-(exp 1 peaked at 0.95, exps 2 and 4 at 0.90, exp 3 at 0.40). Quote the
-threshold beside every number, and compare two runs either at one shared
-threshold or each at its own optimum, never one of each.
-*(`exps/probe_polyline_pr.py`)*
+The best t moves with the model: 0.95 for exp 1, 0.90 for exps 2 and 4, 0.40
+for exp 3. So sweep it again after every change, write it next to every
+number, and compare two runs either at one shared t or each at its own best t,
+never one of each (`exps/probe_polyline_pr.py`).
 
 ### How big a gap has to be before it counts
 
-A score can move by luck. There are two kinds:
+A score moves by luck in two ways:
 
-- **Which crops are in the val set.** If we pick the 3,098 crops again at
-  random, a gap between two runs moves by about 0.005.
-- **The random start of training.** Exp 7 is exp 2 run again, with only the
-  random start (the seed) changed. It scores 0.008 lower at 10 m and 0.013
-  lower at 5 m.
+- Which crops are in the val set. Drawing the 3,098 val crops again moves a
+  gap between two runs by about 0.003 (one standard deviation), so about
+  0.005 either way covers 95% of draws (`exps/probe_f1_gap_bootstrap.py`).
+- The random start of training. Exp 7 is exp 2 with only the seed changed. It
+  scores 0.008 lower at 10 m and 0.013 lower at 5 m.
 
-The second kind is bigger. So a gap of about 0.01 can appear with no real
-change at all. We ask for 0.02 before we call a run better. That bar was a
-guess at first, and exp 7 shows it is about right. Exp 9 (+0.023 at 10 m)
-passes it; exps 4 to 6 do not. It rests on one repeat, so it is rough.
-*(exps 2 and 7, `exps/probe_f1_gap_bootstrap.py`)*
+The second is bigger, so a gap of about 0.01 can appear with no real change.
+A run has to win by 0.02 to count. That bar was chosen before it was measured,
+and exp 7 shows it is about twice the seed gap. Exp 9 (+0.022 at 10 m) passes
+it; exps 4 to 6 do not. It rests on one repeat, so it is rough.
 
 ### No cheap measure can rank two checkpoints, so build the real one
 
-Cluster run 1, two checkpoints, same cluster-val crops at threshold 0.95. Three
-cheap rankings gave three answers: eval loss picked `best_1.pt` (epoch 65),
-mean lines per image picked `1_150.pt`, mean error per image picked `best_1.pt`
-again. The mean count is the trap: per image `1_150.pt` predicts nothing on two
-crops that have hedges and 16 lines on a crop that has 3, and those cancel.
+Exp 1, two checkpoints, the same val crops at t=0.95. Three cheap rankings gave
+three answers. Eval loss picked `best_1.pt` (epoch 65). The mean number of
+lines per crop picked `1_150.pt` (epoch 150). The mean count error per crop
+picked `best_1.pt` again. The mean count misleads most: `1_150.pt` draws
+nothing on two crops that have hedges and 16 lines on a crop that has 3, and
+in the mean those cancel.
 
-Buffered length over all 3,098 val crops settled it (`exps/probe_polyline_pr.py`).
-`1_150.pt` wins at every buffer, F1 0.640 against 0.614 at 10 m. So the checkpoint the eval loss calls
-overfit is the better detector, and its advantage is recall.
+The length metric settled it. `1_150.pt` wins at every tolerance, F1 0.640
+against 0.614 at 10 m (`exps/probe_polyline_pr.py`). The checkpoint the eval
+loss calls overfit is the better detector.
 
-Two rules follow. Do not report eval loss as a result, and do not early-stop on
-it. Aggregate per image and then average, never as a ratio of two totals,
-because errors of opposite sign cancel in a total.
+Two rules. Do not report eval loss as a result and do not stop training on it.
+Training still saves `best_<n>.pt` at the lowest eval loss, so score `<n>.pt`
+too. And compare runs crop by crop, never by a total or a plain mean, because
+too many lines on one crop and too few on another cancel out.
 
-### Chamfer plus Hungarian is the wrong metric for polylines
+### Pairing lines one to one is the wrong metric
 
-The obvious detection metric is to pair each prediction with one GT line, the
-way a box detector pairs by IoU, and call the pair a hit if the chamfer
-distance is under 5, 10 or 15 m. It gives F1 0.41 where buffered length gives
-0.64, on the same predictions, and the figures agree with 0.64.
+The obvious detection metric pairs each drawn line with one labelled line, the
+way a box detector pairs boxes. The pair is a hit if the average distance
+between the two lines (chamfer distance) is under 5, 10 or 15 m. On the same
+predictions it gives F1 0.41 where the length metric gives 0.64, and the
+figures agree with 0.64 (`exps/probe_polyline_pr.py`).
 
 Two ordinary cases break the pairing:
 
-- A hedge that turns a corner is one L-shaped GT line. A prediction covering
-  one leg is half right, but chamfer averages over the whole GT line, so the
-  far leg pushes the average to about 17 m and the pair fails at every
-  threshold. The correct half is thrown away.
-- A hedge stored as three overlapping GT lines can be paired with only one of
-  them. The other two count as misses even though the hedge was covered.
+- A hedge that turns a corner is one L-shaped label. A line covering one leg
+  is half right, but the distance is averaged over the whole label, so the far
+  leg pushes it to about 17 m and the pair fails at every tolerance.
+- A hedge stored as three overlapping labels can be paired with only one of
+  them. The other two count as misses, although the hedge was found.
 
-Buffered length never pairs anything. It asks how much of the drawn length lies
-within r of a real hedge, and how much of the real hedge length has something
-drawn within r of it. Both cases then score honestly. Use `buffered_length_pr`
-in `hedge_seg/metrics.py`; `matched_pr` is kept there only to reproduce this.
+The length metric pairs nothing. It asks how much drawn length lies within r
+of a label, and how much labelled length has a drawn line within r. Use
+`buffered_length_pr` in `hedge_seg/metrics.py`; `matched_pr` is kept there
+only to reproduce this.
 
 ### Most of the recall at a low threshold is clutter, not lost hedges
 
-This corrects the central claim of the last two months of work. "Recall is 0.84
-at t=0.05, so the model finds the hedges and the score throws them away" was
-wrong, and it cost an 11 hour run (exp 3) to find out.
+At t=0.05 exp 2 has recall 0.84. This was read as "the model finds the hedges
+and the score throws them away". That was wrong, and it cost an 11 hour run
+(exp 3) to find out.
 
-The hole in it: at t=0.05 the model draws about 13 lines per image against 2.1
-labelled lines. Buffered recall asks how much labelled length has *any*
-prediction within 10 m, and with 13 lines on a 250 m crop a lot of that happens
-by luck. `exps/probe_recall_null_model.py` measures the luck by scoring each
-crop's predictions against a *different* crop's labels, so the number, length
-and orientation of the lines are unchanged and only the link to the image is
-broken:
+At t=0.05 the model draws about 13 lines per crop against 2.1 labelled ones.
+With 13 lines on a 250 m crop, much of the labelled length has some line
+within 10 m by luck. `exps/probe_recall_null_model.py` measures that luck: it
+scores each crop's lines against a different crop's labels. The number, length
+and direction of the lines stay the same, and only the link to the image is
+broken. Skill is real recall minus this null recall.
 
 | threshold | pred/img | real recall | null recall | skill     |
 | --------- | -------- | ----------- | ----------- | --------- |
@@ -353,36 +352,28 @@ broken:
 | 0.90      | 3.2      | 0.696       | 0.266       | **0.431** |
 | 0.95      | 1.9      | 0.608       | 0.228       | 0.380     |
 
-Nearly half of the celebrated 0.84 is what another crop's predictions would
-score.
+Nearly half of the 0.84 is what another crop's lines would score.
 
-How to read the table. Exp 2 runs at t=0.90. The score head cannot draw a new
-line, it only keeps or drops lines the model already drew, so the best it could
-ever do is move exp 2 to another row of this table. Judged by real recall,
-going from t=0.90 to t=0.05 gains 0.840 - 0.696 = 0.14. Judged by skill, going
-from t=0.90 to t=0.40 gains 0.471 - 0.431 = 0.04. The 0.04 is the real gain.
-The 0.14 counts luck as a gain.
+The score head can only keep or drop lines the model already drew, so at best
+it moves exp 2 to another row of this table. By real recall, going from t=0.90
+to t=0.05 gains 0.14. By skill, the best row (t=0.40) gains only 0.04 over
+t=0.90. The 0.04 is the real gain; the 0.14 counts luck as a gain.
 
-What this means. The model did learn to find hedges. Shuffle the picture and
-the same lines score 0.379 instead of 0.840, and that gap can only come from
-having seen the image. What it did not do is find as many as it appeared to.
-The hedges it misses are missing because it never drew a line there, not
-because the score buried the line. So the score head is closed as a line of
-work, worth 0.04, and everything after this targets perception: draw more of
-the right lines in the first place.
+So the model did learn to find hedges: with the link to the image broken, the
+same lines score 0.379 instead of 0.840. But the hedges it misses are missed
+because it never drew a line there, not because the score dropped it. The
+score head was closed as a line of work, and the work since targets
+perception: draw more of the right lines.
 
-Two rules. Any metric that rewards drawing more lines needs a null model before
-it is used to justify a run. And a threshold sweep is not evidence of headroom:
-falling precision as the threshold drops is the same fact as rising recall.
+Two rules. A metric that rewards drawing more lines needs a null model before
+it is used to justify a run. And a threshold sweep is not evidence of room to
+improve: precision falling as t drops is the same fact as recall rising.
 
-The threshold is still not a constant. It was 0.95 for exp 1, 0.90 for exp 2
-and 0.40 for exp 3. Re-sweep after any change and record the value.
+### The score ranks lines by straightness, and a new head loss did not fix it
 
-### The score ranks lines by how straight they are, not by whether they are right
-
-Measured on exp 2 `best_2.pt`, all 3,098 val crops from the t=0.05 run. A
-prediction counts as correct if at least 80% of its length is within 10 m of a
-label. 7,956 of 39,104 predictions are correct.
+Measured on exp 2 `best_2.pt`, all 3,098 val crops, from the t=0.05 run. A
+line counts as correct if at least 80% of its length lies within 10 m of a
+label. 7,956 of 39,104 lines are correct.
 
 | straightness      | median score, correct | median score, wrong |
 | ----------------- | --------------------- | ------------------- |
@@ -391,69 +382,36 @@ label. 7,956 of 39,104 predictions are correct.
 | 0.95 to 0.99      | 0.951                 | 0.868               |
 | > 0.99 (straight) | 0.974                 | **0.957**           |
 
-A correct bent line scores 0.45 and a wrong straight one scores 0.96, so no
-single threshold can keep both. At t=0.95 only 9% of correct bent predictions
-survive against 74% of correct straight ones. The score's AUC for correct
-against wrong is 0.767 overall but only 0.618 inside the bent group, so most of
-its apparent skill is straightness acting as a proxy.
+A correct bent line scores 0.45 and a wrong straight one 0.96, so no single
+cut-off can keep both. At t=0.95, 9% of the correct bent lines survive against
+74% of the correct straight ones. AUC is the chance that a random correct line
+scores higher than a random wrong one, so 0.5 means no skill. It is 0.767
+overall but only 0.618 inside the bent group, so most of the score's skill is
+straightness standing in for correctness.
 
-Two earlier readings were wrong because of this, and both are corrected above:
+The model itself does draw bends. At t=0.80 the drawn lines have straightness
+0.908 against 0.909 in the labels; only the 0.95 cut-off makes it 0.942. So
+the bends and the recall are one problem, the score, not two.
 
-- "Exp 2 draws straighter lines than the labels" was a thresholding artifact.
-  The model draws bends. At t=0.80 predicted straightness is 0.908 against
-  0.909 in the labels, an almost exact match. Only the 0.95 cut makes it 0.942.
-- The bends problem and the recall problem are one problem, not two.
+Exp 3 tried to fix the ranking with a focal sigmoid class head instead of the
+softmax, with MapTR's loss weights and nothing else changed. It lost: best F1
+at 10 m 0.664 (t=0.40) against 0.699 (t=0.90). The ranking barely moved, AUC
+0.739 against 0.767 overall and 0.642 against 0.618 in the bent group. The
+scores bunched near 0.2 and above 0.98 instead of spreading out. Recall at
+t=0.05 stayed the same, 0.845 against 0.840, so the model drew the same lines.
+The head only became more reluctant: 1.6 lines per crop at its best cut-off
+against 3.2.
 
-Exp 3 tried to fix this with a focal sigmoid head and failed. The ranking did
-not improve: AUC 0.742 against exp 2's 0.767 overall, and 0.648 against 0.618
-inside the bent group. The scores did not spread, they clumped: a mass near 0.2
-and a spike above 0.98 where correct and wrong straight lines sit together at
-0.983 and 0.979.
+The reason is what the head sees. It reads the mean of the 20 point features
+(`class_embed(hs_poly.mean(dim=3))`) and never compares them with the image, so
+no loss on that head can make its score follow how well a line fits. Focal
+loss also starts every score near 0.01 and divides by the number of matched
+lines, so with 60 queries and 2.1 real lines, "draw almost nothing" is a
+comfortable place to sit.
 
-So the classification *loss* is not the problem. The class head reads the mean
-of the 20 point features (`class_embed(hs_poly.mean(dim=3))`) and never sees how
-well those points fit the image, so no reweighting of that head's loss can make
-its output track geometric quality. Changing what the head is told, rather than
-how it is scored, is the only version of this idea left, and after the null
-model above it is worth much less than it looked.
-
-Reproduce with `exps/probe_score_quality.py`, which prints exp 2 and exp 3 side
-by side.
-
-### Exp 3: the focal head made it worse, and that was informative
-
-Exp 2 with the softmax class head swapped for a focal sigmoid, MapTR weights,
-nothing else changed. Best F1 at 10 m fell from **0.699 to 0.664**.
-
-Each run at its own best threshold, so neither is handicapped. Exp 3's better
-checkpoint is the last epoch (`3.pt`, F1 0.664); `best_3.pt` gives 0.660.
-
-|                             | exp 2 `best_2.pt`   | exp 3 `3.pt`    |
-| --------------------------- | ------------------- | --------------- |
-| best F1 at 10 m             | **0.699** at t=0.90 | 0.664 at t=0.40 |
-| P / R there                 | 0.701 / 0.696       | 0.779 / 0.578   |
-| pred per image there        | 3.2                 | 1.6             |
-| recall at t=0.05            | 0.840               | 0.845           |
-| score AUC, correct vs wrong | 0.767               | 0.739           |
-| same, inside the bent group | 0.618               | 0.642           |
-
-(The AUC rows are `3.pt`. For `best_3.pt` they are 0.742 and 0.648.)
-
-Perception did not change: recall at t=0.05 is the same to three decimals, so
-the model draws the same lines. The head just became more decisive about the
-wrong thing. Precision rose to 0.84 and recall collapsed to 0.51, and the score
-went bimodal rather than calibrated.
-
-Three things to take from it:
-
-- A more expressive loss on a head that cannot see the evidence does not make
-  it better informed. The class head averages the 20 point features and never
-  compares them to the image.
-- Focal's prior at p=0.01 plus normalisation by matched-target count makes the
-  head very reluctant. With 60 queries and 2.1 real lines, "predict almost
-  nothing" is a good place to sit.
-- The A/B was worth running even though it lost, because it is what forced the
-  null model above, and that overturned a bigger and older claim.
+The run was still worth it. Losing it forced the null model above, which
+overturned a bigger and older claim. `exps/probe_score_quality.py` prints exp 2
+and exp 3 side by side.
 
 ## Lidar
 
