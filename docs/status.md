@@ -153,7 +153,8 @@ In the order suggested:
    (45,028 of 266,783) are shorter than the nominal 100 m, but the code that
    measured it was not kept. Write `exps/probe_top10nl_short_features.py`:
    `geometry.length` on both shapefiles in EPSG:28992, where the unit is
-   metres. Small, no GPU.
+   metres. It should also give the feature counts, 62,415 and 266,783, that
+   `docs/descriptions.md` quotes. Small, no GPU.
 
 For the paper:
 

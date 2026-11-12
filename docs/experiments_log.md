@@ -102,6 +102,11 @@ lower when only 2 polylines; with 11 it is higher.
 
 ## snellius detr_polyline (DINO embeddings)
 
+Data, the lidar crops: at most 441 polylines in a 256 x 256 crop, 276 after
+dropping those under 10 px, 20 points per polyline, 17,000 crops. 691,006
+polylines, 4,121 closed, some only nearly closed (start and end close
+together), e.g. test_256_None.
+
 - best_detr_polyline_1: 500, 100, 20, eos=.1, dino_14, wd=1e-2, dropout=0.1, giou=1, batch=1280, test_256 -> no collapse.
   Max 441 polylines in some images, image 256x256, DINOv3 resized to 224.
   Top-20 scores 0.75-0.96, detections not good but show some linear structure.
