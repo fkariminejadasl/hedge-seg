@@ -28,6 +28,8 @@ This gives train 26,902 and val 3,098 crops. Val is 10.3%, not 20%, because grou
 
 The split guarantees no overlap, not a distance. Because whole groups go to train, train crops also sit inside val blocks: 235 of the 285 blocks that hold val crops also hold train crops. The gap from a val crop to its nearest train crop, edge to edge, is 593 m at the median. 5% are under 50 m, 95% under 2.1 km, and the largest is 4.5 km. 3 val crops touch a train crop. So val is ground the model has not seen, but mostly nearby ground, not a distant region (`exps/probe_split_gap.py`).
 
+The block size only sets the val fraction. 5 km is much larger than a 250 m crop, so most groups of overlapping crops fit inside one block, and it still gives many blocks to hash. Without the backbone filter it gives 19.1% val against the 20% target (`exps/quantify_geographic_crop_overlap_pdok_dataset3.py`). If the exact fraction ever matters, retry seeds rather than tune the block size.
+
 ## Model
 
 `scripts/train_detr_unet_polyline.py` as in exp 9, the best run. 20.2 M parameters (`exps/probe_model_size.py`):
@@ -36,6 +38,7 @@ The split guarantees no overlap, not a distance. Because whole groups go to trai
 - Polyline head: 5.8 M. Transformer encoder (1 layer) 0.8 M, decoder (4 layers) 4.2 M, the rest (input projection, queries, point refinement, class head) 0.8 M.
 - Input: the crop padded with black to 1024 x 1024, on the bottom and right, so it divides by the backbone stride of 16. The backbone turns it into 64 x 64 = 4,096 tokens of 256 numbers.
 - Output: 60 polylines of 20 points, each with a hedge score.
+- Point loss: `loss_poly` is the mean L1 error per coordinate, on points divided by `pad_to - 1` = 1023. Times 1023 gives pixels, and times 0.25 more gives metres, so a loss of 0.004 is about 1 m (`meters_to_px` in `hedge_seg/metrics.py`). x and y are averaged separately, so the distance from a point to its target is up to 1.4 times larger.
 - Exps 1 to 8 froze the backbone, so only the 5.8 M head trained. Exp 9 trains all of it, the backbone at a 10x lower learning rate (`backbone_lr=1e-5`).
 
 ## Overview
