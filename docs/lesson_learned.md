@@ -13,263 +13,176 @@ details of each run are in `docs/experiments_log.md`.
 
 ## Labels and data
 
-### The images are three years newer than the labels, not ten
+### The photos are from 2025, the labels from 2022
 
-Two facts, both checked:
+- The crops are 2025 photos. Stored crops differ from a fresh `2025_ortho25`
+  download by 5.6 to 13 mean pixel value, against 21 to 41 for
+  `2024_ortho25`.
+- Top10NL2023 was revised on 2022 photos ("herzien op basis van luchtfoto
+  2022", `BRT_Actualiteitskaart_april_2023.pdf`).
 
-- The crops are **2025** imagery. Stored crops differ from a fresh
-  `2025_ortho25` download by 5.6 to 13 mean pixel value, against 21 to 41 for
-  `2024_ortho25`. Not 0, so even the year layer does not return the stored
-  files byte for byte. `2025_ortho25` itself differs from `2022_ortho25`, the
-  year the labels come from, by 29.51 on a test crop.
-- Top10NL2023 was "herzien op basis van luchtfoto 2022"
-  (`BRT_Actualiteitskaart_april_2023.pdf`), so the labels are **2022**.
+Both from `exps/probe_image_label_dates.py`. So the labels are three years
+older than the photos.
 
-Both numbers from `exps/probe_image_label_dates.py`.
+Do not read the age of a label from the `bronactual` field. It sits in 2014 or
+2015 for 75.3% of the 62,415 hedge features, but it is the date of the source
+used for the last edit, not of the last check. Top10NL is revised for the whole
+country every year, and a feature is only edited when a change is seen. An old
+date means the line was drawn with 2014 accuracy, not that nobody looked at it
+since.
 
-So the gap is about three years.
+The cheap fix is the 2025 labels. Top10NL2025 was revised on 2024 and 2025
+photos, so it matches the existing crops and needs no new imagery (TODO 3 in
+`docs/status.md`).
 
-An earlier note here called it ten years, from `bronactual` sitting in 2014 or
-2015 for 75.3% of the 62,415 hedge features. That read the field wrong.
-`bronactualiteit` is the currency of the source used for the last edit of that
-feature, not the last time the map was checked. Top10NL is revised for the
-whole country every year, and changes are trigger-based: two years of photos
-are compared and only a detected difference causes an edit. A hedge with
-`bronactual` 2015 was therefore re-confirmed as unchanged many times since. The
-residual worry is positional rather than existential: those geometries have not
-been redrawn in a decade, so they carry 2014 digitising accuracy.
+### Top10NL is incomplete by its own rules, so precision is a lower bound
 
-The cheap fix is not a re-download. Top10NL2025 was revised on 2024 and 2025
-photos, so taking the 2025 labels against the existing 2025 crops closes the
-gap to about zero and touches no imagery. Re-downloading crops at
-`2022_ortho25` to match the 2023 labels is the other direction and costs 47 GB.
+The Top10NL specification (https://kadaster.github.io/imbrt/, extracted into
+`/home/fatemeh/Downloads/hedge/Top10NL/Top10NL Metadata.docx`) marks both
+heg and bomenrij "Volledigheid: Beperkt", limited completeness. By rule it
+leaves out:
 
-### A checkpoint has to be evaluated on the split it was trained against
+- hedges inside built-up areas, and between tennis courts
+- hedges on or around an erf, the plot of a house or farm, unless they
+  continue past it
 
-Run 1 trained on the cluster split (26,902 / 3,098). The laptop conversion of
-that time was 24,257 / 5,743, because its `avoid_label_dirs` had only 10 of
-the 5,000 pdok_dataset2 labels (counts from `exps/dataset_stats.py`). Same seed
-and blocks, so the cluster val set was a subset of it, but about 46% of the
-laptop val crops were cluster training images. Scoring a cluster checkpoint
-there showed it training images half the time.
+The minimum length is 100 m, but 18.0% of heg features (11,208 of 62,415) and
+16.9% of bomenrij features (45,028 of 266,783) are shorter, because pieces
+split by a road or a watercourse are exempt. Measured with `geometry.length`
+on the shapefiles in EPSG:28992, where the unit is metres.
 
-The split is part of the run, like the weights. A conversion from other labels
-gives another split, so do not assume two conversions agree: pin a new dataset
-to the run it is compared against with `val_stems_file`. Since 2026-11-09 the
-laptop computes the cluster split (`exps/probe_split_reproduces.py`).
+So the model is penalised for woody lines the map leaves out on purpose, and
+the reported precision is a lower bound. Do not go one step further and say
+this is why built-up and campsite crops score worst. That is consistent, not
+shown. Testing it means checking whether the unmatched lines there lie on
+woody lines the rules exclude, the way `exps/probe_treeline_overlap.py` did for
+tree rows.
 
-### Two label artifacts, one real and one that turned out not to matter
+One label artifact turned out not to matter: a hedge stored as several
+overlapping lines. Merging labelled lines within 10 m of each other removes
+0.8% of them and moves F1 by 0.001 (`merge_gt` in
+`exps/probe_polyline_pr.py`). The length metric is immune to it anyway.
+Measure an artifact before designing around it.
 
-Both are visible by eye in the run 1 figures, but only one survives measurement.
+### A quarter of the false positives are tree rows
 
-- One hedge split into several overlapping polylines: **not a problem**.
-  Merging GT lines within 10 m of each other removes 0.8% of GT lines and moves
-  F1 by 0.001 (the `merge_gt` option of `exps/probe_polyline_pr.py`). Buffered length is immune to it anyway, since it measures length
-  covered rather than lines matched. Do not spend more time on it.
-- Woody lines missing from the labels: **measured, and a quarter of it is tree
-  rows**. See the next section. The reported precision is a lower bound.
+Training uses only the hedge layer, `inrichtingselementen_lijn_heg`. Tree rows
+are a separate layer, `inrichtingselementen_lijn_bomenrij`, with 266,783
+features against 62,415 hedges. From above a tree row looks much like a hedge,
+so the model draws it, and every metre counts as wrong.
 
-The general rule stands: measure the artifact before designing around it. The
-first one cost a paragraph of worry and was worth 0.001.
+On 300 random val crops, 24.3% of the drawn length that matches no label lies
+within 10 m of a tree row, and only 1.2% near another hedge
+(`exps/probe_treeline_overlap.py`). As a check, 100% of the training labels
+lie on the hedge layer.
 
-### Top10NL says itself that both layers are incomplete
+What that is worth, for exp 2 at t=0.95: precision at 10 m is 0.783, so 0.217
+of the drawn length counts as wrong. A quarter of that, 0.243 x 0.217 = 0.053,
+lies on tree rows. Without it, precision would be about 0.836. Exp 5 tried to
+win this by adding tree rows as a second class and did not: hedge precision
+went to 0.777 (`exps/probe_polyline_pr.py`).
 
-The specification (https://kadaster.github.io/imbrt/, extracted into
-`/home/fatemeh/Downloads/hedge/Top10NL/Top10NL Metadata.docx`) marks both heg
-and bomenrij "Volledigheid: Beperkt", limited completeness, and says in the heg
-collection criteria:
-
-> "Wordt niet opgenomen binnen bebouwd gebied en tussen tennisbanen. Een heg,
-> haag op of rondom een erf wordt niet ingewonnen, tenzij deze zich voortzet
-> voorbij het erf."
-
-Plainly: a hedge is not recorded inside a built-up area, or between tennis
-courts, and a hedge on or around an *erf* is not recorded unless it continues
-past it. An *erf* is the plot or grounds belonging to a house or farm, not a
-farmyard specifically, so this excludes ordinary garden and property
-boundaries as well as agricultural ones.
-
-The nominal minimum length is 100 m for both classes, but 18.0% of heg features
-(11,208 of 62,415) and 16.9% of bomenrij features (45,028 of 266,783) are
-shorter, because segments split at a road or a watercourse are exempt. Measured
-with `geometry.length` on the shapefiles in EPSG:28992, where the unit is
-metres.
-
-This is the authoritative version of a thing already measured from the other
-side: reported precision is a lower bound, because the model is penalised for
-finding woody lines that the map excludes by rule.
-
-It is tempting to go one step further and say this is *why* built-up and
-campsite crops top the false-positive ranking. Do not. Two things are known
-separately, that the rules exclude those areas and that those crops score
-worst, and nothing yet connects them. Sparser labels there could equally come
-from the mapper skipping cluttered scenes, or from those crops being genuinely
-harder. Testing it means checking whether the unmatched predictions in those
-crops sit on woody lines the rules exclude, the way
-`exps/probe_treeline_overlap.py` did for tree rows. Until then this is
-consistent, not shown.
-
-### A quarter of the false positives are tree rows, not mistakes
-
-Top10NL splits linear woody features into two layers. Training uses only
-`inrichtingselementen_lijn_heg`. Tree rows are a separate layer,
-`inrichtingselementen_lijn_bomenrij`, with 266,783 features against 62,415
-hedges, and they are not in the labels at all. From above a tree row looks much
-like a hedgerow, so the model draws it and every metre counts as a false
-positive.
-
-`exps/probe_treeline_overlap.py` measures it. On 300 random val crops, **24.3%
-of the predicted length that matches no label is within 10 m of a tree line**,
-and only 1.2% is near another hedge, so this is not the crop clipping losing
-labels. The sanity check passes: 100% of the training GT sits on the heg layer.
-
-What that is worth: exp 2 at t=0.95 has a precision of 0.783 at 10 m. So
-78.3% of the length it draws lies on a labelled hedge, and 21.7% counts as
-wrong. A quarter of that wrong part (24.3%) lies on a tree row, which is 5.3%
-of all the drawn length (0.243 x 0.217 = 0.053). If tree rows did not count as
-wrong, precision would be about 0.836 instead of 0.783. That 0.053 is what we
-hoped to win by adding tree rows as a second class. It is also why the
-precision we report is lower than the model's real skill.
-
-Exp 5 did not win it. With tree rows as a second class, hedge precision went
-down a little, not up: 0.777 against 0.783 at t=0.95. *(exp 5,
-`exps/probe_polyline_pr.py`)*
-
-This reverses an earlier call. Tree lines were ranked low because the worst
-crops looked like campsites rather than tree rows. The worst crops are not the
-typical crops: campsite exclusion moved F1 by 0.011, while tree rows account
-for a quarter of all unmatched length. Rank a fix by its share of the total,
-not by how bad the worst examples look.
+Rank a fix by its share of the total, not by how bad the worst examples look.
+The worst crops were campsites (next section), but excluding them moves F1 by
+about 0.01, while tree rows hold a quarter of all unmatched length.
 
 ### The worst crops were campsites, and filtering them out is not worth it
 
-Ranking val crops by false-positive length put the same thing on top every
+Ranking val crops by wrongly drawn length put the same scene on top every
 time: rows of identical chalets on small plots, each plot ringed by a clipped
-hedge. Not housing estates, which is what they look like. Top10NL lists 6
-building footprints in one whole 250 m crop and calls the ground grassland,
-because a chalet is not a registered building, so a built-up or building
-filter misses them entirely. The layer that finds them is
-`functioneel_gebied_vlak`, field `typefunctioneelgebied`, values camping,
-vakantiepark, bungalowpark, caravanpark. On 13 crops sorted by eye the
-separation was clean, 8 of 8 bad and 0 of 5 good.
+hedge. It looks like housing, but Top10NL has almost no buildings there,
+because a chalet is not a registered building. So a built-up or building filter
+misses them. The layer that finds them is `functioneel_gebied_vlak`, field
+`typefunctioneelgebied`, values camping, vakantiepark, bungalowpark,
+caravanpark.
 
-Then measuring killed the idea. Those crops are 315 of 3,098, 10.2%. Excluding
-them moves F1 from 0.640 to 0.652. They really are harder, 0.542 against 0.652,
-but 10% of crops cannot move a per-image average much.
+These crops are 315 of 3,098 (10.2%). They really are harder, F1 0.542 against
+0.652 for the other crops, but excluding them moves the overall F1 only from
+0.640 to 0.652 (exp 1, 10 m, `exps/probe_recreation_crops.py` and
+`exps/probe_polyline_pr.py`).
 
 Two lessons. A crop that looks urban may be a campsite, and the layer that
-identifies a land use is not always the obvious one. And an exclusion can
-always be tested by dropping crops at scoring time
-(`exps/probe_recreation_crops.py` writes the stem list) before anyone touches
-the dataset. That test cost an afternoon and saved a reconversion.
+names a land use is not always the obvious one. And test an exclusion at
+scoring time, by leaving crops out of the score, before changing the dataset.
 
-### Tree rows cost nothing to add, because the crops already exist
+### Tree rows are free to add as a second class, and do not help the hedges
 
-Adding Top10NL `bomenrij` as class 1 needs no new imagery and no new crops. The
-converter clips the layer to each existing crop with the same function that made
-the hedge labels (`scripts/data/convert_pdok_polylines_to_detr_polyline.py`),
-which takes about a minute for 30,000 crops.
+Adding Top10NL bomenrij as class 1 needs no new imagery. The converter clips
+the layer to each existing crop with the same function that made the hedge
+labels (`scripts/data/convert_pdok_polylines_to_detr_polyline.py`), in about a
+minute for 30,000 crops.
 
-What that gives, over the whole dataset:
+|                       | hedges only | with tree rows   |
+| --------------------- | ----------- | ---------------- |
+| lines                 | 103,432     | 103,432 + 44,435 |
+| lines per crop, mean  | 3.45        | 4.93             |
+| max lines per crop    | 49          | 49               |
+| crops with a tree row | 0           | 18,061 (60.2%)   |
 
-|                        | hedges only | with tree rows   |
-| ---------------------- | ----------- | ---------------- |
-| lines                  | 103,432     | 103,432 + 44,435 |
-| lines per crop, mean   | 3.45        | 4.93             |
-| **max lines per crop** | **49**      | **49**           |
-| crops with a tree row  | 0           | 18,061 (60.2%)   |
+All from `exps/probe_tree_dataset_stats.py`.
 
-All of it from `exps/probe_tree_dataset_stats.py`, which compares the two
-datasets crop by crop.
+- The query budget does not change. The busiest crop already had 49 lines, so
+  60 queries still suffice.
+- The hedge labels are untouched: the class 0 arrays are bit-identical to
+  `pdok_dataset3_polylines` on all 30,000 crops.
+- The two classes blur at 10 m. 12.2% of tree row length lies within 10 m of
+  the hedge layer, and 11.0% of hedge length within 10 m of the tree row layer,
+  against 2.4% and 1.7% at 5 m (`exps/probe_tree_class_labels.py`). So the 5 m
+  score shows the class separation more cleanly.
+- Take the tree rows from the same Top10NL year as the hedges, 2023, or the
+  run changes two things at once.
 
-Three things worth keeping:
+As a second class they did not help the hedges: hedge F1 at 10 m 0.689 against
+0.699, a gap about the size of the luck of a new random start (exps 5 and 7 in
+`docs/status.md`).
 
-- **The query budget does not change.** The crowded crop already had 49 lines,
-  so 60 queries are still enough and `num_polylines` stays at 60. This was worth
-  checking before anything else, since a second class competing for queries
-  would have been a real cost.
-- **The hedge half is untouched.** The stored class 0 arrays are bit-identical
-  to `pdok_dataset3_polylines` on all 30,000 crops, so any change in the hedge
-  score comes from the model, not from the data.
-- **The classes blur at 10 m.** 12.2% of tree length is within 10 m of the heg
-  layer and 11.0% of hedge length within 10 m of bomenrij, against 2.4% and 1.7%
-  at 5 m (`exps/probe_tree_class_labels.py`). So read the 5 m buffered score as
-  the cleaner class separation, and the 10 m one as partly forgiving of a
-  confusion between the two.
+### One woody line class gives a better woody map, not a better hedge map
 
-Use the same Top10NL year as the hedge labels, 2023. Taking the tree rows from
-2025 would change the label year at the same time and confound the run.
+Exp 10 trains hedges and tree rows as one class, on the exp 9 recipe
+(`merge_classes=True` in `scripts/train_detr_unet_polyline.py`). As a woody
+line detector it is the best model, F1 0.722 at 10 m (results in
+`docs/status.md`).
 
-Cheap in data, but no help for the hedges. With tree rows added (exp 5), the
-hedge score is a little lower: 0.689 against 0.699 at 10 m, 0.536 against
-0.553 at 5 m. A new random start alone moves the score about as much (exp 7),
-so tree rows cost the hedges little or nothing. But they do not help either.
-The tree row class itself reaches 0.624 at 10 m, and 0.688 with the lidar
-(exp 4); these tree row scores are too high, see TODO 2 in
-`docs/status.md`.
+It does not find more hedges. Its hedge recall rose from 0.733 to 0.795, but
+it draws 5.76 lines per crop against 3.33, and the null model takes all of that
+back: skill 0.483 against 0.473 (`exps/probe_recall_null_model.py`, see "Most
+of the recall at a low threshold is clutter" under Measuring).
 
-One wrong idea to avoid: exp 4 placed its tree rows well, so we thought they
-could not hurt the hedges. How well one class is drawn says nothing about
-what it does to the other. *(exps 4, 5 and 7, `exps/probe_polyline_pr.py`)*
+Against two classes (exp 5), exp 10 is 0.13 more precise at the same recall,
+0.76. Part of that comes from the frozen backbone of exp 5, which was worth
+0.022 on hedges, so the class choice itself is worth nearer 0.05. That rests on
+one run each.
 
-Taught as one class instead of two, tree rows do pay, as a woody line map. See
-"One woody line class" below.
+So the choice is about which map we want, not about a better model: exp 10 for
+woody lines, exp 9 for hedges. Woody recall also barely falls on crowded crops,
+but no null model was run per crowding bucket, so that is only a hint (TODO 4
+in `docs/status.md`).
 
-### One woody line class: a better woody map, not a better hedge map
+### More data buys precision, not recall
 
-Exp 10 trains hedges and tree rows as one class, on the exp 9 recipe. The tree
-row dataset already holds both, so `merge_classes=True` in
-`scripts/train_detr_unet_polyline.py` only relabels them.
+Exp 2 is exp 1 with all 26,902 train crops instead of 5,000, nothing else
+changed. F1 at 10 m went from 0.640 to 0.685, both at t=0.95. Precision rose
+about 0.08 in every crowding bucket. Recall rose about 0.02, and not at all on
+the most crowded crops, 0.372 on crops with 7 or more hedges
+(`exps/probe_polyline_pr.py`). So more data makes the model surer of the lines
+it draws, but it does not find more lines in a busy crop.
 
-As a woody line detector it is the best model we have. F1 at 10 m, every line
-against both label layers, each run at its best threshold:
+Overfitting did vanish. The gap between train and eval loss went from 0.29 to
+0.03, and the eval loss still fell at the last epoch (training logs of exps 1
+and 2, in `docs/experiments_log.md`).
 
-| model                                      | F1    |
-| ------------------------------------------ | ----- |
-| exp 10, one woody class                    | 0.722 |
-| exp 9, hedges only                         | 0.676 |
-| exp 5, two classes pooled, frozen backbone | 0.654 |
+### The split is part of the run
 
-Exp 9 never learned tree rows, so beating it was expected. Exp 5 is the real
-alternative, two classes instead of one. At the same recall, 0.76, exp 10 is
-0.13 more precise. Part of the 0.068 gap is exp 5's frozen backbone, which was
-worth 0.022 on hedges, so the class choice itself is likely nearer 0.05. Still
-above the 0.02 bar, but one run each.
+Score a checkpoint only on the split it trained against. A conversion from
+other labels gives another split, even with the same seed and blocks, because
+`avoid_label_dirs` keeps different crops out of val. Once, such a conversion
+had about 46% of its val crops in a run's training set (counts from
+`exps/dataset_stats.py`), so the run was shown its own training images.
 
-It finds no more hedges. Its hedge recall rose from 0.733 to 0.795, but it
-draws 5.76 lines per crop against 3.33, and the null model takes all of that
-back: skill 0.483 against 0.473. That trap was written down before the run,
-and it held.
-
-So the choice is about what map we want, not about a better model. For woody
-lines, use exp 10. For hedges alone, exp 9 stays. Nothing here says the model
-tells the two apart better; it is simply no longer asked to.
-
-A hint, not a finding: woody recall barely falls on crowded crops, 0.84 with
-one woody line to 0.72 with seven or more, where hedge recall fell to 0.37. But
-it also draws more lines there, and no null model was run per crowding bucket,
-so this may be luck. Check it before it shapes a run.
-*(exp 10, `exps/probe_polyline_pr.py`, `exps/probe_recall_null_model.py`)*
-
-### What 5.4x the data actually bought
-
-Exp 2 is exp 1 with the full 26,902 train crops instead of 5,000, nothing else
-changed. F1 at 10 m went 0.640 to 0.685, and at 5 m 0.489 to 0.547.
-
-The split of that gain is the useful part. Precision rose about 0.08 in every
-density bucket. Recall rose about 0.02 and did not move at all on the crowded
-crops, where it is worst (0.372 on crops with 7+ hedges). So more data makes
-the model surer about the lines it already draws, and does not make it find
-more lines in a busy crop. Do not expect a third dataset increase to fix
-recall; that is the score head's job.
-
-Overfitting did vanish. The train-eval gap went from 0.29 to 0.03 and eval loss
-was still falling at the last epoch, so 45 epochs was short rather than long.
-
-The apparent straightness regression was not one. Predicted straightness at
-t=0.95 rose to 0.942 against 0.909 in the labels, but that is the threshold
-selecting straight lines, not the model losing bends. At t=0.80 it is 0.908.
-See "The score ranks lines by how straight they are" under Measuring.
+Pin a new dataset to an existing run with `val_stems_file` in
+`scripts/data/convert_pdok_polylines_to_detr_polyline.py`.
+`exps/probe_split_reproduces.py` checks that the split still comes out the
+same.
 
 ## Model and losses
 
@@ -872,8 +785,8 @@ documented job, so those empty tensors stayed on the GPU.
 Ours, not PyTorch's. PyTorch never moves data between GPU and CPU by itself; a
 hidden copy would be slow and would hide exactly this kind of mistake.
 
-At threshold 0.5 every crop had a prediction, so the branch never ran. The empty 
-branch is exercised by running `mode="infer"` at a threshold above every score. 
+At threshold 0.5 every crop had a prediction, so the branch never ran. The empty
+branch is exercised by running `mode="infer"` at a threshold above every score.
 When a change makes empty results possible, look there first.
 
 ### A GPU run does not come back bitwise months later
@@ -914,9 +827,9 @@ OSM chips had a second, silent fault. The OpenStreetMap tile server blocks
 contextily's default User-Agent, the name a program sends to say who it is
 (`contextily-<random hex>`, which names no app). It still answers HTTP 200,
 with an image that says "Access blocked", so nothing raised and OSM chips
-built after the block were the notice. The same tile asked for under a name for 
-this project comes back as the map, so the block is on the name, not the address. 
-Fixed: `save_osm_chip` in `hedge_seg/training_data.py` now sends `OSM_USER_AGENT`. 
+built after the block were the notice. The same tile asked for under a name for
+this project comes back as the map, so the block is on the name, not the address.
+Fixed: `save_osm_chip` in `hedge_seg/training_data.py` now sends `OSM_USER_AGENT`.
 No account is needed. *(`exps/probe_osm_user_agent.py`)*
 
 OSM stays off in the test anyway. Volunteers edit the map every day, so tiles

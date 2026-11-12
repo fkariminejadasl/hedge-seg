@@ -13,8 +13,8 @@ stub are not the same mistake. Per crop, at a 10 m buffer:
 - missing_labels: high recall and low precision at once. The model found what
   was labelled, so it is not failing here, yet it also drew a lot more. Those
   extra lines are usually real hedges the labels do not have. This is the
-  "hedges missing from the labels" artifact in docs/lesson_learned.md, which
-  caps precision and makes the reported number a lower bound.
+  gap described in "Top10NL is incomplete by its own rules" in
+  docs/lesson_learned.md, which makes the reported precision a lower bound.
 
 Writes one id per line, e.g. `28000`, so the lists can be pasted into the `ids`
 field of scripts/show_polyline_results.py and looked at directly.

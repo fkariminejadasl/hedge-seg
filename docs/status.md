@@ -106,10 +106,10 @@ In the order suggested:
    crops have none. On the 1,874 that do, tree recall at 10 m is 0.280 for
    exp 5 and 0.425 for exp 4 (`exps/probe_hedge_tree_confusion.py`). Score a
    class only on crops where it appears, then correct the tree row numbers in
-   `docs/experiments_log.md` (exps 4 and 5), in `docs/lesson_learned.md`
-   (0.624 and 0.688), in the `exps/probe_polyline_pr.py` docstring, and in the
-   talk (the exp 4 slide says the score is being fixed). Hedge and woody line
-   scores are not affected: every val crop but one has a hedge.
+   `docs/experiments_log.md` (exps 4 and 5), in the
+   `exps/probe_polyline_pr.py` docstring, and in the talk (the exp 4 slide says 
+   the score is being fixed). Hedge and woody line scores are not affected: every 
+   val crop but one has a hedge.
 
 1. **Labels from Top10NL2025 instead of 2023.** The photos are 2025, the
    labels 2023. Build 2025 labels for the same crops, pinning the split with
