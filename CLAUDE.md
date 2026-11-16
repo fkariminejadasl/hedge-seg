@@ -72,6 +72,7 @@ Before every commit:
 ```
 for i in hedge_seg exps scripts tests; do echo $i; black $i -l 88; isort $i --profile black; pyflakes $i; done
 mdformat docs/
+git diff -U0 -- '*.md' ':!docs/descriptions.md' ':!presentation/' | grep '^+[^+|]' | awk 'length > 81'
 ```
 
 - Fix what pyflakes reports in the code being committed. Mention unrelated old
@@ -79,9 +80,12 @@ mdformat docs/
 - `mdformat` (with `mdformat-gfm`, in the `test` extra of `pyproject.toml`)
   formats the markdown and aligns the pipe tables. Run it on `docs/` only,
   never on `presentation/`: those are Marp decks where a reflow can silently
-  push content off a slide. It does not rewrap paragraphs, so keep edited prose
-  lines near 80 characters yourself. If it adds a backslash escape, the
-  markdown was ambiguous; put that name or expression in backticks instead.
+  push content off a slide. If it adds a backslash escape, the markdown was
+  ambiguous; put that name or expression in backticks instead.
+- `mdformat` does not rewrap paragraphs, so a long line passes it. The last
+  command prints every edited markdown line over 80 characters; rewrap each
+  one. It skips tables, the slides, and `docs/descriptions.md`, which keeps
+  one paragraph per line on purpose.
 
 ## Documentation layout
 
