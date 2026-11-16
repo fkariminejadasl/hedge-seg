@@ -70,10 +70,9 @@ rsync -av me:/projects/prjs1025/data/hedge/<dataset> \
 
 ### Backing up the laptop
 
-Use `rsync -aH` to an ext4 disk. `-H` keeps a hard link as one file:
-`pdok_dataset_semseg3` shares its images with `pdok_dataset3`, so a plain copy
-stores them twice. The `gt/` links of the inference runs are absolute paths,
-so restore to the same place.
+Use `rsync -aH` to an ext4 disk. `-H` keeps a hard link as one file rather
+than two copies. The `gt/` links of the inference runs are absolute paths, so
+restore to the same place.
 
 ## Looking at an inference result
 
