@@ -114,7 +114,7 @@ score counts every metre as an error.
 |:---:|:---:|
 | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_trees_gt_val_cluster_t.90.png) | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_trees_best_2_val_cluster_t.90.png) |
 
-So we added tree rows to the labels: first as a second class, then as one class *(exp 2)*
+So we added tree rows: as a second class, then as one class *(exp 2)*
 
 ---
 
@@ -300,7 +300,7 @@ Built-up areas and holiday parks, where every plot has a clipped hedge. *(exp 2)
 |:---:|:---:|
 | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_recreation_gt_val_cluster_t.90.png) | ![h:420](/home/fatemeh/Downloads/hedge/screenshots/detr_unet_polyline_recreation_best_2_val_cluster_t.90.png) |
 
-Rows of chalets, each ringed by a hedge, 315 of 3,098 crops. *(`probe_recreation_crops.py`)*
+Chalets ringed by hedges: 315 of 3,098 crops *(`probe_recreation_crops.py`)*
 
 ---
 
@@ -377,8 +377,7 @@ long (median), and about one in five bends noticeably *(`exps/probe_polyline_pr.
 
 ## What helped
 
-- **Higher resolution.** On 25 cm aerial photos the model learned where each hedge is;
-  on low-resolution height data it never did
+- **Higher resolution.** On 25 cm photos it learned where each hedge is
 - **A pretrained segmentation backbone.** Colour the pixels first, then draw
 - **Removing losses, not adding them.** Extra geometric terms made the lines
   zigzag *(length, direction, smoothness losses, all set to zero)*
@@ -388,7 +387,7 @@ long (median), and about one in five bends noticeably *(`exps/probe_polyline_pr.
   *(exp 1 to exp 2)*
 - **Cleaner labels.** Loops opened, short lines dropped
 - **Training the image backbone too.** F1 0.699 to 0.721 at 10 m *(exp 9)*
-- **One class for hedges and tree rows**, for a woody line map: F1 0.72 *(exp 10)*
+- **Hedges and tree rows as one class**, for woody lines: F1 0.72 *(exp 10)*
 
 ---
 

@@ -752,3 +752,11 @@ No account is needed. *(`exps/probe_osm_user_agent.py`)*
 
 OSM stays off in the test anyway. Volunteers edit the map every day, so tiles
 drift away from any saved copy, and the test would need the network.
+
+### A Python upgrade leaves the pip packages behind
+
+pip packages live in one folder per Python version, so after a Python upgrade
+pip has to install them all again. On the cluster one package (`simsimd`,
+through `albumentations`) would not build for 3.15, so pip installed nothing
+and the env had no torch. After an upgrade, check on a GPU node that torch
+imports and finds the GPU.

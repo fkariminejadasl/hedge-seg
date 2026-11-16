@@ -7,7 +7,7 @@ are compared by content, because the laptop keeps each run's slurm script and
 log inside the run folder, and the cluster keeps them beside it.
 
 Run it on the laptop after copying from the cluster, as in "Keeping the laptop
-in step with the cluster" in CLAUDE.md. It takes about 5 minutes, most of it
+in step with the cluster" in docs/workflow.md. It takes about 5 minutes, most of it
 the cluster reading 54 GB of images.
 
 Result (2026-11-11):

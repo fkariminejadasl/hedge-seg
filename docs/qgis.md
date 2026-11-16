@@ -6,8 +6,8 @@ Follow the official installation in [QGIS](https://qgis.org/resources/installati
 
 ## QGIS Setup
 
-- Shape file: just drage and drop
-- GeoTIFF file: just drage and drop
+- Shape file: drag and drop into QGIS
+- GeoTIFF file: drag and drop into QGIS
 - PDOK aerial images: WMTS https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0?request=GetCapabilities&service=wmts
 - PDOK AHN: WMTS https://service.pdok.nl/rws/actueel-hoogtebestand-nederland/wms/v1_0
 - PDOK TOP10NL: WMTS https://service.pdok.nl/brt/top10nl/wmts/v1_0?request=GetCapabilities&service=wmts

@@ -116,7 +116,7 @@ All training scripts read datasets produced by the `scripts/data/*` workflows ab
 - `scripts/train_detr_unet_polyline.py`: the polyline model of every current run, successor to `train_detr_maptr_polyline.py`. One `main(cfg)` with `cfg.mode` set to `"train"`, `"infer"` or `"preview"`; preview draws the exact model input with the labels on top.
   - Model: the MapTR-style head of `train_detr_maptr_polyline.py` on the ResNet18-UNet from the `train_semseg_unet_resnet18.py` checkpoint. `freeze_backbone` keeps it fixed, with BatchNorm in eval mode; when it trains, `backbone_lr` gives it its own learning rate (`build_optimizer`).
   - Data: images from `scripts/data/build_pdok_wms_dataset.py`, polyline NPZs from `scripts/data/convert_pdok_polylines_to_detr_polyline.py`, read from `train_polyline_dir` and `val_polyline_dir`, so the split is the converter's. Images are padded from 1000 to 1024 px and points are normalised by the padded size. Flip and rot90 augmentation, on train only.
-  - Checks: `DetrPolylineImageDataset` lists the image folder once and names every crop that has no image or no lidar patch, because two downloads of a dataset need not hold the same crops (`exps/probe_dataset_stem_mismatch.py`). It also stops on a label at or above `num_classes`, which `cls_loss="ce"` would otherwise train as background without any error.
+  - Checks: `DetrPolylineImageDataset` lists the image folder once and names every crop that has no image or no lidar patch, because two downloads of a dataset need not hold the same crops (`exps/probe_dataset_stem_mismatch.py`). It also stops on a label at or above `num_classes`, which `cls_loss="ce"` would otherwise train as background without any error. Under slurm, `main` stops when torch finds no GPU (`_pick_device`), because a broken environment would otherwise train on the CPU until the job runs out of time.
   - Lidar, when `cfg.lidar_path` is set: one patch per crop from `scripts/data/build_lidar_patches.py`, augmented with the image and placed on the token grid at `cfg.lidar_stride`, which must equal the feature stride (asserted in `main`). An extra channel marks where the laser found any vegetation. `LidarTokenEncoder` (BatchNorm, then two 1x1 convolutions whose last layer starts at zero) adds it to the image tokens. `lidar_path=None` builds no branch at all, so old checkpoints still load.
   - Class head, `cfg.cls_loss`: `"ce"` is a softmax with a no-object column (all runs but exp 3), `"focal"` one sigmoid per class (exp 3). A checkpoint only runs with the setting it was trained with.
   - `cfg.merge_classes=True` turns every label into class 0, so the tree row dataset trains one woody line class (exp 10).
@@ -165,7 +165,7 @@ Data and split:
 - `exps/probe_split_reproduces.py`: does `spatial_train_val_split` still give the stored split?
 - `exps/probe_dataset_stem_mismatch.py`: does a polyline dataset name only crops this machine has, each with an image and a lidar patch? Run it on both machines before moving a dataset.
 - `exps/probe_failed_downloads.py`: which stored crops are failed WMS downloads, found by file size.
-- `exps/probe_laptop_matches_cluster.py`: does the laptop copy of the datasets and runs match the cluster, file by file? The copy steps are in `CLAUDE.md`.
+- `exps/probe_laptop_matches_cluster.py`: does the laptop copy of the datasets and runs match the cluster, file by file? The copy steps are in `docs/workflow.md`.
 
 Code and machines:
 
@@ -185,4 +185,4 @@ Older helpers, from before the DETR work:
 
 ### Cluster
 
-- `slurm/snellius_<model>.sh`: one submission script per model, copied to `~/exps/hedge/<model>/<n>.sh` and edited per run (see `CLAUDE.md`). Each prints the git hash, `hedge_seg/paths.py`, the data scripts and the whole training script before starting, so the `.out` log alone documents what ran.
+- `slurm/snellius_<model>.sh`: one submission script per model, copied to `~/exps/hedge/<model>/<n>.sh` and edited per run (see the `/cluster-run` skill in `.claude/skills/`). Each prints the git hash, `hedge_seg/paths.py`, the data scripts and the whole training script before starting, so the `.out` log alone documents what ran.
