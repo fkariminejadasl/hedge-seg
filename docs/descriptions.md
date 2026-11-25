@@ -146,7 +146,7 @@ Labels:
 - `exps/probe_treeline_overlap.py`: how much of the wrongly drawn length lies on a Top10NL tree row.
 - `exps/probe_recreation_crops.py`: finds the crops inside a campsite or holiday park (Top10NL `functioneel_gebied_vlak`) and writes their stem list, to test an exclusion at scoring time.
 - `exps/probe_image_label_dates.py`: which year the stored crops and the labels come from.
-- `exps/probe_tree_dataset_stats.py`: what adding tree rows did to the dataset: lines per crop, the busiest crop, and whether the hedge labels stayed the same.
+- `exps/probe_tree_dataset_stats.py`: what adding tree rows did to the dataset: hedge lines over all crops and over the crops both datasets share, lines per crop, the busiest crop, and whether the hedge labels stayed the same.
 - `exps/probe_tree_class_labels.py`: do the two classes of the tree row dataset sit on the layers they came from?
 - `exps/probe_hedge_tree_confusion.py`: does a two-class model find the hedges but call them tree rows? Tree row recall is counted only on crops that have a tree row.
 

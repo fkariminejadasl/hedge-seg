@@ -13,11 +13,13 @@ have stopped the run:
   than from the model, and the comparison with exp 2 would mean nothing.
 - How much did the dataset actually grow?
 
-Result (2026-11-12, pdok_dataset3_polylines against pdok_dataset3_tree_polylines,
+Result (2026-11-25, pdok_dataset3_polylines against pdok_dataset3_tree_polylines,
 the data every run used):
 
     crops                          30,000 hedges only, 29,998 with tree rows
-    lines                          103,411 -> 147,846 (44,435 tree rows)
+    hedge lines, hedges only       103,414 over all 30,000 crops,
+                                   103,411 over the 29,998 shared crops
+    lines, shared crops            103,411 -> 147,846 (44,435 tree rows)
     lines per crop, mean           3.45 -> 4.93
     lines per crop, max            49 -> 49
     crops with a tree row          18,061 (60.2%)
@@ -26,10 +28,12 @@ the data every run used):
 
 The tree row dataset lacks pos_030002 and pos_030003, which hold 3 hedge lines.
 It was built from the laptop copy of pdok_dataset3, which did not have them
-(dataset notes in docs/experiments_log.md). So the line counts are over the
-29,998 shared crops; over all 30,000 the hedges-only dataset has 103,414. The
-first run, on 2026-09-16, compared with the laptop's own hedges-only dataset of
-that time, which held two other crops, and gave 103,432 hedge lines.
+(dataset notes in docs/experiments_log.md). Since 2026-11-09 the laptop and
+cluster copies of both datasets are identical, so the cluster lacks them too
+(exps/probe_laptop_matches_cluster.py). So the other counts are over the
+29,998 shared crops. The first run, on 2026-09-16, compared with the laptop's
+own hedges-only dataset of that time, which held two other crops, and gave
+103,432 hedge lines.
 
 So the busiest crop was already at 49 lines before tree rows were added, and 60
 queries are still enough. Nothing about the hedges changed.
@@ -84,8 +88,16 @@ def main(cfg):
     new_counts = np.asarray(new_counts)
     tree_counts = np.asarray(tree_counts)
 
+    # The tree row dataset lacks two crops, so count the hedges-only dataset
+    # over all its crops too, not only over the shared ones.
+    n_old_all = sum(len(np.load(p)["polylines"]) for p in old.values())
     print(
-        f"lines: {old_counts.sum()} -> {new_counts.sum()} ({tree_counts.sum()} trees)"
+        f"hedge lines, hedges only: {n_old_all} over all {len(old)} crops, "
+        f"{old_counts.sum()} over the {n_compared} shared crops"
+    )
+    print(
+        f"lines, shared crops: {old_counts.sum()} -> {new_counts.sum()} "
+        f"({tree_counts.sum()} trees)"
     )
     print(
         f"lines per crop, mean: {old_counts.mean():.2f} -> {new_counts.mean():.2f}, "

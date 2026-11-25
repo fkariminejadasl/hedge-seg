@@ -799,10 +799,16 @@ bbox 3900/903.
   0 val-train overlap. avoid_label_dirs excluded just 36 crops, because the
   laptop then had only 10 pdok_dataset2 labels. Replaced on 2026-11-09 by the
   cluster conversion below.
-- cluster (2026-07-21): same, but avoid_label_dirs sees all 5,000 pdok_dataset2
-  labels. The split of every run. train=26,902 val=3,098 (10.3%), 103,414 polylines, 0 val-train overlap.
-  12,155 crops (40%) sit near semseg areas, so avoidance halves the val set. Kept
-  it: no val image was seen by the frozen backbone during semseg training.
+
+- cluster (2026-07-21): the same conversion, but `avoid_label_dirs` now sees
+  all 5,000 pdok_dataset2 labels. Those are the crops the backbone learned
+  from, and no crop near them may go to val. This is the split of every run:
+  train 26,902, val 3,098 (10.3%), and no val crop overlaps a train crop. The
+  number of polylines left after cleaning is in docs/descriptions.md.
+
+  Val is about half the 5,743 of the laptop conversion, because 12,155 crops
+  (40%) lie near a backbone crop. We kept it that way, so the backbone has
+  never seen a val crop.
 
 ## Batch size probe (2026-07-21)
 
