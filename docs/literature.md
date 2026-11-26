@@ -55,7 +55,7 @@ These refernce are the DETR-like model, which from BEV images they get the vecto
 - [Data](https://essd.copernicus.org/articles/17/3641/2025) from AHN4 (GeoTIFF). Paper: Multi-temporal high-resolution data products of ecosystem structure derived from country-wide airborne laser scanning surveys of the Netherlands
 - TOPO10NL: Ground truth data for hedge, tree, road, and building. Data is provided by PDOK platform. There is also Germany: ATKIS, Great Britain: Mastermap, Denmark: TOP10DK in Chapter 6 https://kadaster.github.io/imbrt .
 - [Beeldmateriaal aerial images](https://www.beeldmateriaal.nl/bekijk-luchtfotos)
-- [Map2ImLas](https://doi.org/10.1016/j.ophoto.2025.100112): Large-scale 2D-3D airborne dataset with map-based annotations.
+- [Map2ImLas](https://doi.org/10.1016/j.ophoto.2025.100112): Large-scale 2D-3D airborne dataset with map-based annotations. 2,413 spatially aligned Dutch tiles (300 × 300 m, about 217 km², acquired in 2022) of RGB aerial orthoimages, DSMs and colorized LiDAR point clouds, matched to BGT and BAG maps. Automatically generated per-pixel and per-point semantic labels for 20 classes, plus vector polygons for object delineation. Also introduces a deep learning-based workflow for labeling trees in point clouds using topographic maps as semantic priors.
 
 PDOK aerial images (only Netherlands)
 
